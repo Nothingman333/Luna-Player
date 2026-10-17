@@ -2303,6 +2303,17 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
   }, [big, zoom]);
   const [seen, setSeen] = useState<string[]>(loadSeen);
   const [later, setLater] = useState<string[]>(loadLater);
+  /** A title's action menu stays inside the chat panel, sliding left when there's no room on the right. */
+  const fitPop = (e: React.MouseEvent) => {
+    const acts = (e.target as HTMLElement).closest(".title-acts") ?? (e.target as HTMLElement).closest("b.film-link")?.nextElementSibling;
+    const pop = acts?.querySelector<HTMLElement>(".ta-pop");
+    const box = acts?.closest(".ws-main, .chat")?.getBoundingClientRect();
+    if (!acts || !pop || !box) return;
+    // slide it just enough to stay inside the panel
+    const left = acts.getBoundingClientRect().left;
+    const x = Math.max(box.left + 12 - left, Math.min(-6, box.right - 16 - left - pop.offsetWidth));
+    pop.style.left = x + "px";
+  };
   const toggleSeen = (e: React.MouseEvent) => {
     const el = e.target as HTMLElement;
     const fl = el.closest<HTMLElement>("[data-film]");
@@ -2436,7 +2447,9 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
       }
       if (done_.length) { setSeen(loadSeen()); setLater(loadLater()); }
       const outText = (r?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? "").join("").trim();
-      if (!toolCtx.media.film && !toolCtx.media.choices && !toolCtx.media.source && !ground && !notOneFilm) {
+      // "bir film öner" answered with one film: that film's page too
+      const askedForOne = /oner|izlesem|recommend|suggest|what should i watch/.test(tn);
+      if (!toolCtx.media.film && !toolCtx.media.choices && !toolCtx.media.source && !ground && (!notOneFilm || askedForOne)) {
         const titles = [...new Set([...outText.matchAll(/\*\*([^*]+?\((?:19|20)\d{2}\))\*\*/g)].map((x) => x[1].trim()))];
         if (titles.length === 1) {
           const t = titles[0];
@@ -2517,7 +2530,7 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
                   ))}
                 </div>
               )}
-              {(m.role === "user" || m.text) && <div className={"msg " + m.role} {...(m.role === "model" ? { dangerouslySetInnerHTML: { __html: md(body, seen, later) }, onClick: toggleSeen } : { children: body })} />}
+              {(m.role === "user" || m.text) && <div className={"msg " + m.role} {...(m.role === "model" ? { dangerouslySetInnerHTML: { __html: md(body, seen, later) }, onClick: toggleSeen, onMouseOver: fitPop } : { children: body })} />}
               {m.people && (
                 <div className="msg-people">
                   {m.people.map((f) => (

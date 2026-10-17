@@ -1794,3 +1794,4 @@ body.ws-open .chat-scrim { background: rgba(4,4,7,.18); }
 .su-key input:focus { outline: none; border-color: var(--accent); }
 .su-key.set input { border-color: rgba(80,200,120,.45); }
 @media (max-width: 700px) { .su-key { flex-wrap: wrap; } .su-key .su-txt { flex-basis: 100%; } }
+
