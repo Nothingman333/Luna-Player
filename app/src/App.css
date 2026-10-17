@@ -1765,3 +1765,7 @@ body.ws-open .chat-scrim { background: rgba(4,4,7,.18); }
   .tour-scene { height: 300px; order: -1; }
   .tour-top, .tour-foot { padding-left: 20px; padding-right: 20px; }
 }
+.tour-lang { display: flex; padding: 3px; border-radius: 16px; background: rgba(255,255,255,.05); border: 1px solid var(--line); }
+.tour-lang button { padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: .5px; }
+.tour-lang button.on { background: var(--accent); color: #140a02; }
+.tour-lang button:not(.on):hover { color: var(--text); }

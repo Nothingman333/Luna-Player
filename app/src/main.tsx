@@ -51,6 +51,7 @@ async function restore() {
 (async () => {
   if (!isSubs) {
     await restore();
+    invoke("set_lang", { lang: localStorage.getItem("lang") === "tr" ? "tr" : "en" }).catch(() => {});
     try { localStorage.setItem("lunaMark", "1"); } catch {}
     setInterval(snapshot, 20000);
     window.addEventListener("beforeunload", snapshot);

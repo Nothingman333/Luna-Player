@@ -72,7 +72,7 @@ pub async fn add(source: String, out_dir: String) -> Result<Added, String> {
     let add = if source.starts_with("magnet:") || source.starts_with("http://") || source.starts_with("https://") {
         AddTorrent::from_url(source.clone())
     } else {
-        AddTorrent::from_bytes(std::fs::read(&source).map_err(|e| format!("Torrent dosyası okunamadı: {e}"))?)
+        AddTorrent::from_bytes(std::fs::read(&source).map_err(|e| tr!("Torrent dosyası okunamadı: {}", "Couldn't read the torrent file: {}", e))?)
     };
     let opts = AddTorrentOptions { overwrite: true, output_folder: Some(out_dir.clone()), ..Default::default() };
     let handle = eng
@@ -89,7 +89,7 @@ pub async fn add(source: String, out_dir: String) -> Result<Added, String> {
             break;
         }
         if let Some(e) = handle.stats().error {
-            return Err(format!("Torrent hatası: {e}"));
+            return Err(tr!("Torrent hatası: {}", "Torrent error: {}", e));
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
@@ -135,8 +135,8 @@ pub fn list() -> Vec<Value> {
 
 /// Which parts of file `idx` are already downloaded, as merged [start, end] fractions of the file.
 pub fn haves(id: usize, idx: usize) -> Result<Vec<(f64, f64)>, String> {
-    let eng = ENGINE.get().ok_or("Torrent motoru çalışmıyor")?;
-    let h = eng.session.get(id.into()).ok_or("Torrent bulunamadı")?;
+    let eng = ENGINE.get().ok_or(tr!("Torrent motoru çalışmıyor", "The torrent engine isn't running"))?;
+    let h = eng.session.get(id.into()).ok_or(tr!("Torrent bulunamadı", "Torrent not found"))?;
     let (off, len, plen) = h
         .with_metadata(|m| {
             let f = &m.file_infos[idx];
@@ -164,13 +164,13 @@ pub fn haves(id: usize, idx: usize) -> Result<Vec<(f64, f64)>, String> {
 }
 
 pub async fn pause(id: usize, pause: bool) -> Result<(), String> {
-    let eng = ENGINE.get().ok_or("Torrent motoru çalışmıyor")?;
-    let h = eng.session.get(id.into()).ok_or("Torrent bulunamadı")?;
+    let eng = ENGINE.get().ok_or(tr!("Torrent motoru çalışmıyor", "The torrent engine isn't running"))?;
+    let h = eng.session.get(id.into()).ok_or(tr!("Torrent bulunamadı", "Torrent not found"))?;
     if pause { eng.session.pause(&h).await } else { eng.session.unpause(&h).await }.map_err(|e| e.to_string())
 }
 
 pub async fn remove(id: usize, delete_files: bool) -> Result<(), String> {
-    let eng = ENGINE.get().ok_or("Torrent motoru çalışmıyor")?;
+    let eng = ENGINE.get().ok_or(tr!("Torrent motoru çalışmıyor", "The torrent engine isn't running"))?;
     eng.session.delete(id.into(), delete_files).await.map_err(|e| e.to_string())
 }
 

@@ -1,3 +1,4 @@
+import { tt } from "./i18n";
 import { useRef } from "react";
 import { setProp } from "./mpv";
 
@@ -14,7 +15,7 @@ type Props = {
 };
 
 const fmtDelay = (d: number) =>
-  (d > 0 ? "+" : d < 0 ? "−" : "") + Math.abs(d).toFixed(3).replace(".", ",") + " sn";
+  (d > 0 ? "+" : d < 0 ? "−" : "") + Math.abs(d).toFixed(3).replace(".", ",") + tt(" sn");
 
 export default function SubTimeline({ cues, time, delay, embedded, onReset, onOther, onClose }: Props) {
   const strip = useRef<HTMLDivElement>(null);
@@ -45,17 +46,17 @@ export default function SubTimeline({ cues, time, delay, embedded, onReset, onOt
   return (
     <div className="sync">
       <div className="sync-head">
-        <span className="sync-title">Altyazı zaman çizelgesi</span>
+        <span className="sync-title">{tt("Altyazı zaman çizelgesi")}</span>
         <span className="muted">
           {embedded
-            ? "Gömülü altyazı · kaydırma çalışır, bloklar gösterilemiyor"
-            : "Blokları sürükle ya da butonlarla kaydır · turuncu çizgi = şu an"}
+            ? tt("Gömülü altyazı · kaydırma çalışır, bloklar gösterilemiyor")
+            : tt("Blokları sürükle ya da butonlarla kaydır · turuncu çizgi = şu an")}
         </span>
         <span className="grow" />
-        <span className="muted">Kaydırma</span>
+        <span className="muted">{tt("Kaydırma")}</span>
         <span className="sync-value">{fmtDelay(delay)}</span>
-        <button className="chip" onClick={onReset}>Sıfırla</button>
-        <button className="icon sm" aria-label="Kapat" title="Kapat (S)" onClick={onClose}>✕</button>
+        <button className="chip" onClick={onReset}>{tt("Sıfırla")}</button>
+        <button className="icon sm" aria-label={tt("Kapat")} title={tt("Kapat (S)")} onClick={onClose}>✕</button>
       </div>
       <div className="sync-row">
         <button className="step big" aria-label="500 ms geri" onClick={() => nudge(-0.5)}>−500</button>
@@ -86,12 +87,13 @@ export default function SubTimeline({ cues, time, delay, embedded, onReset, onOt
         <button className="step big" aria-label="500 ms ileri" onClick={() => nudge(0.5)}>+500</button>
       </div>
       <div className="sync-foot">
-        <span className="muted">Bu ayar bu dosya için kaydedilir. Kısayol: G / H (VLC gibi, 50 ms)</span>
+        <span className="muted">{tt("Bu ayar bu dosya için kaydedilir. Kısayol: G / H (VLC gibi, 50 ms)")}</span>
         <span className="grow" />
         <button className="chip" disabled={!next} onClick={syncNext}>
-          Sıradaki replik şimdi söylendi
+          
+          {tt("Sıradaki replik şimdi söylendi")}
         </button>
-        <button className="chip" onClick={onOther}>Başka altyazı seç…</button>
+        <button className="chip" onClick={onOther}>{tt("Başka altyazı seç…")}</button>
       </div>
     </div>
   );

@@ -1,3 +1,4 @@
+import { defaultSubLangs, lang, locale, tt } from "./i18n";
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -10,9 +11,9 @@ export type SubHit = {
 };
 
 const LANG_NAMES: Record<string, string> = {
-  tr: "Türkçe", en: "İngilizce", de: "Almanca", fr: "Fransızca", es: "İspanyolca", it: "İtalyanca",
-  ru: "Rusça", ar: "Arapça", "pt-br": "Portekizce (BR)", "pt-pt": "Portekizce", nl: "Hollandaca",
-  pl: "Lehçe", ja: "Japonca", ko: "Korece", "zh-cn": "Çince", el: "Yunanca", az: "Azerice", fa: "Farsça",
+  tr: tt("Türkçe"), en: tt("İngilizce"), de: tt("Almanca"), fr: tt("Fransızca"), es: tt("İspanyolca"), it: tt("İtalyanca"),
+  ru: tt("Rusça"), ar: tt("Arapça"), "pt-br": tt("Portekizce (BR)"), "pt-pt": tt("Portekizce"), nl: tt("Hollandaca"),
+  pl: tt("Lehçe"), ja: tt("Japonca"), ko: tt("Korece"), "zh-cn": tt("Çince"), el: tt("Yunanca"), az: tt("Azerice"), fa: tt("Farsça"),
 };
 const SUB_EXT = ["srt", "ass", "ssa", "vtt", "sub"];
 
@@ -22,11 +23,11 @@ export function SubtitleDialog({ path, onAttach, onClose }: {
 }) {
   const [key, setKey] = useState(store.get("osKey") ?? "");
   const [keyDraft, setKeyDraft] = useState("");
-  const [langs, setLangs] = useState(store.get("langs") ?? "tr,en,de");
+  const [langs, setLangs] = useState(store.get("langs") ?? defaultSubLangs());
   const [hits, setHits] = useState<SubHit[] | null>(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState<number | null>(null);
-  const [filter, setFilter] = useState<string>("tr");
+  const [filter, setFilter] = useState<string>(lang());
 
   const parsed = useMemo(() => parseName(path), [path]);
   const title = store.json<Record<string, { title?: string; year?: string } | null>>("meta", {});
@@ -67,7 +68,7 @@ export function SubtitleDialog({ path, onAttach, onClose }: {
     }
   };
   const fromDisk = async () => {
-    const f = await open({ multiple: false, filters: [{ name: "Altyazı", extensions: SUB_EXT }] });
+    const f = await open({ multiple: false, filters: [{ name: tt("Altyazı"), extensions: SUB_EXT }] });
     if (typeof f === "string") onAttach(f, f.split(/[\\/]/).pop()!);
   };
 
@@ -80,27 +81,28 @@ export function SubtitleDialog({ path, onAttach, onClose }: {
     <div className="modal-bg" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal wide subdlg" onKeyDown={(e) => e.stopPropagation()}>
         <div className="row-head" style={{ margin: 0 }}>
-          <h2>Altyazı ekle</h2>
+          <h2>{tt("Altyazı ekle")}</h2>
           <span className="grow" />
-          <button className="ghost sm" onClick={fromDisk}>Bilgisayardan yükle…</button>
+          <button className="ghost sm" onClick={fromDisk}>{tt("Bilgisayardan yükle…")}</button>
         </div>
         <div className="muted small ellipsis">{path.split(/[\\/]/).pop()}</div>
 
         {!key ? (
           <div className="sub-key">
-            <p>İnternetten aramak için bir kere OpenSubtitles API anahtarını gir.
-              <br /><span className="muted small">opensubtitles.com › üye ol › opensubtitles.com/consumers › New Consumer › API Key</span></p>
+            <p>{tt("İnternetten aramak için bir kere OpenSubtitles API anahtarını gir.")}
+              <br /><span className="muted small">{tt("opensubtitles.com › üye ol › opensubtitles.com/consumers › New Consumer › API Key")}</span></p>
             <div className="rm-row">
-              <input value={keyDraft} placeholder="API anahtarı" aria-label="OpenSubtitles API anahtarı" autoFocus
+              <input value={keyDraft} placeholder={tt("API anahtarı")} aria-label={tt("OpenSubtitles API anahtarı")} autoFocus
                 onChange={(e) => setKeyDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && saveKey()} />
-              <button className="primary" disabled={!keyDraft.trim()} onClick={saveKey}>Kaydet ve ara</button>
+              <button className="primary" disabled={!keyDraft.trim()} onClick={saveKey}>{tt("Kaydet ve ara")}</button>
             </div>
           </div>
         ) : (
           <>
             <div className="seg-row">
               <button className={"seg" + (effective === "all" ? " on" : "")} onClick={() => setFilter("all")}>
-                Hepsi {hits ? `(${hits.length})` : ""}
+                
+                {tt("Hepsi")} {hits ? `(${hits.length})` : ""}
               </button>
               {shownLangs.map((l) => (
                 <button key={l} className={"seg" + (effective === l ? " on" : "")} onClick={() => setFilter(l)}>
@@ -108,40 +110,40 @@ export function SubtitleDialog({ path, onAttach, onClose }: {
                 </button>
               ))}
               <span className="grow" />
-              <select className="lang-select" value={langs} aria-label="Aranacak diller"
+              <select className="lang-select" value={langs} aria-label={tt("Aranacak diller")}
                 onChange={(e) => { setLangs(e.target.value); run(key, e.target.value); }}>
-                <option value="tr,en,de">Türkçe + İngilizce + Almanca</option>
-                <option value="tr,en">Türkçe + İngilizce</option>
-                <option value="tr">Sadece Türkçe</option>
-                <option value="en">Sadece İngilizce</option>
-                <option value="de">Sadece Almanca</option>
-                <option value="tr,en,de,fr,es,it,ru,ar">Birçok dil</option>
+                <option value="tr,en,de">{tt("Türkçe + İngilizce + Almanca")}</option>
+                <option value="tr,en">{tt("Türkçe + İngilizce")}</option>
+                <option value="tr">{tt("Sadece Türkçe")}</option>
+                <option value="en">{tt("Sadece İngilizce")}</option>
+                <option value="de">{tt("Sadece Almanca")}</option>
+                <option value="tr,en,de,fr,es,it,ru,ar">{tt("Birçok dil")}</option>
               </select>
             </div>
             {err && <div className="sub-err">{err}</div>}
             <div className="sub-list">
-              {hits === null && <div className="sub-loading"><span className="spinner" /> OpenSubtitles'ta aranıyor…</div>}
-              {hits && !list.length && !err && <div className="muted">Altyazı bulunamadı. Bilgisayardan yükleyebilirsin.</div>}
+              {hits === null && <div className="sub-loading"><span className="spinner" />  {tt("OpenSubtitles'ta aranıyor…")}</div>}
+              {hits && !list.length && !err && <div className="muted">{tt("Altyazı bulunamadı. Bilgisayardan yükleyebilirsin.")}</div>}
               {list.map((h) => (
                 <button key={h.fileId} className="sub-row" disabled={busy !== null} onClick={() => pick(h)}>
                   <span className="sub-lang">{(h.language || "?").toUpperCase()}</span>
                   <span className="sub-main">
-                    <span className="sub-rel ellipsis">{h.release || h.fileName || "İsimsiz"}</span>
+                    <span className="sub-rel ellipsis">{h.release || h.fileName || tt("İsimsiz")}</span>
                     <span className="sub-tags">
-                      {h.hashMatch && <span className="tag good">Bu dosyaya tam uyuyor</span>}
-                      {h.hearingImpaired && <span className="tag">İşitme engelli</span>}
-                      {(h.machineTranslated || h.aiTranslated) && <span className="tag warn">Makine çevirisi</span>}
-                      {h.fps > 0 && <span className="tag">{h.fps} fps</span>}
-                      <span className="muted small">{h.downloads.toLocaleString("tr")} indirme{h.uploader ? ` · ${h.uploader}` : ""}</span>
+                      {h.hashMatch && <span className="tag good">{tt("Bu dosyaya tam uyuyor")}</span>}
+                      {h.hearingImpaired && <span className="tag">{tt("İşitme engelli")}</span>}
+                      {(h.machineTranslated || h.aiTranslated) && <span className="tag warn">{tt("Makine çevirisi")}</span>}
+                      {h.fps > 0 && <span className="tag">{h.fps}  {tt("fps")}</span>}
+                      <span className="muted small">{h.downloads.toLocaleString(locale())}  {tt("indirme")}{h.uploader ? ` · ${h.uploader}` : ""}</span>
                     </span>
                   </span>
-                  <span className="sub-act">{busy === h.fileId ? <span className="spinner" /> : "Ekle"}</span>
+                  <span className="sub-act">{busy === h.fileId ? <span className="spinner" /> : tt("Ekle")}</span>
                 </button>
               ))}
             </div>
           </>
         )}
-        <div className="modal-actions"><button className="chip" onClick={onClose}>Kapat</button></div>
+        <div className="modal-actions"><button className="chip" onClick={onClose}>{tt("Kapat")}</button></div>
       </div>
     </div>
   );

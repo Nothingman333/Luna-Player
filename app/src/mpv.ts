@@ -1,3 +1,4 @@
+import { tt } from "./i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef, useState } from "react";
@@ -125,17 +126,17 @@ export type SubOpts = { font: string; size: number; color: string; bg: "none" | 
 
 export const SUB_PRESETS: Record<string, { label: string; opts: SubOpts }> = {
   netflix: { label: "Netflix", opts: { font: "Netflix Sans Medium", size: 46, color: "#FFFFFF", bg: "shadow", bold: false, margin: 48 } },
-  box: { label: "Kutulu", opts: { font: "Netflix Sans Medium", size: 44, color: "#FFFFFF", bg: "box", bold: false, margin: 48 } },
-  yellow: { label: "Klasik sarı", opts: { font: "Inter Bold", size: 46, color: "#FFE15A", bg: "shadow", bold: false, margin: 48 } },
+  box: { label: tt("Kutulu"), opts: { font: "Netflix Sans Medium", size: 44, color: "#FFFFFF", bg: "box", bold: false, margin: 48 } },
+  yellow: { label: tt("Klasik sarı"), opts: { font: "Inter Bold", size: 46, color: "#FFE15A", bg: "shadow", bold: false, margin: 48 } },
 };
 export const SUB_FONTS: [string, string][] = [
-  ["Netflix Sans Medium", "Netflix Sans"], ["Netflix Sans Bold", "Netflix Sans Kalın"], ["Netflix Sans Regular", "Netflix Sans İnce"],
-  ["Inter SemiBold", "Inter"], ["Inter Medium", "Inter İnce"], ["Inter Bold", "Inter Kalın"],
+  ["Netflix Sans Medium", "Netflix Sans"], ["Netflix Sans Bold", tt("Netflix Sans Kalın")], ["Netflix Sans Regular", tt("Netflix Sans İnce")],
+  ["Inter SemiBold", "Inter"], ["Inter Medium", tt("Inter İnce")], ["Inter Bold", tt("Inter Kalın")],
   ["Segoe UI Semibold", "Segoe UI"], ["Arial", "Arial"], ["Verdana", "Verdana"], ["Tahoma", "Tahoma"],
   ["Calibri", "Calibri"], ["Georgia", "Georgia"], ["Trebuchet MS", "Trebuchet"],
 ];
 export const SUB_COLORS: [string, string][] = [
-  ["#FFFFFF", "Beyaz"], ["#FFE15A", "Sarı"], ["#9EE7FF", "Açık mavi"], ["#B8F5A0", "Yeşil"], ["#FFB070", "Turuncu"], ["#D0D0D0", "Gri"],
+  ["#FFFFFF", tt("Beyaz")], ["#FFE15A", tt("Sarı")], ["#9EE7FF", tt("Açık mavi")], ["#B8F5A0", tt("Yeşil")], ["#FFB070", tt("Turuncu")], ["#D0D0D0", tt("Gri")],
 ];
 
 export function loadSubOpts(): SubOpts {

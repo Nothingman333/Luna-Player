@@ -32,7 +32,7 @@ pub fn add(dir: &Path, paths: Vec<String>) -> Result<u32, String> {
         let path = PathBuf::from(&p);
         if p.to_lowercase().ends_with(".zip") {
             let f = std::fs::File::open(&path).map_err(|e| e.to_string())?;
-            let mut zip = zip::ZipArchive::new(f).map_err(|e| format!("Zip açılamadı: {e}"))?;
+            let mut zip = zip::ZipArchive::new(f).map_err(|e| tr!("Zip açılamadı: {}", "Couldn't open the zip: {}", e))?;
             for i in 0..zip.len() {
                 let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
                 let name = entry.name().rsplit(['/', '\\']).next().unwrap_or("").to_string();
@@ -44,13 +44,13 @@ pub fn add(dir: &Path, paths: Vec<String>) -> Result<u32, String> {
                 }
             }
         } else if is_font(&p) {
-            let name = path.file_name().ok_or("Geçersiz dosya")?;
+            let name = path.file_name().ok_or(tr!("Geçersiz dosya", "Invalid file"))?;
             std::fs::copy(&path, dir.join(name)).map_err(|e| e.to_string())?;
             n += 1;
         }
     }
     if n == 0 {
-        return Err("İçinde font bulunamadı (.ttf / .otf)".into());
+        return Err(tr!("İçinde font bulunamadı (.ttf / .otf)", "No fonts inside (.ttf / .otf)"));
     }
     Ok(n)
 }
@@ -92,7 +92,7 @@ pub fn list(dir: &Path) -> Vec<FontInfo> {
 pub fn remove(dir: &Path, file: &str) -> Result<(), String> {
     let p = dir.join(file);
     if p.parent() != Some(dir) {
-        return Err("Geçersiz dosya".into());
+        return Err(tr!("Geçersiz dosya", "Invalid file"));
     }
     std::fs::remove_file(p).map_err(|e| e.to_string())
 }

@@ -35,9 +35,9 @@ pub struct PluginInfo {
 
 fn load(path: &Path) -> Result<Y, String> {
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let y: Y = serde_yaml::from_str(&text).map_err(|e| format!("YAML hatası: {e}"))?;
+    let y: Y = serde_yaml::from_str(&text).map_err(|e| tr!("YAML hatası: {}", "YAML error: {}", e))?;
     if y.get("search").is_none() {
-        return Err("Bu dosyada 'search' bölümü yok; Cardigann tanımı değil.".into());
+        return Err(tr!("Bu dosyada 'search' bölümü yok; Cardigann tanımı değil.", "This file has no 'search' section; it isn't a Cardigann definition."));
     }
     Ok(y)
 }
@@ -81,7 +81,7 @@ pub fn add(dir: &Path, paths: Vec<String>) -> Result<u32, String> {
     for p in paths {
         let src = PathBuf::from(&p);
         load(&src).map_err(|e| format!("{}: {e}", src.file_name().unwrap_or_default().to_string_lossy()))?;
-        std::fs::copy(&src, dir.join(src.file_name().ok_or("Geçersiz dosya")?)).map_err(|e| e.to_string())?;
+        std::fs::copy(&src, dir.join(src.file_name().ok_or(tr!("Geçersiz dosya", "Invalid file"))?)).map_err(|e| e.to_string())?;
         n += 1;
     }
     Ok(n)
@@ -89,7 +89,7 @@ pub fn add(dir: &Path, paths: Vec<String>) -> Result<u32, String> {
 
 pub fn remove(dir: &Path, file: &str) -> Result<(), String> {
     if file.contains(['/', '\\']) {
-        return Err("Geçersiz dosya adı".into());
+        return Err(tr!("Geçersiz dosya adı", "Invalid file name"));
     }
     std::fs::remove_file(dir.join(file)).map_err(|e| e.to_string())
 }
@@ -511,7 +511,7 @@ pub async fn search_one(path: &Path, query: &str) -> Result<Vec<Hit>, String> {
     let name = if s(&def, "name").is_empty() { file.clone() } else { s(&def, "name") };
     let base = base_url(&def);
     if base.is_empty() {
-        return Err("'links' boş".into());
+        return Err(tr!("'links' boş", "'links' is empty"));
     }
     let search = def.get("search").unwrap();
     let config = config_defaults(&def);
@@ -553,7 +553,7 @@ pub async fn search_one(path: &Path, query: &str) -> Result<Vec<Hit>, String> {
         let req = if post {
             http.post(&url).form(&inputs)
         } else {
-            let mut u = Url::parse(&url).map_err(|e| format!("Adres hatalı: {url} ({e})"))?;
+            let mut u = Url::parse(&url).map_err(|e| tr!("Adres hatalı: {} ({})", "Bad address: {} ({})", url, e))?;
             if !inputs.is_empty() {
                 let mut q = u.query_pairs_mut();
                 for (k, v) in &inputs {
@@ -567,14 +567,14 @@ pub async fn search_one(path: &Path, query: &str) -> Result<Vec<Hit>, String> {
             }
             http.get(s2)
         };
-        let res = req.send().await.map_err(|e| format!("Bağlanılamadı: {}", chain(&e)))?;
+        let res = req.send().await.map_err(|e| tr!("Bağlanılamadı: {}", "Couldn't connect: {}", chain(&e)))?;
         if !res.status().is_success() {
-            return Err(format!("Site {} döndürdü", res.status()));
+            return Err(tr!("Site {} döndürdü", "The site returned {}", res.status()));
         }
         let body = res.text().await.map_err(|e| e.to_string())?;
         let response_type = p.get("response").map(|r| s(r, "type")).unwrap_or_default();
-        let rows_def = search.get("rows").ok_or("'rows' tanımı yok")?;
-        let fields = search.get("fields").and_then(|f| f.as_mapping()).ok_or("'fields' tanımı yok")?;
+        let rows_def = search.get("rows").ok_or(tr!("'rows' tanımı yok", "No 'rows' definition"))?;
+        let fields = search.get("fields").and_then(|f| f.as_mapping()).ok_or(tr!("'fields' tanımı yok", "No 'fields' definition"))?;
 
         let extract = |row: Row| -> Option<Hit> {
             let mut result: HashMap<String, String> = HashMap::new();
@@ -625,7 +625,7 @@ pub async fn search_one(path: &Path, query: &str) -> Result<Vec<Hit>, String> {
         };
 
         if response_type == "json" || body.trim_start().starts_with('{') || body.trim_start().starts_with('[') && response_type != "html" {
-            let j: J = serde_json::from_str(&body).map_err(|e| format!("JSON okunamadı: {e}"))?;
+            let j: J = serde_json::from_str(&body).map_err(|e| tr!("JSON okunamadı: {}", "Couldn't read the JSON: {}", e))?;
             let rows = json_path(&j, &s(rows_def, "selector")).and_then(|v| v.as_array()).cloned().unwrap_or_default();
             let sub = s(rows_def, "attribute");
             for r in &rows {
@@ -639,7 +639,7 @@ pub async fn search_one(path: &Path, query: &str) -> Result<Vec<Hit>, String> {
             }
         } else {
             let doc = Html::parse_document(&body);
-            let sel = Selector::parse(&s(rows_def, "selector")).map_err(|_| format!("Geçersiz satır seçicisi: {}", s(rows_def, "selector")))?;
+            let sel = Selector::parse(&s(rows_def, "selector")).map_err(|_| tr!("Geçersiz satır seçicisi: {}", "Invalid row selector: {}", s(rows_def, "selector")))?;
             for el in doc.select(&sel) {
                 hits.extend(extract(Row::Html(el)));
             }
@@ -675,7 +675,7 @@ pub async fn resolve(path: &Path, url: &str) -> Result<String, String> {
     doc.select(&a)
         .next()
         .and_then(|e| e.value().attr("href").map(String::from))
-        .ok_or_else(|| "Sayfada indirme bağlantısı bulunamadı".into())
+        .ok_or_else(|| tr!("Sayfada indirme bağlantısı bulunamadı", "No download link on the page"))
 }
 
 #[derive(Serialize)]
@@ -708,7 +708,7 @@ pub async fn search(dir: &Path, query: String, disabled: Vec<String>) -> SearchO
             match r {
                 Ok(Ok(h)) => out.hits.extend(h),
                 Ok(Err(e)) => out.errors.push((name, e)),
-                Err(_) => out.errors.push((name, "Zaman aşımı".into())),
+                Err(_) => out.errors.push((name, tr!("Zaman aşımı", "Timed out"))),
             }
         }
     }

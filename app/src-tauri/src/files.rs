@@ -49,7 +49,7 @@ ${current-tracks/audio/demux-channel-count}|${=duration}";
         .output()
         .map_err(|e| e.to_string())?;
     let text = String::from_utf8_lossy(&out.stdout);
-    let line = text.lines().find(|l| l.starts_with("MPINFO|")).ok_or("Bilgi okunamadı")?;
+    let line = text.lines().find(|l| l.starts_with("MPINFO|")).ok_or(tr!("Bilgi okunamadı", "Couldn't read the info"))?;
     let f: Vec<&str> = line.split('|').collect();
     let num = |i: usize| f.get(i).and_then(|s| s.trim().parse::<f64>().ok()).unwrap_or(0.0);
     let txt = |i: usize| {
@@ -99,7 +99,7 @@ pub fn thumbnail(mpv_exe: &Path, file: &str, cache: &Path) -> Result<String, Str
         .flatten()
         .map(|e| e.path())
         .find(|p| p.extension().is_some_and(|x| x == "jpg"))
-        .ok_or("Kare alınamadı")?;
+        .ok_or(tr!("Kare alınamadı", "Couldn't grab a frame"))?;
     std::fs::rename(&produced, &target).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_dir_all(&tmp);
     Ok(target.to_string_lossy().into_owned())
@@ -181,7 +181,7 @@ pub fn reveal(file: &str) -> Result<(), String> {
         // File not on disk (e.g. a torrent not downloaded yet): open the nearest existing folder.
         cmd.raw_arg(format!("\"{}\"", dir.display()));
     } else {
-        return Err("Dosya bulunamadı".into());
+        return Err(tr!("Dosya bulunamadı", "File not found"));
     }
     cmd.spawn()
         .map(|_| ())

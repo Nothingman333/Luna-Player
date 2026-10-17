@@ -1,4 +1,5 @@
 // Upscaler: Lossless Scaling driven from Luna, with subtitles kept out of frame generation.
+import { tt } from "./i18n";
 import { useEffect, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -82,14 +83,14 @@ export function pushSubs(osd?: Osd) {
 
 // ---------- settings ----------
 const SCALERS: [string, string][] = [
-  ["Off", "Kapalı"], ["LS1", "LS1"], ["FSR", "AMD FSR"], ["NIS", "NVIDIA NIS"], ["SGSR", "Snapdragon GSR"],
+  ["Off", tt("Kapalı")], ["LS1", "LS1"], ["FSR", "AMD FSR"], ["NIS", "NVIDIA NIS"], ["SGSR", "Snapdragon GSR"],
   ["BicubicCAS", "Bicubic CAS"], ["Anime4K", "Anime4K"], ["XBR", "xBR"], ["SharpBilinear", "Sharp Bilinear"],
-  ["Integer", "Tamsayı"], ["Nearest", "En yakın komşu"],
+  ["Integer", tt("Tamsayı")], ["Nearest", tt("En yakın komşu")],
 ];
 const LABEL: Record<string, string> = {
-  FrameGeneration: "Kare üretimi", LSFG3Mode1: "Mod", LSFG3Multiplier: "Çarpan", LSFG3Target: "Hedef FPS",
-  LSFGFlowScale: "Akış ölçeği (%)", LSFGSize: "Kalite", HdrSupport: "HDR desteği", DrawFps: "FPS göstergesi",
-  CaptureApi: "Yakalama yöntemi", GsyncSupport: "G-Sync / VRR", MaxFrameLatency: "En fazla kare gecikmesi",
+  FrameGeneration: tt("Kare üretimi"), LSFG3Mode1: tt("Mod"), LSFG3Multiplier: tt("Çarpan"), LSFG3Target: tt("Hedef FPS"),
+  LSFGFlowScale: tt("Akış ölçeği (%)"), LSFGSize: tt("Kalite"), HdrSupport: tt("HDR desteği"), DrawFps: tt("FPS göstergesi"),
+  CaptureApi: tt("Yakalama yöntemi"), GsyncSupport: "G-Sync / VRR", MaxFrameLatency: tt("En fazla kare gecikmesi"),
 };
 
 /** Lossless Scaling options. `inPlayer`: the panel behind the player's UP button. */
@@ -109,10 +110,10 @@ export function UpscalerSettings({ inPlayer, onToggle, onSaved, onApply }: {
   const v = (k: string, d = "") => vals[k] ?? d;
   const put = (k: string, x: string) => setVals((cur) => ({ ...cur, [k]: x }));
   const save = async () => {
-    setBusy("Kaydediliyor…"); setMsg("");
+    setBusy(tt("Kaydediliyor…")); setMsg("");
     try {
       await invoke("upscaler_save", { values: { ...vals, HdrSupport: vals.HdrSupport ?? "true" } });
-      setMsg(inPlayer ? "Uygulandı." : "Kaydedildi. Lossless Scaling'deki “Luna Player” profiline yazıldı.");
+      setMsg(inPlayer ? tt("Uygulandı.") : tt("Kaydedildi. Lossless Scaling'deki “Luna Player” profiline yazıldı."));
       onSaved?.();
     } catch (e) { setMsg(String(e)); }
     setBusy(""); refresh();
@@ -132,33 +133,33 @@ export function UpscalerSettings({ inPlayer, onToggle, onSaved, onApply }: {
     <div className={"field up" + (inPlayer ? " in-player" : "")}>
       <span>{inPlayer ? "Upscaler" : "Upscaler (Lossless Scaling)"}</span>
       {st && !st.installed ? (
-        <div className="muted small">Lossless Scaling bulunamadı. Steam'den kurunca burada ayarları görünecek.</div>
+        <div className="muted small">{tt("Lossless Scaling bulunamadı. Steam'den kurunca burada ayarları görünecek.")}</div>
       ) : (
         <div className="up-box">
           {inPlayer && (
             <label className="look-check">
               <input type="checkbox" checked={on} onChange={(e) => toggle(e.target.checked)} />
-              {inPlayer ? "Upscaler'ı kullan" : "Video oynarken Upscaler'ı kullan"}
+              {inPlayer ? tt("Upscaler'ı kullan") : tt("Video oynarken Upscaler'ı kullan")}
             </label>
           )}
-          {inPlayer && <div className="muted small up-note">Değişiklikler en alttaki <b>Uygula</b> tuşuna basınca geçerli olur.</div>}
+          {inPlayer && <div className="muted small up-note">{tt("Değişiklikler en alttaki")} <b>{tt("Uygula")}</b>  {tt("tuşuna basınca geçerli olur.")}</div>}
           <div className="muted small">
             {inPlayer
-              ? "Luna, Lossless Scaling'i kendisi açar ve ölçeklemeyi başlatır. Altyazılar her zaman görünür kalır."
-              : "Upscaler her filmde ayrı açılır: oynatıcıdaki UP menüsünden ya da Q tuşuyla. Buradaki ayarlar Lossless Scaling'deki “Luna Player” profiline yazılır."}
-            {st ? (st.running ? (st.scaling ? " · Şu an ölçekliyor" : " · Lossless Scaling açık") : " · Lossless Scaling kapalı") : ""}
+              ? tt("Luna, Lossless Scaling'i kendisi açar ve ölçeklemeyi başlatır. Altyazılar her zaman görünür kalır.")
+              : tt("Upscaler her filmde ayrı açılır: oynatıcıdaki UP menüsünden ya da Q tuşuyla. Buradaki ayarlar Lossless Scaling'deki “Luna Player” profiline yazılır.")}
+            {st ? (st.running ? (st.scaling ? tt(" · Şu an ölçekliyor") : tt(" · Lossless Scaling açık")) : tt(" · Lossless Scaling kapalı")) : ""}
           </div>
-          <h4 className="up-h">Kare üretimi</h4>
+          <h4 className="up-h">{tt("Kare üretimi")}</h4>
           <div className="up-grid">
-            <label>Tür
+            <label>{tt("Tür")}
               <select value={fg} onChange={(e) => put("FrameGeneration", e.target.value)}>
-                <option value="LSFG3">LSFG 3</option><option value="LSFG2">LSFG 2</option><option value="LSFG1">LSFG 1</option><option value="Off">Kapalı</option>
+                <option value="LSFG3">{tt("LSFG 3")}</option><option value="LSFG2">{tt("LSFG 2")}</option><option value="LSFG1">{tt("LSFG 1")}</option><option value="Off">{tt("Kapalı")}</option>
               </select>
             </label>
             {fg === "LSFG3" && (
               <label>{LABEL.LSFG3Mode1}
                 <select value={v("LSFG3Mode1", "FIXED")} onChange={(e) => put("LSFG3Mode1", e.target.value)}>
-                  <option value="FIXED">Sabit çarpan</option><option value="ADAPTIVE">Uyarlamalı (hedef FPS)</option>
+                  <option value="FIXED">{tt("Sabit çarpan")}</option><option value="ADAPTIVE">{tt("Uyarlamalı (hedef FPS)")}</option>
                 </select>
               </label>
             )}
@@ -175,7 +176,7 @@ export function UpscalerSettings({ inPlayer, onToggle, onSaved, onApply }: {
               </label>
             )}
             {fg === "LSFG2" && (
-              <label>Çarpan
+              <label>{tt("Çarpan")}
                 <select value={v("LSFG2Mode", "X2")} onChange={(e) => put("LSFG2Mode", e.target.value)}>
                   <option value="X2">x2</option><option value="X3">x3</option><option value="X4">x4</option>
                 </select>
@@ -189,75 +190,75 @@ export function UpscalerSettings({ inPlayer, onToggle, onSaved, onApply }: {
             {fg !== "Off" && (
               <label>{LABEL.LSFGSize}
                 <select value={v("LSFGSize", "BALANCED")} onChange={(e) => put("LSFGSize", e.target.value)}>
-                  <option value="BALANCED">Dengeli</option><option value="PERFORMANCE">Performans</option>
+                  <option value="BALANCED">{tt("Dengeli")}</option><option value="PERFORMANCE">{tt("Performans")}</option>
                 </select>
               </label>
             )}
           </div>
 
-          <h4 className="up-h">Ölçekleme</h4>
+          <h4 className="up-h">{tt("Ölçekleme")}</h4>
           <div className="up-grid">
-            <label>Tür
+            <label>{tt("Tür")}
               <select value={st2} onChange={(e) => put("ScalingType", e.target.value)}>
                 {SCALERS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
               </select>
             </label>
             {st2 === "Anime4K" && (
-              <label>Boyut
+              <label>{tt("Boyut")}
                 <select value={v("Anime4kType", "S")} onChange={(e) => put("Anime4kType", e.target.value)}>
-                  <option value="S">Küçük</option><option value="M">Orta</option><option value="L">Büyük</option><option value="VL">Çok büyük</option><option value="UL">En büyük</option>
+                  <option value="S">{tt("Küçük")}</option><option value="M">{tt("Orta")}</option><option value="L">{tt("Büyük")}</option><option value="VL">{tt("Çok büyük")}</option><option value="UL">{tt("En büyük")}</option>
                 </select>
               </label>
             )}
             {st2 === "LS1" && (
-              <label>Kalite
+              <label>{tt("Kalite")}
                 <select value={v("LS1Type", "BALANCED")} onChange={(e) => put("LS1Type", e.target.value)}>
-                  <option value="BALANCED">Dengeli</option><option value="PERFORMANCE">Performans</option>
+                  <option value="BALANCED">{tt("Dengeli")}</option><option value="PERFORMANCE">{tt("Performans")}</option>
                 </select>
               </label>
             )}
             {st2 === "FSR" && (
-              <label>FSR türü
+              <label>{tt("FSR türü")}
                 <select value={v("FSRType", "ORIGINAL")} onChange={(e) => put("FSRType", e.target.value)}>
-                  <option value="ORIGINAL">Orijinal</option><option value="OPTIMIZED">Optimize</option>
+                  <option value="ORIGINAL">{tt("Orijinal")}</option><option value="OPTIMIZED">{tt("Optimize")}</option>
                 </select>
               </label>
             )}
             {["FSR", "NIS", "SGSR", "BicubicCAS", "LS1"].includes(st2) && (
-              <label>Keskinlik: {v(sharpKey, "5")}
+              <label>{tt("Keskinlik:")} {v(sharpKey, "5")}
                 <input type="range" min={0} max={10} value={v(sharpKey, "5")} onChange={(e) => put(sharpKey, e.target.value)} />
               </label>
             )}
-            <label>Mod
+            <label>{tt("Mod")}
               <select value={v("ScalingMode", "Auto")} onChange={(e) => put("ScalingMode", e.target.value)}>
-                <option value="Auto">Otomatik</option><option value="Custom">Özel</option>
+                <option value="Auto">{tt("Otomatik")}</option><option value="Custom">{tt("Özel")}</option>
               </select>
             </label>
             {v("ScalingMode", "Auto") === "Custom" ? (
-              <label>Ölçek çarpanı
+              <label>{tt("Ölçek çarpanı")}
                 <input type="number" min={1} max={10} step={0.1} value={v("ScaleFactor", "1.5")} onChange={(e) => put("ScaleFactor", e.target.value)} />
               </label>
             ) : (
-              <label>Sığdırma
+              <label>{tt("Sığdırma")}
                 <select value={v("ScalingFitMode", "AspectRatio")} onChange={(e) => put("ScalingFitMode", e.target.value)}>
-                  <option value="AspectRatio">En boy oranı</option><option value="Fullscreen">Tam ekran</option>
+                  <option value="AspectRatio">{tt("En boy oranı")}</option><option value="Fullscreen">{tt("Tam ekran")}</option>
                 </select>
               </label>
             )}
           </div>
-          <label className="look-check"><input type="checkbox" checked={v("VRS") === "true"} onChange={(e) => put("VRS", String(e.target.checked))} /> VRS</label>
+          <label className="look-check"><input type="checkbox" checked={v("VRS") === "true"} onChange={(e) => put("VRS", String(e.target.checked))} />  {tt("VRS")}</label>
 
-          <h4 className="up-h">İşleme</h4>
+          <h4 className="up-h">{tt("İşleme")}</h4>
           <div className="up-grid">
             <label>{LABEL.CaptureApi}
               <select value={v("CaptureApi", "DXGI")} onChange={(e) => put("CaptureApi", e.target.value)}>
-                <option value="DXGI">DXGI</option><option value="WGC">WGC</option><option value="GDI">GDI</option>
+                <option value="DXGI">{tt("DXGI")}</option><option value="WGC">{tt("WGC")}</option><option value="GDI">{tt("GDI")}</option>
               </select>
             </label>
-            <label>Senkronizasyon
+            <label>{tt("Senkronizasyon")}
               <select value={v("SyncMode", "DEFAULT")} onChange={(e) => put("SyncMode", e.target.value)}>
-                <option value="DEFAULT">Varsayılan</option><option value="OFF">Kapalı</option>
-                <option value="VSYNC1">V-Sync 1</option><option value="VSYNC2">V-Sync 2</option><option value="VSYNC3">V-Sync 3</option><option value="VSYNC4">V-Sync 4</option>
+                <option value="DEFAULT">{tt("Varsayılan")}</option><option value="OFF">{tt("Kapalı")}</option>
+                <option value="VSYNC1">{tt("V-Sync 1")}</option><option value="VSYNC2">{tt("V-Sync 2")}</option><option value="VSYNC3">{tt("V-Sync 3")}</option><option value="VSYNC4">{tt("V-Sync 4")}</option>
               </select>
             </label>
             <label>{LABEL.MaxFrameLatency}
@@ -267,15 +268,15 @@ export function UpscalerSettings({ inPlayer, onToggle, onSaved, onApply }: {
             </label>
           </div>
           <div className="up-checks">
-            <label className="look-check"><input type="checkbox" checked={v("HdrSupport", "true") === "true"} onChange={(e) => put("HdrSupport", String(e.target.checked))} /> {LABEL.HdrSupport} <span className="muted small">(HDR filmler için açık kalmalı)</span></label>
+            <label className="look-check"><input type="checkbox" checked={v("HdrSupport", "true") === "true"} onChange={(e) => put("HdrSupport", String(e.target.checked))} /> {LABEL.HdrSupport} <span className="muted small">{tt("(HDR filmler için açık kalmalı)")}</span></label>
             <label className="look-check"><input type="checkbox" checked={v("DrawFps") === "true"} onChange={(e) => put("DrawFps", String(e.target.checked))} /> {LABEL.DrawFps}</label>
             <label className="look-check"><input type="checkbox" checked={v("GsyncSupport") === "true"} onChange={(e) => put("GsyncSupport", String(e.target.checked))} /> {LABEL.GsyncSupport}</label>
           </div>
           <div className="up-actions">
             <button className={inPlayer ? "primary sm" : "chip"} onClick={() => (onApply ? onApply(async () => {
               await invoke("upscaler_save", { values: { ...vals, HdrSupport: vals.HdrSupport ?? "true" } });
-            }, on) : save())} disabled={!!busy}>{busy || (inPlayer ? "Uygula" : "Lossless Scaling'e kaydet")}</button>
-            {st?.hotkey && <span className="muted small">Kısayol: {st.hotkey}</span>}
+            }, on) : save())} disabled={!!busy}>{busy || (inPlayer ? tt("Uygula") : tt("Lossless Scaling'e kaydet"))}</button>
+            {st?.hotkey && <span className="muted small">{tt("Kısayol:")} {st.hotkey}</span>}
           </div>
           {msg && <div className="small up-msg">{msg}</div>}
         </div>

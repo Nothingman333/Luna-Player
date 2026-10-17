@@ -1,3 +1,4 @@
+import { locale } from "./i18n";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { useEffect, useMemo, useState } from "react";
 
@@ -109,7 +110,7 @@ export type SearchHit = { id: number; kind: "movie" | "tv"; title: string; year:
 
 export async function searchTmdb(query: string, kind: "movie" | "tv", year?: number): Promise<SearchHit[]> {
   const r = await tmdb(`/search/${kind}`, {
-    query, language: "tr-TR",
+    query, language: locale(),
     ...(year ? { [kind === "movie" ? "year" : "first_air_date_year"]: String(year) } : {}),
   });
   return (r.results ?? []).slice(0, 12).map((h: any) => ({
@@ -125,7 +126,7 @@ async function lookup(p: Parsed): Promise<Meta | null> {
 }
 
 export async function details(kind: "movie" | "tv", id: number): Promise<Meta> {
-  const d = await tmdb(`/${kind}/${id}`, { language: "tr-TR" });
+  const d = await tmdb(`/${kind}/${id}`, { language: locale() });
   // Turkish credits sometimes carry names in the original script (e.g. Japanese); English is always Latin.
   d.credits = await tmdb(`/${kind}/${id}/credits`, { language: "en-US" }).catch(() => ({ cast: [] }));
   let overview: string = d.overview;
@@ -154,7 +155,7 @@ export async function seasonEpisodes(tvId: number, season: number): Promise<Epis
   if (cached) return cached;
   if (!store.get("tmdbKey")) return [];
   try {
-    const d = await tmdb(`/tv/${tvId}/season/${season}`, { language: "tr-TR" });
+    const d = await tmdb(`/tv/${tvId}/season/${season}`, { language: locale() });
     const eps: Episode[] = (d.episodes ?? []).map((e: any) => ({
       episode: e.episode_number, name: e.name, overview: e.overview,
       still: e.still_path, runtime: e.runtime,

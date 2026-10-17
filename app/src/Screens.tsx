@@ -1,3 +1,4 @@
+import { defaultSubLangs, lang, setLang, tt } from "./i18n";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -109,10 +110,10 @@ export function Header({ view, setView, query, setQuery, scanning, onOpen, onSet
   view: View; setView: (v: View) => void; query: string; setQuery: (q: string) => void;
   scanning: boolean; onOpen: () => void; onSettings: () => void; onTorrent: () => void; downloading: number; onChat: () => void;
 }) {
-  const tabs: [View, string][] = [["home", "Ana sayfa"], ["movies", "Filmler"], ["shows", "Diziler"], ["folders", "Klasörler"], ["downloads", "İndirmeler"], ["recs", "Öneriler"]];
+  const tabs: [View, string][] = [["home", tt("Ana sayfa")], ["movies", tt("Filmler")], ["shows", tt("Diziler")], ["folders", tt("Klasörler")], ["downloads", tt("İndirmeler")], ["recs", tt("Öneriler")]];
   return (
     <header className="app-header">
-      <div className="brand"><LunaMark /> Luna Player</div>
+      <div className="brand"><LunaMark />  {tt("Luna Player")}</div>
       <nav className="tabs">
         {tabs.map(([v, l]) => (
           <button key={v} className={"tab" + (v === view ? " on" : "")} onClick={() => setView(v)}>
@@ -121,20 +122,20 @@ export function Header({ view, setView, query, setQuery, scanning, onOpen, onSet
         ))}
       </nav>
       <span className="grow" />
-      {scanning && <span className="muted small pulse">Taranıyor…</span>}
+      {scanning && <span className="muted small pulse">{tt("Taranıyor…")}</span>}
       <label className="search">
         <Icon d={I.search} size={18} />
-        <input value={query} placeholder="Ara" aria-label="Kütüphanede ara"
+        <input value={query} placeholder={tt("Ara")} aria-label={tt("Kütüphanede ara")}
           onChange={(e) => { setQuery(e.target.value); if (e.target.value && view === "home") setView("movies"); }} />
       </label>
-      <button className="ghost sm hdr-btn" onClick={onChat} title="Film asistanı (Gemini)" aria-label="Asistan">
-        <Icon d={I.chat} size={18} /><span className="lbl">Asistan</span>
+      <button className="ghost sm hdr-btn" onClick={onChat} title={tt("Film asistanı (Gemini)")} aria-label={tt("Asistan")}>
+        <Icon d={I.chat} size={18} /><span className="lbl">{tt("Asistan")}</span>
       </button>
-      <button className="ghost sm hdr-btn" onClick={onTorrent} title="Bağlantı aç: magnet, torrent ya da video adresi (Ctrl+N)" aria-label="Bağlantı aç">
-        <Icon d={I.magnet} size={18} /><span className="lbl">Bağlantı</span>
+      <button className="ghost sm hdr-btn" onClick={onTorrent} title={tt("Bağlantı aç: magnet, torrent ya da video adresi (Ctrl+N)")} aria-label={tt("Bağlantı aç")}>
+        <Icon d={I.magnet} size={18} /><span className="lbl">{tt("Bağlantı")}</span>
       </button>
-      <button className="round gear" aria-label="Ayarlar" title="Ayarlar" onClick={onSettings}><Icon d={I.gear} /></button>
-      <button className="primary hdr-open" onClick={onOpen} title="Dosya aç (Ctrl+O)"><Icon d={I.folder} size={18} /><span className="lbl">Dosya aç</span></button>
+      <button className="round gear" aria-label={tt("Ayarlar")} title={tt("Ayarlar")} onClick={onSettings}><Icon d={I.gear} /></button>
+      <button className="primary hdr-open" onClick={onOpen} title={tt("Dosya aç (Ctrl+O)")}><Icon d={I.folder} size={18} /><span className="lbl">{tt("Dosya aç")}</span></button>
     </header>
   );
 }
@@ -147,9 +148,9 @@ function Poster({ it, a }: { it: Item; a: Actions }) {
     <button className="poster" onClick={() => a.details(it.key)}
       onContextMenu={(e) => a.menu(e, { path: it.files[0].path, item: it })}>
       <div className={"poster-img" + (it.files.every((f) => isRemote(f.path) || a.missing.has(f.path)) ? " remote" : "")}
-        title={it.files.every((f) => isRemote(f.path)) ? "İnik değil · detaylardan indirebilirsin"
-          : it.files.every((f) => a.missing.has(f.path)) ? "Dosya bulunamadı · detaylardan yeniden bağlayabilirsin" : undefined}>
-        {it.files.every((f) => isFinished(f.path)) && <span className="done-badge" title="Bitirdin">✓</span>}
+        title={it.files.every((f) => isRemote(f.path)) ? tt("İnik değil · detaylardan indirebilirsin")
+          : it.files.every((f) => a.missing.has(f.path)) ? tt("Dosya bulunamadı · detaylardan yeniden bağlayabilirsin") : undefined}>
+        {it.files.every((f) => isFinished(f.path)) && <span className="done-badge" title={tt("Bitirdin")}>✓</span>}
         {m?.poster ? <img src={IMG + "w342" + m.poster} alt="" loading="lazy" />
           : thumb ? <img src={thumb} alt="" />
           : <span>{it.parsed.title}</span>}
@@ -157,7 +158,7 @@ function Poster({ it, a }: { it: Item; a: Actions }) {
       </div>
       <div className="card-title">{m?.title ?? it.parsed.title}</div>
       <div className="muted small">
-        {it.parsed.kind === "tv" ? `${it.files.length} bölüm` : m?.year ?? it.parsed.year ?? ""}
+        {it.parsed.kind === "tv" ? tt("{0} bölüm", it.files.length) : m?.year ?? it.parsed.year ?? ""}
       </div>
     </button>
   );
@@ -166,7 +167,7 @@ function Poster({ it, a }: { it: Item; a: Actions }) {
 /** The small "i" in a card's corner: opens the details page instead of playing. */
 function InfoBtn({ onClick }: { onClick: () => void }) {
   return (
-    <span className="info-btn" role="button" tabIndex={0} aria-label="Detaylar" title="Detaylar"
+    <span className="info-btn" role="button" tabIndex={0} aria-label={tt("Detaylar")} title={tt("Detaylar")}
       onClick={(e) => { e.stopPropagation(); onClick(); }}
       onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onClick(); } }}>i</span>
   );
@@ -180,7 +181,7 @@ function WideCard({ path, item, title, sub, progress, a, still }: {
   return (
     <button className="card" onClick={() => a.play(path)} onContextMenu={(e) => a.menu(e, { path, item })}>
       <div className={"thumb" + (isRemote(path) || a.missing.has(path) ? " remote" : "")} style={bg ? { backgroundImage: `url("${bg}")` } : undefined}
-        title={isRemote(path) ? "İnik değil · oynatınca torrent'ten akar" : undefined}>
+        title={isRemote(path) ? tt("İnik değil · oynatınca torrent'ten akar") : undefined}>
         <div className="thumb-play"><Icon d={I.play} fill size={28} /></div>
         {item && <InfoBtn onClick={() => a.details(item.key)} />}
         {progress != null && <div className="progress"><div style={{ width: progress + "%" }} /></div>}
@@ -224,14 +225,14 @@ function HeroSlider({ slides, a }: { slides: Slide[]; a: Actions }) {
       ))}
       <div className="hero-shade" />
       <div className="hero-body" key={s.kind + s.path}>
-        <div className="eyebrow">{s.kind === "continue" ? "KALDIĞIN YERDEN DEVAM ET" : "HENÜZ İZLEMEDİN"}</div>
+        <div className="eyebrow">{s.kind === "continue" ? tt("KALDIĞIN YERDEN DEVAM ET") : tt("HENÜZ İZLEMEDİN")}</div>
         <h1>{title}</h1>
         <Badges path={s.path} />
         {s.rec ? (
           <>
             <div className="muted">
               {f?.season != null && epLabel(f.season, f.episode) + " — "}
-              {fmtTime(s.rec.duration - s.rec.time)} kaldı
+              {fmtTime(s.rec.duration - s.rec.time)}  {tt("kaldı")}
             </div>
             <div className="progress"><div style={{ width: pct(s.rec) + "%" }} /></div>
           </>
@@ -244,18 +245,18 @@ function HeroSlider({ slides, a }: { slides: Slide[]; a: Actions }) {
         )}
         <div className="hero-actions" onClick={(e) => e.stopPropagation()}>
           <button className="primary light" onClick={() => a.play(s.path)}>
-            <Icon d={I.play} fill size={18} /> {s.kind === "continue" ? "Devam et" : "Oynat"}
+            <Icon d={I.play} fill size={18} /> {s.kind === "continue" ? tt("Devam et") : tt("Oynat")}
           </button>
-          {it && <button className="ghost" onClick={() => a.details(it.key)}>Detaylar</button>}
+          {it && <button className="ghost" onClick={() => a.details(it.key)}>{tt("Detaylar")}</button>}
         </div>
       </div>
       {n > 1 && (
         <>
-          <button className="hero-arrow l" aria-label="Önceki" onClick={(e) => { e.stopPropagation(); go(-1); }}><Icon d={I.left} size={28} /></button>
-          <button className="hero-arrow r" aria-label="Sonraki" onClick={(e) => { e.stopPropagation(); go(1); }}><Icon d={I.right} size={28} /></button>
+          <button className="hero-arrow l" aria-label={tt("Önceki")} onClick={(e) => { e.stopPropagation(); go(-1); }}><Icon d={I.left} size={28} /></button>
+          <button className="hero-arrow r" aria-label={tt("Sonraki")} onClick={(e) => { e.stopPropagation(); go(1); }}><Icon d={I.right} size={28} /></button>
           <div className="hero-dots" onClick={(e) => e.stopPropagation()}>
             {slides.map((sl, k) => (
-              <button key={k} aria-label={`${k + 1}. öğe`} className={"hero-dot" + (k === i ? " on" : "") + (sl.kind === "new" ? " new" : "")}
+              <button key={k} aria-label={tt("{0}. öğe", k + 1)} className={"hero-dot" + (k === i ? " on" : "") + (sl.kind === "new" ? " new" : "")}
                 onClick={() => setI(k)}>{k === i && !hover && <span className="hero-dot-fill" />}</button>
             ))}
           </div>
@@ -288,9 +289,9 @@ export function Home({ items, recent, hasFolders, a, onSettings, downloads }: {
     <div className="page">
       {slides.length ? <HeroSlider slides={slides} a={a} /> : (
         <section className="hero empty">
-          <h1>Bir video sürükle bırak</h1>
-          <div className="muted">ya da “Dosya aç”a bas. Altyazı yoksa otomatik bulunur.</div>
-          {!hasFolders && <button className="ghost" onClick={onSettings}><Icon d={I.folder} size={18} /> Kütüphaneye klasör ekle</button>}
+          <h1>{tt("Bir video sürükle bırak")}</h1>
+          <div className="muted">{tt("ya da “Dosya aç”a bas. Altyazı yoksa otomatik bulunur.")}</div>
+          {!hasFolders && <button className="ghost" onClick={onSettings}><Icon d={I.folder} size={18} />  {tt("Kütüphaneye klasör ekle")}</button>}
         </section>
       )}
 
@@ -298,7 +299,7 @@ export function Home({ items, recent, hasFolders, a, onSettings, downloads }: {
 
       {continuing.length > 0 && (
         <section className="row">
-          <h2>İzlemeye devam et</h2>
+          <h2>{tt("İzlemeye devam et")}</h2>
           <div className="grid wide">
             {continuing.map((r) => {
               const it = itemOf(r.path);
@@ -307,15 +308,15 @@ export function Home({ items, recent, hasFolders, a, onSettings, downloads }: {
                 <WideCard key={r.path} path={r.path} item={it} a={a} progress={pct(r)}
                   still={it?.meta?.backdrop ? `${IMG}w500${it.meta.backdrop}` : null}
                   title={it?.meta?.title ?? it?.parsed.title ?? r.title}
-                  sub={(f?.season != null ? epLabel(f.season, f.episode) + " · " : "") + fmtTime(r.duration - r.time) + " kaldı"} />
+                  sub={(f?.season != null ? epLabel(f.season, f.episode) + " · " : "") + fmtTime(r.duration - r.time) + tt(" kaldı")} />
               );
             })}
           </div>
         </section>
       )}
-      {shows.length > 0 && <PosterRow title="Diziler" items={shows} a={a} />}
-      {movies.length > 0 && <PosterRow title="Filmler" items={movies} a={a} />}
-      {finishedItems.length > 0 && <PosterRow title="Bitirdiklerim" items={finishedItems} a={a} />}
+      {shows.length > 0 && <PosterRow title={tt("Diziler")} items={shows} a={a} />}
+      {movies.length > 0 && <PosterRow title={tt("Filmler")} items={movies} a={a} />}
+      {finishedItems.length > 0 && <PosterRow title={tt("Bitirdiklerim")} items={finishedItems} a={a} />}
     </div>
   );
 }
@@ -338,9 +339,9 @@ export function Browse({ title, items, query, a }: { title: string; items: Item[
   return (
     <div className="page">
       <section className="row">
-        <h2>{q ? `Yerel dosyalar · “${query}”` : title} <span className="muted small">{list.length}</span></h2>
+        <h2>{q ? tt("Yerel dosyalar · “{0}”", query) : title} <span className="muted small">{list.length}</span></h2>
         {list.length ? <div className="grid">{list.map((it) => <Poster key={it.key} it={it} a={a} />)}</div>
-          : <div className="muted empty-note">{q ? "Kütüphanende bulunamadı." : "Bir şey bulunamadı. Klasörler sekmesinden kütüphaneye klasör ekleyebilirsin."}</div>}
+          : <div className="muted empty-note">{q ? tt("Kütüphanende bulunamadı.") : tt("Bir şey bulunamadı. Klasörler sekmesinden kütüphaneye klasör ekleyebilirsin.")}</div>}
       </section>
     </div>
   );
@@ -389,10 +390,10 @@ export function Folders({ roots, setRoots, items, recent, a }: {
     return (
       <div className="page">
         <section className="row">
-          <div className="row-head"><h2>Klasörler</h2><span className="grow" />
-            <button className="ghost sm" onClick={addRoot}><Icon d={I.plus} size={18} /> Klasör ekle</button>
+          <div className="row-head"><h2>{tt("Klasörler")}</h2><span className="grow" />
+            <button className="ghost sm" onClick={addRoot}><Icon d={I.plus} size={18} />  {tt("Klasör ekle")}</button>
           </div>
-          {roots.length === 0 && <div className="muted empty-note">Film ve dizilerinin olduğu klasörleri ekle; içindekiler kütüphaneye girer.</div>}
+          {roots.length === 0 && <div className="muted empty-note">{tt("Film ve dizilerinin olduğu klasörleri ekle; içindekiler kütüphaneye girer.")}</div>}
           <div className="grid folders">
             {roots.map((r) => (
               <div key={r} className="folder-tile" role="button" tabIndex={0} onClick={() => setCwd(r)}
@@ -400,8 +401,8 @@ export function Folders({ roots, setRoots, items, recent, a }: {
                 <Icon d={I.folder} size={40} />
                 <div className="ellipsis folder-name">{fileName(r) || r}</div>
                 <div className="muted small ellipsis">{r}</div>
-                <div className="muted small">{rootInfo[r] != null ? `${rootInfo[r]} video` : "…"}</div>
-                <button className="icon sm tile-x" aria-label="Kütüphaneden çıkar"
+                <div className="muted small">{rootInfo[r] != null ? tt("{0} video", rootInfo[r]) : "…"}</div>
+                <button className="icon sm tile-x" aria-label={tt("Kütüphaneden çıkar")}
                   onClick={(e) => { e.stopPropagation(); setRoots(roots.filter((x) => x !== r)); }}>
                   <Icon d={I.x} size={16} />
                 </button>
@@ -418,7 +419,7 @@ export function Folders({ roots, setRoots, items, recent, a }: {
     <div className="page">
       <section className="row">
         <div className="crumbs">
-          <button className="crumb" onClick={() => setCwd(null)}>Klasörler</button>
+          <button className="crumb" onClick={() => setCwd(null)}>{tt("Klasörler")}</button>
           {crumbs.map((c, i) => (
             <span key={i} className="crumb-wrap"><Icon d={I.right} size={16} />
               <button className="crumb" onClick={() => setCwd(crumbPath(i))}>{i === 0 ? fileName(c) || c : c}</button>
@@ -431,7 +432,7 @@ export function Folders({ roots, setRoots, items, recent, a }: {
               <button key={d.path} className="folder-tile" onClick={() => setCwd(d.path)}>
                 <Icon d={I.folder} size={36} />
                 <div className="ellipsis folder-name">{d.name}</div>
-                <div className="muted small">{d.videos} video</div>
+                <div className="muted small">{d.videos}  {tt("video")}</div>
               </button>
             ))}
           </div>
@@ -446,7 +447,7 @@ export function Folders({ roots, setRoots, items, recent, a }: {
             })}
           </div>
         )}
-        {!entries.length && <div className="muted empty-note">Bu klasörde video yok.</div>}
+        {!entries.length && <div className="muted empty-note">{tt("Bu klasörde video yok.")}</div>}
       </section>
     </div>
   );
@@ -492,8 +493,8 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
 
   const extSub = store.get("extSub:" + file.path);
   const hasSub = store.get("hasSub:" + file.path) === "1";
-  const playLabel = rec ? (isTv ? `${epLabel(file.season, file.episode)} · Devam et` : "Devam et")
-    : isTv ? `${epLabel(file.season, file.episode)} · Oynat` : "Oynat";
+  const playLabel = rec ? (isTv ? tt("{0} · Devam et", epLabel(file.season, file.episode)) : tt("Devam et"))
+    : isTv ? tt("{0} · Oynat", epLabel(file.season, file.episode)) : tt("Oynat");
   const longText = (m?.overview.length ?? 0) > 260;
 
   return (
@@ -502,66 +503,66 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
         <div className={"hero-bg" + (it.files.every((f) => isRemote(f.path)) ? " remote" : "")} style={m?.backdrop ? { backgroundImage: `url(${IMG}w1280${m.backdrop})` } : undefined} />
         <div className="d-shade" />
         <header>
-          <button className="round" aria-label="Geri" onClick={onBack}><Icon d={I.left} /></button>
-          <div className="brand"><LunaMark /> Luna Player</div>
+          <button className="round" aria-label={tt("Geri")} onClick={onBack}><Icon d={I.left} /></button>
+          <div className="brand"><LunaMark />  {tt("Luna Player")}</div>
         </header>
         <div className="d-body">
           <h1>{m?.title ?? it.parsed.title}</h1>
           <div className="d-meta">
             {m && m.rating > 0 && (
-              <button className="rating" title="TMDB sayfasını aç"
-                onClick={() => openUrl(m.id > 0 ? `https://www.themoviedb.org/${m.kind}/${m.id}?language=tr` : `https://www.themoviedb.org/search?query=${encodeURIComponent(m.title)}`)}>
+              <button className="rating" title={tt("TMDB sayfasını aç")}
+                onClick={() => openUrl(m.id > 0 ? `https://www.themoviedb.org/${m.kind}/${m.id}?language=${lang()}` : `https://www.themoviedb.org/search?query=${encodeURIComponent(m.title)}`)}>
                 ★ {String(m.rating).replace(".", ",")}
               </button>
             )}
             {m?.year && <span>{m.year}</span>}
-            {m?.seasons && <span>{m.seasons} sezon</span>}
-            {m?.runtime ? <span>{Math.floor(m.runtime / 60)} sa {m.runtime % 60} dk</span> : null}
+            {m?.seasons && <span>{m.seasons}  {tt("sezon")}</span>}
+            {m?.runtime ? <span>{Math.floor(m.runtime / 60)}  {tt("sa")} {m.runtime % 60}  {tt("dk")}</span> : null}
             {m?.genres.length ? <span>{m.genres.slice(0, 3).join(", ")}</span> : null}
           </div>
           <Badges path={file.path} big />
           {m?.overview ? (
             <div>
               <TrText className={"overview" + (more ? " open" : "")} text={m.overview} />
-              {longText && <button className="more-btn" onClick={() => setMore((v) => !v)}>{more ? "Daha az göster" : "Devamını oku"}</button>}
+              {longText && <button className="more-btn" onClick={() => setMore((v) => !v)}>{more ? tt("Daha az göster") : tt("Devamını oku")}</button>}
             </div>
           ) : m === null && store.get("tmdbKey") ? (
             <div className="name-ask">
-              <span>Bunun adını bulamadım{it.files[0]?.path.includes("://") ? " (bağlantıdan açıldı)" : ""}. Adını söylersen sayfası, afişi ve altyazısı gelir.</span>
-              {a.rematch && <button className="primary sm" onClick={() => a.rematch!({ path: it.files[0].path, item: it })}>Adını gir</button>}
+              <span>{tt("Bunun adını bulamadım")}{it.files[0]?.path.includes("://") ? tt(" (bağlantıdan açıldı)") : ""}{tt(". Adını söylersen sayfası, afişi ve altyazısı gelir.")}</span>
+              {a.rematch && <button className="primary sm" onClick={() => a.rematch!({ path: it.files[0].path, item: it })}>{tt("Adını gir")}</button>}
             </div>
-          ) : <p className="overview muted">Özet ve oyuncular için ayarlardan TMDB anahtarını gir.</p>}
+          ) : <p className="overview muted">{tt("Özet ve oyuncular için ayarlardan TMDB anahtarını gir.")}</p>}
           <div className="hero-actions">
             <button className="primary light" onClick={() => a.play(file.path)}><Icon d={I.play} fill size={18} /> {playLabel}</button>
-            {rec && <button className="ghost" onClick={() => a.play(file.path, true)}>Baştan başla</button>}
+            {rec && <button className="ghost" onClick={() => a.play(file.path, true)}>{tt("Baştan başla")}</button>}
             <span className="act-sep" aria-hidden="true" />
             <button className={"act" + (allDone || (isTv && isFinished(file.path)) ? " on good" : "")}
-              data-tip={isTv ? (isFinished(file.path) ? "Bölümü izlemedim" : "Bölümü bitirdim") : allDone ? "Bitirmedim" : "Bitirdim"}
-              aria-label={isTv ? "Bölümü bitirdim" : "Bitirdim"}
+              data-tip={isTv ? (isFinished(file.path) ? tt("Bölümü izlemedim") : tt("Bölümü bitirdim")) : allDone ? tt("Bitirmedim") : tt("Bitirdim")}
+              aria-label={isTv ? tt("Bölümü bitirdim") : tt("Bitirdim")}
               onClick={() => { setFinished(isTv ? [file.path] : it.files.map((f) => f.path), !allDone && !(isTv && isFinished(file.path))); rerender((n) => n + 1); }}>
               <Icon d={I.check} size={20} />
             </button>
             <TasteButtons it={it} />
-            <button className="act" data-tip="Altyazı ekle" aria-label="Altyazı ekle" onClick={() => onAddSub(file.path)}>
+            <button className="act" data-tip={tt("Altyazı ekle")} aria-label={tt("Altyazı ekle")} onClick={() => onAddSub(file.path)}>
               <Icon d={I.subs} size={20} />
             </button>
-            <button className="act" data-tip="YouTube'da Türkçe fragman" aria-label="Fragman"
+            <button className="act" data-tip={tt("YouTube'da Türkçe fragman")} aria-label={tt("Fragman")}
               onClick={() => { const t = m?.title ?? it.parsed.title; const y = m?.year ?? it.parsed.year; openUrl(youtubeTrailer(y ? `${t} (${y})` : t)); }}>
               <Icon d={I.play} fill size={16} />
             </button>
             {onAsk && (
-              <button className="act" data-tip="Asistana sor" aria-label="Asistana sor" onClick={onAsk}>
+              <button className="act" data-tip={tt("Asistana sor")} aria-label={tt("Asistana sor")} onClick={onAsk}>
                 <Icon d={I.chat} size={20} />
               </button>
             )}
-            <button className="act" data-tip="Diğer seçenekler" aria-label="Diğer seçenekler" onClick={(e) => a.menu(e, { path: file.path, item: it })}>
+            <button className="act" data-tip={tt("Diğer seçenekler")} aria-label={tt("Diğer seçenekler")} onClick={(e) => a.menu(e, { path: file.path, item: it })}>
               <Icon d={I.more} size={22} />
             </button>
           </div>
           {missingPanel}
           {download}
           <div className="muted small">
-            {extSub ? `Altyazı: ${fileName(extSub)}` : hasSub ? "Altyazı mevcut" : "Altyazı yok · oynatınca internetten aranır"}
+            {extSub ? tt("Altyazı: {0}", fileName(extSub)) : hasSub ? tt("Altyazı mevcut") : tt("Altyazı yok · oynatınca internetten aranır")}
             {info?.size ? ` · ${fmtSize(info.size)}` : ""}
           </div>
         </div>
@@ -569,11 +570,11 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
 
       {m && m.cast.length > 0 && (
         <section className="row">
-          <h2>Oyuncular</h2>
+          <h2>{tt("Oyuncular")}</h2>
           <div className="cast">
             {m.cast.map((c) => (
-              <button key={c.name + c.character} className="person" title={`${c.name} · TMDB'de aç`}
-                onClick={() => openUrl(c.id ? `https://www.themoviedb.org/person/${c.id}?language=tr`
+              <button key={c.name + c.character} className="person" title={tt("{0} · TMDB'de aç", c.name)}
+                onClick={() => openUrl(c.id ? `https://www.themoviedb.org/person/${c.id}?language=${lang()}`
                   : `https://www.themoviedb.org/search/person?query=${encodeURIComponent(c.name)}`)}>
                 <div className="face">{c.profile ? <img src={IMG + "w185" + c.profile} alt="" loading="lazy" /> : c.name[0]}</div>
                 <div className="p-name">{c.name}</div>
@@ -587,9 +588,9 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
       {isTv && (
         <section className="row">
           <div className="row-head">
-            <h2>Bölümler</h2>
+            <h2>{tt("Bölümler")}</h2>
             {seasons.map((n) => (
-              <button key={n} className={"seg" + (n === season ? " on" : "")} onClick={() => setSeason(n)}>Sezon {n}</button>
+              <button key={n} className={"seg" + (n === season ? " on" : "")} onClick={() => setSeason(n)}>{tt("Sezon")} {n}</button>
             ))}
           </div>
           <div className="grid wide">
@@ -601,7 +602,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
                 <WideCard key={f.path} path={f.path} item={it} a={a} progress={r ? p : undefined}
                   still={e?.still ? `${IMG}w300${e.still}` : null}
                   title={`${f.episode}. ${e?.name ?? fileName(f.path)}`}
-                  sub={[e?.runtime ? e.runtime + " dk" : "", p > 92 ? "İzlendi" : r ? `${fmtTime(r.duration - r.time)} kaldı` : ""].filter(Boolean).join(" · ")} />
+                  sub={[e?.runtime ? e.runtime + tt(" dk") : "", p > 92 ? tt("İzlendi") : r ? tt("{0} kaldı", fmtTime(r.duration - r.time)) : ""].filter(Boolean).join(" · ")} />
               );
             })}
           </div>
@@ -640,7 +641,7 @@ export function Confirm({ title, text, ok, danger, onOk, onCancel }: {
         <h2>{title}</h2>
         <p className="modal-text">{text}</p>
         <div className="modal-actions">
-          <button className="chip" onClick={onCancel} autoFocus>Vazgeç</button>
+          <button className="chip" onClick={onCancel} autoFocus>{tt("Vazgeç")}</button>
           <button className={"primary" + (danger ? " danger" : "")} onClick={onOk}>{ok}</button>
         </div>
       </div>
@@ -667,20 +668,20 @@ export function Rematch({ it, onPick, onCustom, onClose }: {
   return (
     <div className="modal-bg" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal wide" onKeyDown={(e) => e.stopPropagation()}>
-        <h2>Adını değiştir / eşleştir</h2>
+        <h2>{tt("Adını değiştir / eşleştir")}</h2>
         <div className="muted small ellipsis">{fileName(it.files[0].path)}</div>
         <div className="rm-row">
-          <input value={q} autoFocus onChange={(e) => setQ(e.target.value)} aria-label="Ad"
+          <input value={q} autoFocus onChange={(e) => setQ(e.target.value)} aria-label={tt("Ad")}
             onKeyDown={(e) => e.key === "Enter" && saveName()} />
-          <button className={"seg" + (kind === "movie" ? " on" : "")} onClick={() => setKind("movie")}>Film</button>
-          <button className={"seg" + (kind === "tv" ? " on" : "")} onClick={() => setKind("tv")}>Dizi</button>
-          <button className="primary" disabled={!q.trim()} onClick={saveName}>Kaydet</button>
+          <button className={"seg" + (kind === "movie" ? " on" : "")} onClick={() => setKind("movie")}>{tt("Film")}</button>
+          <button className={"seg" + (kind === "tv" ? " on" : "")} onClick={() => setKind("tv")}>{tt("Dizi")}</button>
+          <button className="primary" disabled={!q.trim()} onClick={saveName}>{tt("Kaydet")}</button>
         </div>
-        <div className="muted small">Enter ya da Kaydet: sadece bu adı kullanır. Afişli bilgi istersen aşağıdan doğru olanı seç.</div>
+        <div className="muted small">{tt("Enter ya da Kaydet: sadece bu adı kullanır. Afişli bilgi istersen aşağıdan doğru olanı seç.")}</div>
         {err && <div className="muted">{err}</div>}
         <div className="rm-grid">
-          {hits === null && !err && <div className="muted">Aranıyor…</div>}
-          {hits?.length === 0 && <div className="muted">Sonuç yok.</div>}
+          {hits === null && !err && <div className="muted">{tt("Aranıyor…")}</div>}
+          {hits?.length === 0 && <div className="muted">{tt("Sonuç yok.")}</div>}
           {hits?.map((h) => (
             <button key={h.id} className="poster" onClick={() => onPick(h)}>
               <div className="poster-img">{h.poster ? <img src={IMG + "w185" + h.poster} alt="" /> : <span>{h.title}</span>}</div>
@@ -689,7 +690,7 @@ export function Rematch({ it, onPick, onCustom, onClose }: {
             </button>
           ))}
         </div>
-        <div className="modal-actions"><button className="chip" onClick={onClose}>Kapat</button></div>
+        <div className="modal-actions"><button className="chip" onClick={onClose}>{tt("Kapat")}</button></div>
       </div>
     </div>
   );
@@ -698,18 +699,18 @@ export function Rematch({ it, onPick, onCustom, onClose }: {
 export function Settings({ onClose, onTour }: { onClose: () => void; onTour?: () => void }) {
   const [osKey, setOsKey] = useState(store.get("osKey") ?? "");
   const [tmdbKey, setTmdbKey] = useState(store.get("tmdbKey") ?? "");
-  const [langs, setLangs] = useState(store.get("langs") ?? "tr,en,de");
+  const [langs, setLangs] = useState(store.get("langs") ?? defaultSubLangs());
   const [autoFull, setAutoFull] = useState(store.get("autoFull") !== "0");
   const [dlDir, setDlDir] = useState(store.get("dlDir") ?? "");
   const [gemKey, setGemKey] = useState(store.get("geminiKey") ?? "");
   const [gemModel, setGemModel] = useState(store.get("geminiModel") ?? "gemini-3.1-flash-lite");
   const [models, setModels] = useState<[string, string][]>([]);
-  const [modelsMsg, setModelsMsg] = useState("Önce API anahtarını gir");
+  const [modelsMsg, setModelsMsg] = useState(tt("Önce API anahtarını gir"));
   const loadModels = () => {
     if (!gemKey.trim()) return;
-    setModelsMsg("Modeller yükleniyor…");
+    setModelsMsg(tt("Modeller yükleniyor…"));
     invoke<[string, string][]>("gemini_models", { key: gemKey.trim() })
-      .then((l) => { setModels(l.sort((x, y) => y[0].localeCompare(x[0]))); store.set("geminiModelIds", JSON.stringify(l.map(([id]) => id))); setModelsMsg(l.length ? "" : "Model bulunamadı"); })
+      .then((l) => { setModels(l.sort((x, y) => y[0].localeCompare(x[0]))); store.set("geminiModelIds", JSON.stringify(l.map(([id]) => id))); setModelsMsg(l.length ? "" : tt("Model bulunamadı")); })
       .catch((e) => { setModels([]); setModelsMsg(String(e).slice(0, 80)); });
   };
   useEffect(() => { if (store.get("geminiKey")) loadModels(); }, []);
@@ -740,49 +741,57 @@ export function Settings({ onClose, onTour }: { onClose: () => void; onTour?: ()
   return (
     <div className="modal-bg" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal">
-        <h2>Ayarlar{onTour && <button className="tour-again" onClick={onTour}>Tanıtımı göster</button>}</h2>
-        <label>TMDB API anahtarı (afiş, özet, oyuncular)
-          <input value={tmdbKey} onChange={(e) => setTmdbKey(e.target.value)} placeholder="themoviedb.org › Ayarlar › API" />
+        <h2>{tt("Ayarlar")}{onTour && <button className="tour-again" onClick={onTour}>{tt("Tanıtımı göster")}</button>}</h2>
+        <div className="field">
+          <span>{tt("Dil")}</span>
+          <div className="seg-row">
+            <button className={"seg" + (lang() === "en" ? " on" : "")} onClick={() => lang() !== "en" && setLang("en")}>English</button>
+            <button className={"seg" + (lang() === "tr" ? " on" : "")} onClick={() => lang() !== "tr" && setLang("tr")}>Türkçe</button>
+          </div>
+        </div>
+        <label>{tt("TMDB API anahtarı (afiş, özet, oyuncular)")}
+          <input value={tmdbKey} onChange={(e) => setTmdbKey(e.target.value)} placeholder={tt("themoviedb.org › Ayarlar › API")} />
         </label>
-        <label>OpenSubtitles API anahtarı (otomatik altyazı)
+        <label>{tt("OpenSubtitles API anahtarı (otomatik altyazı)")}
           <input value={osKey} onChange={(e) => setOsKey(e.target.value)} placeholder="opensubtitles.com › Profil › API consumers" />
         </label>
-        <label>Gemini API anahtarı (film asistanı)
+        <label>{tt("Gemini API anahtarı (film asistanı)")}
           <input value={gemKey} onChange={(e) => setGemKey(e.target.value)} placeholder="aistudio.google.com › Get API key" />
         </label>
         <div className="field">
-          <span>Gemini modeli</span>
+          <span>{tt("Gemini modeli")}</span>
           <div className="gem-model">
             <select value={models.some(([id]) => id === gemModel) ? gemModel : ""} onChange={(e) => { if (e.target.value) { setGemModel(e.target.value); store.set("geminiModel", e.target.value); } }}>
-              <option value="">{models.length ? "Listeden seç…" : modelsMsg}</option>
+              <option value="">{models.length ? tt("Listeden seç…") : modelsMsg}</option>
               {models.map(([id, name]) => <option key={id} value={id}>{name} ({id})</option>)}
             </select>
-            <button className="chip" onClick={loadModels} disabled={!gemKey.trim()}>Listeyi yenile</button>
+            <button className="chip" onClick={loadModels} disabled={!gemKey.trim()}>{tt("Listeyi yenile")}</button>
           </div>
-          <input value={gemModel} onChange={(e) => setGemModel(e.target.value)} placeholder="ya da model adını yaz: gemini-flash-latest" />
+          <input value={gemModel} onChange={(e) => setGemModel(e.target.value)} placeholder={tt("ya da model adını yaz: gemini-flash-latest")} />
         </div>
         <div className="field">
-          <span>Altyazı görünümü</span>
+          <span>{tt("Altyazı görünümü")}</span>
           <SubAppearance />
         </div>
         <UpscalerSettings />
         <PluginSettings />
         <div className="field">
-          <span>Torrent indirme klasörü</span>
+          <span>{tt("Torrent indirme klasörü")}</span>
           <div className="dir"><Icon d={I.folder} size={18} /><span className="grow ellipsis">{dlDir || "…"}</span>
-            <button className="chip" onClick={pickDl}>Değiştir…</button></div>
+            <button className="chip" onClick={pickDl}>{tt("Değiştir…")}</button></div>
         </div>
         <label className="look-check">
           <input type="checkbox" checked={autoFull} onChange={(e) => setAutoFull(e.target.checked)} />
-          Oynatınca tam ekran başlat
+          
+          {tt("Oynatınca tam ekran başlat")}
         </label>
-        <label>Altyazı dilleri (öncelik sırasıyla)
+        <label>{tt("Altyazı dilleri (öncelik sırasıyla)")}
           <input value={langs} onChange={(e) => setLangs(e.target.value)} />
         </label>
-        <div className="muted small">Kütüphane klasörleri artık “Klasörler” sekmesinde.</div>
+        <div className="muted small">{tt("Kütüphane klasörleri artık “Klasörler” sekmesinde.")}</div>
         <div className="modal-actions">
-          <button className="chip" onClick={onClose}>Vazgeç</button>
-          <button className="primary" onClick={save}>Kaydet</button>
+          <button className="chip" onClick={onClose}>{tt("Vazgeç")}</button>
+          <button className="primary" onClick={save}>{tt("Kaydet")}</button>
         </div>
       </div>
     </div>
@@ -800,21 +809,21 @@ export function MissingPanel({ onRelink, onMagnet, onForget }: {
   };
   return (
     <div className="dlp missing">
-      <div className="dlp-head"><b>Dosya bulunamadı</b><span className="muted small">taşınmış, silinmiş ya da disk takılı değil</span></div>
+      <div className="dlp-head"><b>{tt("Dosya bulunamadı")}</b><span className="muted small">{tt("taşınmış, silinmiş ya da disk takılı değil")}</span></div>
       {mag == null ? (
         <div className="missing-actions">
-          <button className="ghost sm" onClick={pick}><Icon d={I.folder} size={16} /> Dosyayı göster</button>
-          <button className="ghost sm" onClick={() => setMag("")}><Icon d={I.magnet} size={16} /> Magnet ekle</button>
-          <button className="chip" onClick={onForget}>Kütüphaneden kaldır</button>
+          <button className="ghost sm" onClick={pick}><Icon d={I.folder} size={16} />  {tt("Dosyayı göster")}</button>
+          <button className="ghost sm" onClick={() => setMag("")}><Icon d={I.magnet} size={16} />  {tt("Magnet ekle")}</button>
+          <button className="chip" onClick={onForget}>{tt("Kütüphaneden kaldır")}</button>
         </div>
       ) : (
         <form className="missing-actions" onSubmit={(e) => { e.preventDefault(); if (mag.trim()) onMagnet(mag.trim()); }}>
-          <input className="missing-input" autoFocus value={mag} onChange={(e) => setMag(e.target.value)} placeholder="magnet:?xt=… ya da .torrent adresi" />
-          <button className="primary sm" disabled={!mag.trim()}>Kaydet</button>
-          <button type="button" className="chip" onClick={() => setMag(null)}>Vazgeç</button>
+          <input className="missing-input" autoFocus value={mag} onChange={(e) => setMag(e.target.value)} placeholder={tt("magnet:?xt=… ya da .torrent adresi")} />
+          <button className="primary sm" disabled={!mag.trim()}>{tt("Kaydet")}</button>
+          <button type="button" className="chip" onClick={() => setMag(null)}>{tt("Vazgeç")}</button>
         </form>
       )}
-      <div className="muted small">Altyazı, ses/görüntü ayarları ve kaldığın yer yeni dosyaya taşınır.</div>
+      <div className="muted small">{tt("Altyazı, ses/görüntü ayarları ve kaldığın yer yeni dosyaya taşınır.")}</div>
     </div>
   );
 }

@@ -167,10 +167,10 @@ fn read_track(path: &Path, track_number: u64, progress: &dyn Fn(f32)) -> Result<
                     r.seek(SeekFrom::Start(h + cs)).map_err(e)?;
                 }
                 if track.number != track_number {
-                    return Err(format!("Altyazı izi bulunamadı (#{track_number})"));
+                    return Err(tr!("Altyazı izi bulunamadı (#{})", "Subtitle track not found (#{})", track_number));
                 }
                 if !track.codec.contains("PGS") {
-                    return Err(format!("Bu iz PGS değil ({})", track.codec));
+                    return Err(tr!("Bu iz PGS değil ({})", "This track isn't PGS ({})", track.codec));
                 }
             }
             CLUSTER_TS => cluster_ts = read_uint(&mut r, size).map_err(e)?,

@@ -119,8 +119,8 @@ pub fn start() -> Result<(), String> {
     if running() {
         return Ok(());
     }
-    let exe = exe_path().ok_or("Lossless Scaling bulunamadı. Steam'den kurulu olduğundan emin ol.")?;
-    Command::new(&exe).current_dir(exe.parent().unwrap()).spawn().map_err(|e| format!("Lossless Scaling başlatılamadı: {e}"))?;
+    let exe = exe_path().ok_or(tr!("Lossless Scaling bulunamadı. Steam'den kurulu olduğundan emin ol.", "Lossless Scaling not found. Make sure it's installed from Steam."))?;
+    Command::new(&exe).current_dir(exe.parent().unwrap()).spawn().map_err(|e| tr!("Lossless Scaling başlatılamadı: {}", "Couldn't start Lossless Scaling: {}", e))?;
     // Wait for it, then tuck its window away so it doesn't cover the player.
     for _ in 0..50 {
         std::thread::sleep(std::time::Duration::from_millis(200));
@@ -130,7 +130,7 @@ pub fn start() -> Result<(), String> {
             return Ok(());
         }
     }
-    Err("Lossless Scaling açılmadı".into())
+    Err(tr!("Lossless Scaling açılmadı", "Lossless Scaling didn't open"))
 }
 
 /// Closes Lossless Scaling and waits until it's gone (it writes Settings.xml when it exits).
@@ -235,17 +235,17 @@ pub fn status() -> Status {
 pub fn save(values: BTreeMap<String, String>) -> Result<(), String> {
     // Check everything before touching Lossless Scaling or its file.
     if let Some((k, v)) = values.iter().find(|(k, v)| KEYS.contains(&k.as_str()) && !valid(k, v)) {
-        return Err(format!("Geçersiz değer: {k} = {v}"));
+        return Err(tr!("Geçersiz değer: {} = {}", "Invalid value: {} = {}", k, v));
     }
     let path = settings_path();
     let was_running = running();
     stop();
-    let mut xml = std::fs::read_to_string(&path).map_err(|_| "Lossless Scaling ayar dosyası bulunamadı. Programı bir kez açıp kapat.".to_string())?;
+    let mut xml = std::fs::read_to_string(&path).map_err(|_| tr!("Lossless Scaling ayar dosyası bulunamadı. Programı bir kez açıp kapat.", "Lossless Scaling's settings file wasn't found. Open and close the program once."))?;
     let (a, b) = match block_range(&xml, PROFILE) {
         Some(r) => r,
         None => {
             // First time: copy the user's default profile as the starting point.
-            let (fa, fb) = first_block(&xml).ok_or("Lossless Scaling ayar dosyasında profil yok")?;
+            let (fa, fb) = first_block(&xml).ok_or(tr!("Lossless Scaling ayar dosyasında profil yok", "No profile in Lossless Scaling's settings file"))?;
             let mut copy = xml[fa..fb].to_string();
             let old_title = get(&copy, "Title").unwrap_or_default();
             copy = copy.replacen(&format!("<Title>{old_title}</Title>"), &format!("<Title>{PROFILE}</Title>"), 1);
@@ -406,7 +406,7 @@ pub mod win {
 
     pub fn press(key: &str, mods: &str) -> Result<(), String> {
         let mut keys: Vec<u16> = mods.split([' ', ',', '+']).filter(|s| !s.is_empty()).filter_map(vk).collect();
-        keys.push(vk(key).ok_or("Lossless Scaling kısayolu anlaşılamadı")?);
+        keys.push(vk(key).ok_or(tr!("Lossless Scaling kısayolu anlaşılamadı", "Couldn't understand the Lossless Scaling shortcut"))?);
         let mut inputs = vec![];
         for &k in &keys {
             inputs.push(Input { kind: 1, ki: KeybdInput { vk: k, scan: 0, flags: 0, time: 0, extra: 0 }, _pad: [0; 8] });
@@ -415,7 +415,7 @@ pub mod win {
             inputs.push(Input { kind: 1, ki: KeybdInput { vk: k, scan: 0, flags: 2, time: 0, extra: 0 }, _pad: [0; 8] });
         }
         let sent = unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), std::mem::size_of::<Input>() as i32) };
-        if sent as usize == inputs.len() { Ok(()) } else { Err("Kısayol gönderilemedi".into()) }
+        if sent as usize == inputs.len() { Ok(()) } else { Err(tr!("Kısayol gönderilemedi", "Couldn't send the shortcut")) }
     }
 
     /// Hidden from every screen capture (Lossless Scaling, screenshots) but still shown on screen.

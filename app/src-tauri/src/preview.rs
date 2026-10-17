@@ -49,7 +49,7 @@ fn spawn(mpv_exe: &Path) -> Result<Worker, String> {
             match ClientOptions::new().open(&pipe_name) {
                 Ok(c) => break c,
                 Err(_) if start.elapsed() < Duration::from_secs(5) => tokio::time::sleep(Duration::from_millis(10)).await,
-                Err(e) => return Err(format!("Önizleme başlatılamadı: {e}")),
+                Err(e) => return Err(tr!("Önizleme başlatılamadı: {}", "Couldn't start the preview: {}", e)),
             }
         };
         let (mut read, write) = tokio::io::split(client);
@@ -101,7 +101,7 @@ impl Worker {
             std::thread::sleep(Duration::from_millis(4));
         }
         self.n = newest_index(&self.out);
-        Err("Kare alınamadı".into())
+        Err(tr!("Kare alınamadı", "Couldn't grab a frame"))
     }
 }
 

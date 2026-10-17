@@ -69,7 +69,7 @@ async fn read_pages(client: &reqwest::Client, url: &str, max_pages: u32) -> Resu
                 let text = res.text().await.unwrap_or_default();
                 // a challenge page comes back as 200 without posters: treat it as a failure, except on a real last page
                 if !parse(&text).is_empty() || text.contains("class=\"pagination") || attempt >= 3 { body = Some(text); break; }
-                last = "boş sayfa".into();
+                last = tr!("boş sayfa", "empty page");
             }
                 Ok(res) if res.status() == reqwest::StatusCode::NOT_FOUND => { last = "404".into(); break; }
                 Ok(res) => last = res.status().to_string(),
@@ -79,7 +79,7 @@ async fn read_pages(client: &reqwest::Client, url: &str, max_pages: u32) -> Resu
         }
         let Some(body) = body else {
             if page == 1 {
-                return Err(format!("Letterboxd sayfası açılamadı ({last})"));
+                return Err(tr!("Letterboxd sayfası açılamadı ({})", "Couldn't open the Letterboxd page ({})", last));
             }
             break;
         };
@@ -144,7 +144,7 @@ pub async fn read(url: &str, max_pages: u32) -> Result<Vec<Section>, String> {
     // short links (boxd.it/…) redirect to the real page
     let mut clean = url.trim().trim_end_matches('/').to_string();
     if clean.contains("boxd.it/") {
-        let res = client.get(&clean).send().await.map_err(|e| format!("Kısa bağlantı açılamadı: {e}"))?;
+        let res = client.get(&clean).send().await.map_err(|e| tr!("Kısa bağlantı açılamadı: {}", "Couldn't open the short link: {}", e))?;
         clean = res.url().as_str().trim_end_matches('/').to_string();
     }
     let path: Vec<&str> = clean.split("letterboxd.com/").nth(1).unwrap_or("").split('/').filter(|s| !s.is_empty()).collect();
@@ -155,9 +155,9 @@ pub async fn read(url: &str, max_pages: u32) -> Result<Vec<Section>, String> {
         let liked = read_pages(&client, &format!("{root}/likes/films"), max_pages).await.unwrap_or_default();
         let watchlist = read_pages(&client, &format!("{root}/watchlist"), max_pages).await.unwrap_or_default();
         let mut out = vec![
-            Section { name: "İzledikleri".into(), kind: "watched".into(), url: format!("{root}/films/"), films: watched },
-            Section { name: "Beğendikleri".into(), kind: "liked".into(), url: format!("{root}/likes/films/"), films: liked },
-            Section { name: "İzleme listesi".into(), kind: "watchlist".into(), url: format!("{root}/watchlist/"), films: watchlist },
+            Section { name: tr!("İzledikleri", "Watched"), kind: "watched".into(), url: format!("{root}/films/"), films: watched },
+            Section { name: tr!("Beğendikleri", "Liked"), kind: "liked".into(), url: format!("{root}/likes/films/"), films: liked },
+            Section { name: tr!("İzleme listesi", "Watchlist"), kind: "watchlist".into(), url: format!("{root}/watchlist/"), films: watchlist },
         ];
         for (name, url) in user_lists(&client, user).await.into_iter().take(30) {
             if let Ok(films) = read_pages(&client, &url, max_pages.min(20)).await {
@@ -167,11 +167,11 @@ pub async fn read(url: &str, max_pages: u32) -> Result<Vec<Section>, String> {
         return Ok(out);
     }
     let films = read_pages(&client, &clean, max_pages).await?;
-    let (name, kind) = if clean.contains("/watchlist") { ("İzleme listesi", "watchlist") }
-        else if clean.contains("/likes/") { ("Beğendikleri", "liked") }
-        else if clean.contains("/list/") { ("Liste", "list") }
-        else { ("İzledikleri", "watched") };
-    Ok(vec![Section { name: name.into(), kind: kind.into(), url: format!("{clean}/"), films }])
+    let (name, kind) = if clean.contains("/watchlist") { (tr!("İzleme listesi", "Watchlist"), "watchlist") }
+        else if clean.contains("/likes/") { (tr!("Beğendikleri", "Liked"), "liked") }
+        else if clean.contains("/list/") { (tr!("Liste", "List"), "list") }
+        else { (tr!("İzledikleri", "Watched"), "watched") };
+    Ok(vec![Section { name, kind: kind.into(), url: format!("{clean}/"), films }])
 }
 
 #[cfg(test)]

@@ -1,3 +1,19 @@
+/// Messages in the UI language: `tr!("Türkçe {}", "English {}", arg)` (English unless the UI is Turkish).
+#[macro_export]
+macro_rules! tr {
+    ($t:literal, $e:literal $(, $a:expr)* $(,)?) => {
+        if $crate::is_tr() { format!($t $(, $a)*) } else { format!($e $(, $a)*) }
+    };
+}
+static UI_TR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn is_tr() -> bool {
+    UI_TR.load(std::sync::atomic::Ordering::Relaxed)
+}
+#[tauri::command]
+fn set_lang(lang: String) {
+    UI_TR.store(lang == "tr", std::sync::atomic::Ordering::Relaxed);
+}
+
 mod files;
 mod preview;
 mod fonts;
@@ -159,12 +175,12 @@ async fn gemini(key: String, model: String, body: Value) -> Result<Value, String
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("Gemini'ye bağlanılamadı: {e}"))?;
+        .map_err(|e| tr!("Gemini'ye bağlanılamadı: {}", "Couldn't reach Gemini: {}", e))?;
     let status = res.status();
     let v: Value = res.json().await.map_err(|e| e.to_string())?;
     if !status.is_success() {
         let msg = v["error"]["message"].as_str().unwrap_or("bilinmeyen hata");
-        return Err(format!("Gemini hatası ({status}): {msg}"));
+        return Err(tr!("Gemini hatası ({}): {}", "Gemini error ({}): {}", status, msg));
     }
     Ok(v)
 }
@@ -184,7 +200,7 @@ async fn gemini_models(key: String) -> Result<Vec<(String, String)>, String> {
         }
         let v: Value = req.send().await.map_err(|e| e.to_string())?.json().await.map_err(|e| e.to_string())?;
         if let Some(msg) = v["error"]["message"].as_str() {
-            return Err(format!("Gemini hatası: {msg}"));
+            return Err(tr!("Gemini hatası: {}", "Gemini error: {}", msg));
         }
         for m in v["models"].as_array().into_iter().flatten() {
             let chat = m["supportedGenerationMethods"].as_array().is_some_and(|a| a.iter().any(|x| x == "generateContent"));
@@ -278,7 +294,7 @@ async fn subs_window(app: AppHandle, show: bool) -> Result<(), String> {
             }
             let w = tauri::WebviewWindowBuilder::new(&app, "subs", tauri::WebviewUrl::App("index.html?subs=1".into()))
                 .additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling")
-                .title("Luna altyazı")
+                .title("Luna subtitles")
                 .transparent(true)
                 .decorations(false)
                 .shadow(false)
@@ -477,10 +493,10 @@ async fn fetch_page_text(url: String) -> Result<String, String> {
     }
     let mut out = String::new();
     for (i, u) in pages.iter().enumerate() {
-        let res = client.get(u).header("Accept-Language", "tr,en;q=0.8").send().await.map_err(|e| format!("Sayfa açılamadı: {e}"))?;
+        let res = client.get(u).header("Accept-Language", "tr,en;q=0.8").send().await.map_err(|e| tr!("Sayfa açılamadı: {}", "Couldn't open the page: {}", e))?;
         if !res.status().is_success() {
             if i == 0 {
-                return Err(format!("Sayfa açılamadı ({})", res.status()));
+                return Err(tr!("Sayfa açılamadı ({})", "Couldn't open the page ({})", res.status()));
             }
             break;
         }
@@ -624,6 +640,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            set_lang,
             mpv_command,
             startup_file,
             find_subtitles,

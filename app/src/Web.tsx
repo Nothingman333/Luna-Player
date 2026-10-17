@@ -1,4 +1,5 @@
 // Web search through the user's own plugins (indexer definitions run inside Luna).
+import { tt } from "./i18n";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -70,16 +71,16 @@ export function WebResults({ query, onStream, onDownload }: {
 
   return (
     <section className="row web-results">
-      <h2>Web'de bulunanlar <span className="muted small">{state.busy ? "aranıyor…" : state.hits.length}</span>
+      <h2>{tt("Web'de bulunanlar")} <span className="muted small">{state.busy ? tt("aranıyor…") : state.hits.length}</span>
         {state.errors.length > 0 && !state.busy && (
-          <button className="chip warn-chip" onClick={() => setShowErr((v) => !v)}>{state.errors.length} eklenti hata verdi</button>
+          <button className="chip warn-chip" onClick={() => setShowErr((v) => !v)}>{state.errors.length}  {tt("eklenti hata verdi")}</button>
         )}
       </h2>
       {showErr && (
         <div className="web-errors">{state.errors.map(([p, e], i) => <div key={i}><b>{p || "Arama"}</b>: {e}</div>)}</div>
       )}
-      {state.busy && !state.hits.length && <div className="web-loading"><span className="dlp-spin" /> {active.length} eklentide aranıyor…</div>}
-      {!state.busy && !state.hits.length && <div className="muted empty-note">Web'de sonuç bulunamadı.</div>}
+      {state.busy && !state.hits.length && <div className="web-loading"><span className="dlp-spin" /> {active.length}  {tt("eklentide aranıyor…")}</div>}
+      {!state.busy && !state.hits.length && <div className="muted empty-note">{tt("Web'de sonuç bulunamadı.")}</div>}
       <div className="web-list">
         {state.hits.slice(0, 60).map((h, i) => (
           <div key={i} className="web-row">
@@ -95,8 +96,8 @@ export function WebResults({ query, onStream, onDownload }: {
             </div>
             {resolving === h.title ? <span className="dlp-spin" /> : (
               <>
-                <button className="ghost sm" onClick={() => go(h, false)} title="Sadece indir"><Icon d={I.down} size={16} /> İndir</button>
-                <button className="primary sm" onClick={() => go(h, true)}><Icon d={I.play} fill size={14} /> İndirerek izle</button>
+                <button className="ghost sm" onClick={() => go(h, false)} title={tt("Sadece indir")}><Icon d={I.down} size={16} />  {tt("İndir")}</button>
+                <button className="primary sm" onClick={() => go(h, true)}><Icon d={I.play} fill size={14} />  {tt("İndirerek izle")}</button>
               </>
             )}
           </div>
@@ -114,7 +115,7 @@ export function PluginSettings() {
   const [err, setErr] = useState("");
 
   const add = async () => {
-    const files = await open({ multiple: true, filters: [{ name: "Eklenti tanımı", extensions: ["yml", "yaml"] }] });
+    const files = await open({ multiple: true, filters: [{ name: tt("Eklenti tanımı"), extensions: ["yml", "yaml"] }] });
     if (!files) return;
     setErr("");
     try { await invoke("plugins_add", { paths: Array.isArray(files) ? files : [files] }); }
@@ -128,35 +129,35 @@ export function PluginSettings() {
   };
   const remove = async (f: string) => { await invoke("plugins_remove", { file: f }).catch(() => {}); refresh(); };
   const test = async (p: PluginInfo) => {
-    setMsg((m) => ({ ...m, [p.file]: "Deneniyor…" }));
+    setMsg((m) => ({ ...m, [p.file]: tt("Deneniyor…") }));
     try {
       const hits = await invoke<Hit[]>("plugin_test", { file: p.file, query: "the" });
-      setMsg((m) => ({ ...m, [p.file]: hits.length ? `Çalışıyor · ${hits.length} sonuç (ör. “${hits[0].title.slice(0, 50)}”)` : "Bağlandı ama sonuç gelmedi" }));
+      setMsg((m) => ({ ...m, [p.file]: hits.length ? tt("Çalışıyor · {0} sonuç (ör. “{1}”)", hits.length, hits[0].title.slice(0, 50)) : tt("Bağlandı ama sonuç gelmedi") }));
     } catch (e) {
-      setMsg((m) => ({ ...m, [p.file]: "Hata: " + String(e) }));
+      setMsg((m) => ({ ...m, [p.file]: tt("Hata: ") + String(e) }));
     }
   };
 
   return (
     <div className="field">
-      <span>Arama eklentileri (web'de bulunanlar)</span>
+      <span>{tt("Arama eklentileri (web'de bulunanlar)")}</span>
       <div className="plugins">
-        {!list.length && <div className="muted small">Eklenti yok. Jackett biçimindeki (Cardigann) <code>.yml</code> tanım dosyalarını ekleyebilirsin; arama kutusunda “Web'de bulunanlar” bölümü açılır.</div>}
+        {!list.length && <div className="muted small">{tt("Eklenti yok. Jackett biçimindeki (Cardigann)")} <code>{tt(".yml")}</code>  {tt("tanım dosyalarını ekleyebilirsin; arama kutusunda “Web'de bulunanlar” bölümü açılır.")}</div>}
         {list.map((p) => (
           <div key={p.file} className={"plugin" + (p.error ? " broken" : "")}>
             <label className="look-check">
               <input type="checkbox" checked={!p.error && !off.includes(p.file)} disabled={!!p.error} onChange={() => toggle(p.file)} />
               <b>{p.name}</b>
             </label>
-            <span className="muted small ellipsis">{p.error ?? p.site}{p.login ? " · giriş gerektiriyor (desteklenmiyor)" : ""}</span>
+            <span className="muted small ellipsis">{p.error ?? p.site}{p.login ? tt(" · giriş gerektiriyor (desteklenmiyor)") : ""}</span>
             <span className="grow" />
-            {!p.error && <button className="chip" onClick={() => test(p)}>Dene</button>}
-            <button className="round sm-round" aria-label="Sil" title="Sil" onClick={() => remove(p.file)}><Icon d={I.x} size={14} /></button>
+            {!p.error && <button className="chip" onClick={() => test(p)}>{tt("Dene")}</button>}
+            <button className="round sm-round" aria-label={tt("Sil")} title={tt("Sil")} onClick={() => remove(p.file)}><Icon d={I.x} size={14} /></button>
             {msg[p.file] && <div className="plugin-msg small">{msg[p.file]}</div>}
           </div>
         ))}
         {err && <div className="plugin-msg small err">{err}</div>}
-        <button className="chip" onClick={add}><Icon d={I.plus} size={14} /> Eklenti ekle (.yml)</button>
+        <button className="chip" onClick={add}><Icon d={I.plus} size={14} />  {tt("Eklenti ekle (.yml)")}</button>
       </div>
     </div>
   );

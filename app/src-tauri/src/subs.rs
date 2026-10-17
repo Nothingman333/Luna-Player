@@ -79,12 +79,12 @@ async fn request(http: &reqwest::Client, key: &str, params: &[(&str, String)]) -
         .query(params)
         .send()
         .await
-        .map_err(|e| format!("OpenSubtitles'a ulaşılamadı: {e}"))?;
+        .map_err(|e| tr!("OpenSubtitles'a ulaşılamadı: {}", "Couldn't reach OpenSubtitles: {}", e))?;
     match res.status().as_u16() {
         200 => {}
-        401 | 403 => return Err("OpenSubtitles API anahtarı geçersiz".into()),
-        429 => return Err("OpenSubtitles çok fazla istek dedi, biraz sonra tekrar dene".into()),
-        s => return Err(format!("OpenSubtitles arama hatası ({s})")),
+        401 | 403 => return Err(tr!("OpenSubtitles API anahtarı geçersiz", "The OpenSubtitles API key is invalid")),
+        429 => return Err(tr!("OpenSubtitles çok fazla istek dedi, biraz sonra tekrar dene", "OpenSubtitles says too many requests; try again a bit later")),
+        s => return Err(tr!("OpenSubtitles arama hatası ({})", "OpenSubtitles search error ({})", s)),
     }
     let v: Value = res.json().await.map_err(|e| e.to_string())?;
     Ok(v["data"].as_array().cloned().unwrap_or_default())
@@ -161,9 +161,9 @@ pub async fn download(video: &str, key: &str, hit_id: i64, language: &str, cache
     let dl: Value = res.json().await.unwrap_or(Value::Null);
     let Some(link) = dl["link"].as_str() else {
         return Err(match status {
-            406 | 429 => "Bugünkü ücretsiz indirme hakkın doldu (OpenSubtitles sınırı)".into(),
-            401 | 403 => "OpenSubtitles API anahtarı geçersiz".into(),
-            _ => dl["message"].as_str().unwrap_or("İndirme reddedildi").to_string(),
+            406 | 429 => tr!("Bugünkü ücretsiz indirme hakkın doldu (OpenSubtitles sınırı)", "You've used today's free downloads (OpenSubtitles limit)"),
+            401 | 403 => tr!("OpenSubtitles API anahtarı geçersiz", "The OpenSubtitles API key is invalid"),
+            _ => dl["message"].as_str().map(str::to_string).unwrap_or_else(|| tr!("İndirme reddedildi", "Download refused")),
         });
     };
     let bytes = http
@@ -197,7 +197,7 @@ pub async fn download(video: &str, key: &str, hit_id: i64, language: &str, cache
 /// Automatic mode: best result, downloaded.
 pub async fn find(video: &str, key: &str, langs: &str, q: Query, cache: PathBuf) -> Result<Found, String> {
     let hits = search(video, key, langs, q).await?;
-    let best = hits.first().ok_or("Altyazı bulunamadı")?;
+    let best = hits.first().ok_or(tr!("Altyazı bulunamadı", "No subtitles found"))?;
     let file = download(video, key, best.file_id, &best.language, cache).await?;
     Ok(Found { file, language: best.language.clone(), release: best.release.clone(), hash_match: best.hash_match })
 }
