@@ -10,6 +10,7 @@ export const setLang = (l: Lang) => {
   window.location.reload();
 };
 const isTr = lang() === "tr";
+try { document.documentElement.lang = isTr ? "tr" : "en"; } catch {}
 /** Locale for numbers, dates and TMDB requests. */
 export const locale = () => (isTr ? "tr-TR" : "en-US");
 

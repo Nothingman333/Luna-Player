@@ -38,14 +38,16 @@ function Row({ state, title, text, action }: { state: State; title: string; text
 
 export function Setup({ onDone }: { onDone: () => void }) {
   const [c, setC] = useState<SysCheck | null>(null);
+  const [failed, setFailed] = useState(false);
   const [n, setN] = useState(0);
   const [keys, setKeys] = useState<Record<string, string>>(() => Object.fromEntries(KEYS.map((k) => [k.id, store.get(k.id) ?? ""])));
   useEffect(() => {
-    setC(null);
-    invoke<SysCheck>("system_check").then(setC).catch(() => setC({ mpv: false, vulkan: false, gpus: [], lossless: false, webview: null }));
+    setC(null); setFailed(false);
+    // if the check itself can't run, say so instead of marking everything missing
+    invoke<SysCheck>("system_check").then(setC).catch(() => setFailed(true));
   }, [n]);
   const setKey = (id: string, v: string) => { setKeys((k) => ({ ...k, [id]: v })); store.set(id, v.trim()); };
-  const st = (ok: boolean | undefined, optional = false): State => (c == null ? "wait" : ok ? "ok" : optional ? "optional" : "missing");
+  const st = (ok: boolean | undefined, optional = false): State => (failed ? "optional" : c == null ? "wait" : ok ? "ok" : optional ? "optional" : "missing");
   const drv = driverLink(c?.gpus ?? []);
   const blocking = c != null && (!c.mpv || !c.vulkan);
   const done = () => { store.set("setupDone", "1"); onDone(); };
@@ -65,14 +67,15 @@ export function Setup({ onDone }: { onDone: () => void }) {
         <h1>{tt("Luna'yı hazırlayalım")}</h1>
         <p className="su-lead">{tt("Bu bilgisayarda gerekenleri kontrol ettim. Eksik olan varsa yanındaki bağlantı indirme sayfasını tarayıcında açar.")}</p>
 
+        {failed && <div className="su-row missing"><div className="su-ic">!</div><div className="su-txt"><b>{tt("Kontrol yapılamadı")}</b><span>{tt("Luna bu bilgisayarı kontrol edemedi. Videolar açılıyorsa sorun yok; devam edebilirsin.")}</span></div></div>}
         <h3>{tt("Gerekenler")}</h3>
         <Row state={st(c?.mpv)} title={tt("Video motoru (mpv)")}
           text={c?.mpv === false ? tt("Luna ile gelen video motoru çalışmadı. Luna'yı yeniden indirip kurmak bunu düzeltir.") : tt("Luna ile birlikte geliyor; neredeyse her video biçimini oynatır.")}
           action={c?.mpv === false ? { label: tt("Luna'yı indir"), url: "https://github.com/Nothingman333/Luna-Player/releases/latest" } : undefined} />
         <Row state={st(c?.vulkan)} title={tt("Ekran kartı sürücüsü")}
-          text={c?.vulkan === false ? tt("Video oynatmak için güncel bir ekran kartı sürücüsü (Vulkan) gerekiyor. Kurduktan sonra bilgisayarı yeniden başlat.") : c?.gpus.length ? c.gpus.join(" · ") : tt("Kontrol ediliyor…")}
+          text={failed ? "" : c?.vulkan === false ? tt("Video oynatmak için güncel bir ekran kartı sürücüsü (Vulkan) gerekiyor. Kurduktan sonra bilgisayarı yeniden başlat.") : c?.gpus.length ? c.gpus.join(" · ") : tt("Kontrol ediliyor…")}
           action={c?.vulkan === false ? { label: tt("{0} sürücüsünü indir", drv.name), url: drv.url } : undefined} />
-        <Row state={st(!!c?.webview)} title={tt("Arayüz (WebView2)")} text={c?.webview ? tt("Sürüm {0}", c.webview) : tt("Kontrol ediliyor…")} />
+        <Row state={st(!!c?.webview)} title={tt("Arayüz (WebView2)")} text={c?.webview ? tt("Sürüm {0}", c.webview) : failed ? "" : tt("Kontrol ediliyor…")} />
 
         <h3>{tt("İsteğe bağlı")}</h3>
         <Row state={st(c?.lossless, true)} title="Lossless Scaling"

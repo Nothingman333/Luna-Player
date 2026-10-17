@@ -36,6 +36,43 @@ fn mpv_exe(app: &AppHandle) -> PathBuf {
     mpv::mpv_exe(app.path().resource_dir().ok())
 }
 
+/// What the first-run check shows: is everything Luna needs on this computer?
+#[derive(serde::Serialize)]
+struct SysCheck {
+    /// The bundled mpv is there and starts.
+    mpv: bool,
+    /// Vulkan loader from the graphics driver (mpv needs it to start).
+    vulkan: bool,
+    /// Graphics cards, to point at the right driver download.
+    gpus: Vec<String>,
+    /// Lossless Scaling (optional, for the upscaler).
+    lossless: bool,
+    webview: Option<String>,
+}
+
+#[tauri::command]
+async fn system_check(app: AppHandle) -> Result<SysCheck, String> {
+    use std::os::windows::process::CommandExt;
+    const NO_WINDOW: u32 = 0x0800_0000;
+    let exe = mpv_exe(&app);
+    blocking(move || {
+        let sys = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        let vulkan = PathBuf::from(&sys).join("System32").join("vulkan-1.dll").exists();
+        let com = exe.with_extension("com");
+        let mpv = exe.exists()
+            && std::process::Command::new(if com.exists() { &com } else { &exe })
+                .arg("--version").creation_flags(NO_WINDOW).output()
+                .map(|o| o.status.success()).unwrap_or(false);
+        let gpus = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", "(Get-CimInstance Win32_VideoController).Name"])
+            .creation_flags(NO_WINDOW).output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+            .unwrap_or_default();
+        Ok(SysCheck { mpv, vulkan, gpus, lossless: upscaler::exe_path().is_some(), webview: tauri::webview_version().ok() })
+    })
+    .await
+}
+
 async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
@@ -641,6 +678,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             set_lang,
+            system_check,
             mpv_command,
             startup_file,
             find_subtitles,

@@ -829,4 +829,6 @@ export const EN: Record<string, string> = {
   "Yine de devam et": "Continue anyway",
   "Devam": "Continue",
   "Sistem kontrolü": "System check",
+  "Kontrol yapılamadı": "Couldn't run the check",
+  "Luna bu bilgisayarı kontrol edemedi. Videolar açılıyorsa sorun yok; devam edebilirsin.": "Luna couldn't check this computer. If videos play, everything is fine; you can continue.",
 };
