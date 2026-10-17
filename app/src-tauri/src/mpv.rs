@@ -1,0 +1,142 @@
+//! mpv runs as a child process drawing into our window (`--wid`), driven over
+//! its JSON IPC named pipe. Every mpv event is forwarded to the UI as `mpv`.
+
+use serde_json::{json, Value};
+use std::os::windows::process::CommandExt;
+use std::path::PathBuf;
+use std::process::{Child, Command};
+use std::sync::Mutex;
+use tauri::{AppHandle, Emitter};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::windows::named_pipe::ClientOptions;
+use tokio::sync::mpsc;
+
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+pub struct Mpv {
+    tx: mpsc::UnboundedSender<Value>,
+    child: Mutex<Option<Child>>,
+}
+
+impl Mpv {
+    pub fn command(&self, args: Value) {
+        let _ = self.tx.send(json!({ "command": args }));
+    }
+
+    pub fn kill(&self) {
+        if let Some(mut c) = self.child.lock().unwrap().take() {
+            let _ = c.kill();
+        }
+    }
+}
+
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn FindWindowExW(parent: isize, after: isize, class: *const u16, title: *const u16) -> isize;
+    fn EnableWindow(hwnd: isize, enable: i32) -> i32;
+}
+
+fn disable_child(parent: isize) -> bool {
+    let class: Vec<u16> = "mpv\0".encode_utf16().collect();
+    let child = unsafe { FindWindowExW(parent, 0, class.as_ptr(), std::ptr::null()) };
+    if child == 0 {
+        return false;
+    }
+    unsafe { EnableWindow(child, 0) };
+    true
+}
+
+pub fn mpv_exe(resource_dir: Option<PathBuf>) -> PathBuf {
+    if let Some(dir) = resource_dir {
+        let p = dir.join("mpv").join("mpv.exe");
+        if p.exists() {
+            return p;
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("mpv").join("mpv.exe")
+}
+
+/// Starts mpv idle inside `hwnd` so that opening a file later is instant.
+pub fn start(app: AppHandle, exe: PathBuf, hwnd: isize, fonts: PathBuf) -> Mpv {
+    let pipe = format!(r"\\.\pipe\modernplayer-{}", std::process::id());
+    let child = Command::new(&exe)
+        .arg(format!("--sub-fonts-dir={}", fonts.display()))
+        .args([
+            format!("--wid={hwnd}"),
+            format!("--input-ipc-server={pipe}"),
+            "--idle=yes".into(),
+            "--force-window=yes".into(),
+            "--keep-open=yes".into(),
+            "--osc=no".into(),
+            "--osd-level=0".into(),
+            "--input-default-bindings=no".into(),
+            "--input-vo-keyboard=no".into(),
+            "--cursor-autohide=no".into(),
+            // 4K/HDR: GPU decoding, modern renderer, HDR passthrough on HDR
+            // screens and tone mapping to SDR everywhere else.
+            "--hwdec=auto-safe".into(),
+            "--vo=gpu-next".into(),
+            "--gpu-api=d3d11".into(),
+            "--target-colorspace-hint=yes".into(),
+            "--tone-mapping=auto".into(),
+            "--hdr-compute-peak=yes".into(),
+            "--sub-auto=fuzzy".into(),
+            "--slang=tr,tur,en,eng".into(),
+            // Newer mpv defaults to a light-grey checkerboard behind the picture; use black bars.
+            "--background=color".into(),
+            "--background-color=#000000".into(),
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .ok();
+
+    let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
+
+    tauri::async_runtime::spawn(async move {
+        // mpv needs a moment to create the pipe.
+        let client = loop {
+            match ClientOptions::new().open(&pipe) {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(15)).await,
+            }
+        };
+        let (read, mut write) = tokio::io::split(client);
+
+        tauri::async_runtime::spawn(async move {
+            while let Some(msg) = rx.recv().await {
+                if write.write_all(format!("{msg}\n").as_bytes()).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        // mpv's video window must never take keyboard focus or clicks from the UI.
+        for _ in 0..200 {
+            if disable_child(hwnd) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+
+        let _ = app.emit("mpv-ready", ());
+        let mut lines = BufReader::new(read).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            if let Ok(v) = serde_json::from_str::<Value>(&line) {
+                if v.get("event").is_some() {
+                    if v["name"] == "sub-text" {
+                        crate::forward_sub_text(&app, v["data"].as_str().unwrap_or(""));
+                    } else if v["name"] == "time-pos" {
+                        crate::pgs::set_time(v["data"].as_f64().unwrap_or(0.0));
+                        crate::forward_pgs(&app);
+                    } else if v["name"] == "sub-delay" {
+                        crate::pgs::set_delay(v["data"].as_f64().unwrap_or(0.0));
+                        crate::forward_pgs(&app);
+                    }
+                    let _ = app.emit("mpv", v);
+                }
+            }
+        }
+    });
+
+    Mpv { tx, child: Mutex::new(child) }
+}

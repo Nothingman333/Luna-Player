@@ -1,0 +1,9 @@
+node_modules/
+app/dist/
+app/src-tauri/target/
+app/src-tauri/gen/
+app/src-tauri/mpv/
+dist-share/
+*.exe
+luna-restore.json*
+.claude/

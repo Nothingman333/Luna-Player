@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Luna mock</title>
+    <script>
+      // Dev-only stand-in for the Tauri bridge so the UI can be exercised in a plain browser.
+      try {
+        if (!localStorage.getItem("mock3")) {
+          localStorage.clear();
+          localStorage.setItem("mock3", "1");
+          localStorage.setItem("recent", JSON.stringify([
+            { path: "C:/m/The.Matrix.Reloaded.2003.mkv", title: "The Matrix Reloaded", time: 600, duration: 8000 },
+            { path: "C:/m/Dune.Part.Two.2024.2160p.mkv", title: "Dune Part Two", time: 3000, duration: 9900 },
+            { path: "C:/m/Paprika.2006.mkv", title: "Paprika", time: 200, duration: 5400 },
+          ]));
+          localStorage.setItem("pinned", JSON.stringify(["C:/m/Inception.2010.mkv", "C:/m/Arrival.2016.mkv", "C:/m/Blade.Runner.2049.2017.mkv", "C:/m/Severance.S01E01.mkv", "C:/m/Severance.S01E02.mkv"]));
+        }
+        localStorage.setItem("geminiKey", "x");
+      } catch {}
+      let cb = 0;
+      window.__TAURI_INTERNALS__ = {
+        metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
+        transformCallback: () => ++cb,
+        convertFileSrc: (p) => p,
+        invoke: async (cmd, args) => {
+          console.log("invoke", cmd);
+          if (cmd === "plugin:window|is_fullscreen" || cmd === "plugin:window|is_maximized") return false;
+          if (cmd.startsWith("plugin:event|listen")) return cb;
+          if (cmd === "plugins_list" || cmd === "fonts_list" || cmd === "torrent_list" || cmd === "scan_folders") return [];
+          if (cmd === "paths_exist") return args.paths.map((p) => !p.includes("Arrival"));
+          if (cmd === "gemini") return { candidates: [{ content: { parts: [{ text: "Serinin ikinci filmi.\n>> Üçüncüsü hangisi | Benzer filmler" }] } }] };
+          return null;
+        },
+      };
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

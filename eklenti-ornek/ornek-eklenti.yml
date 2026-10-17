@@ -1,0 +1,47 @@
+# Luna Player arama eklentisi şablonu (Jackett "Cardigann" biçimi).
+# Bu dosya hiçbir gerçek siteye bağlı değildir; kendi kaynağına göre doldur.
+# Luna bu tarifle aramayı kendi içinde yapar; kod çalıştırmaz.
+
+id: ornek
+name: Örnek kaynak
+links:
+  - https://site.example/          # sitenin ana adresi
+
+search:
+  paths:
+    - path: search                 # arama sayfası (ana adrese eklenir)
+      # method: post               # form ile arama gerekiyorsa
+      # response: { type: json }   # site JSON döndürüyorsa
+  inputs:
+    q: "{{ .Keywords }}"           # aranan kelime -> ?q=...
+  keywordsfilters:
+    - name: tolower
+
+  # HTML için: her sonuç satırının CSS seçicisi
+  rows:
+    selector: table.results tr.item
+    # JSON için: selector: data.items   (alt dizi varsa: attribute: files)
+
+  fields:
+    title:
+      selector: a.title
+    details:                       # detay sayfası (magnet orada ise)
+      selector: a.title
+      attribute: href
+    magnet:                        # listede magnet varsa
+      selector: a[href^="magnet:"]
+      attribute: href
+      optional: true
+    # infohash: { selector: td.hash }   # sadece hash veriliyorsa Luna magnet'i kendisi oluşturur
+    size:
+      selector: td.size
+    seeders:
+      selector: td.seeders
+    leechers:
+      selector: td.leechers
+
+# Magnet sadece detay sayfasındaysa:
+download:
+  selectors:
+    - selector: a[href^="magnet:"]
+      attribute: href
