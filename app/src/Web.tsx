@@ -47,13 +47,14 @@ export function WebResults({ query, onStream, onDownload }: {
 
   useEffect(() => {
     if (q.length < 2 || !active.length) return;
+    let alive = true;
     setState((s) => ({ ...s, busy: true }));
     const t = setTimeout(() => {
       invoke<{ hits: Hit[]; errors: [string, string][] }>("web_search", { query: q, disabled: disabledList() })
-        .then((r) => setState({ q, hits: r.hits, errors: r.errors, busy: false }))
-        .catch((e) => setState({ q, hits: [], errors: [["", String(e)]], busy: false }));
+        .then((r) => alive && setState({ q, hits: r.hits, errors: r.errors, busy: false }))
+        .catch((e) => alive && setState({ q, hits: [], errors: [["", String(e)]], busy: false }));
     }, 700);
-    return () => clearTimeout(t);
+    return () => { alive = false; clearTimeout(t); };
   }, [q, active.length]);
 
   if (!active.length || q.length < 2) return null;

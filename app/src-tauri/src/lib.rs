@@ -96,6 +96,14 @@ fn sub_cache(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app.path().app_cache_dir().map_err(|e| e.to_string())?.join("subtitles"))
 }
 
+/// Release sample clips ("movie-sample.mkv", "Sample/clip.mkv"), not films that merely have "sample" somewhere in their path.
+fn is_sample(p: &std::path::Path) -> bool {
+    let word = |s: &str| s.to_lowercase().split(|c: char| !c.is_alphanumeric()).any(|w| w == "sample");
+    let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let parent = p.parent().and_then(|d| d.file_name()).map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+    word(&stem) || parent == "sample" || parent == "samples"
+}
+
 #[tauri::command]
 async fn find_subtitles(
     app: AppHandle,
@@ -141,7 +149,7 @@ fn walk(dir: &std::path::Path, out: &mut Vec<String>, depth: u32) {
             if depth < 6 {
                 walk(&p, out, depth + 1);
             }
-        } else if files::is_video(&p) && !p.to_string_lossy().to_lowercase().contains("sample") {
+        } else if files::is_video(&p) && !is_sample(&p) {
             out.push(p.to_string_lossy().into_owned());
         }
     }
@@ -742,4 +750,16 @@ pub fn run() {
             preview::shutdown();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    #[test]
+    fn samples_only() {
+        assert!(super::is_sample(Path::new(r"D:\Films\Movie.2010\movie-sample.mkv")));
+        assert!(super::is_sample(Path::new(r"D:\Films\Movie.2010\Sample\clip.mkv")));
+        assert!(!super::is_sample(Path::new(r"D:\Sample Collection\Inception.2010.mkv")));
+        assert!(!super::is_sample(Path::new(r"D:\Films\Samplers.2019.mkv")));
+    }
 }

@@ -8,6 +8,7 @@ import "@fontsource/ibm-plex-sans/400.css";
 import "@fontsource/ibm-plex-sans/500.css";
 import "@fontsource/ibm-plex-sans/600.css";
 import App from "./App";
+import { loadedLang } from "./i18n";
 import { SubsOverlay } from "./Upscaler";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -51,6 +52,8 @@ async function restore() {
 (async () => {
   if (!isSubs) {
     await restore();
+    // a restored backup can carry another language than the one the texts were loaded in
+    if (localStorage.getItem("lang") === "tr" ? loadedLang !== "tr" : loadedLang !== "en") { location.reload(); return; }
     invoke("set_lang", { lang: localStorage.getItem("lang") === "tr" ? "tr" : "en" }).catch(() => {});
     try { localStorage.setItem("lunaMark", "1"); } catch {}
     setInterval(snapshot, 20000);

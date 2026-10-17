@@ -189,7 +189,14 @@ pub async fn download(video: &str, key: &str, hit_id: i64, language: &str, cache
         return Ok(beside.to_string_lossy().into_owned());
     }
     std::fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
-    let p = cache.join(&name);
+    // the cache is shared by every video, so the name carries which video it belongs to
+    let id = {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        video.to_lowercase().hash(&mut h);
+        h.finish()
+    };
+    let p = cache.join(format!("{id:016x}-{name}"));
     std::fs::write(&p, &bytes).map_err(|e| e.to_string())?;
     Ok(p.to_string_lossy().into_owned())
 }

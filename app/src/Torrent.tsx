@@ -15,7 +15,7 @@ export type TorrentStat = {
 export type Added = { id: number; name: string; videoIdx: number | null; url: string | null; localPath: string | null;
   files: { idx: number; name: string; len: number }[] };
 
-export const isTorrentSource = (s: string) => /^magnet:\?/i.test(s.trim()) || /\.torrent$/i.test(s.trim());
+export const isTorrentSource = (s: string) => /^magnet:\?/i.test(s.trim()) || /\.torrent([?#]|$)/i.test(s.trim());
 
 export async function downloadDir(): Promise<string> {
   return store.get("dlDir") || (await invoke<string | null>("downloads_dir")) || "C:\\";

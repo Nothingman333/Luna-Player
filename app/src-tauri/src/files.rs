@@ -188,6 +188,20 @@ pub fn reveal(file: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// `name` (lower case) is a subtitle of the video `stem`: "stem.srt" or "stem.<language / tags>.srt",
+/// where the tags are language codes, numbers or forced / sdh / hi / cc.
+fn is_own_sub(name: &str, stem: &str) -> bool {
+    let Some(rest) = name.strip_prefix(stem) else { return false };
+    let Some(rest) = rest.strip_prefix('.') else { return false };
+    let mut parts: Vec<&str> = rest.split('.').collect();
+    parts.pop(); // the extension
+    parts.iter().all(|t| {
+        let lang = (2..=3).contains(&t.len()) && t.chars().all(|c| c.is_ascii_alphabetic())
+            || t.len() == 5 && t.as_bytes()[2] == b'-' && t.chars().filter(|c| *c != '-').all(|c| c.is_ascii_alphabetic());
+        lang || t.chars().all(|c| c.is_ascii_digit()) || ["forced", "sdh", "hi", "cc", "default", "full"].contains(t)
+    })
+}
+
 /// Moves the video (and its matching subtitle files) to the Recycle Bin.
 pub fn delete(file: &str) -> Result<u32, String> {
     let p = Path::new(file);
@@ -200,7 +214,7 @@ pub fn delete(file: &str) -> Result<u32, String> {
                 let is_sub = ["srt", "ass", "ssa", "vtt", "sub", "idx"]
                     .iter()
                     .any(|x| n.ends_with(&format!(".{x}")));
-                if is_sub && n.starts_with(&stem.to_lowercase()) {
+                if is_sub && is_own_sub(&n, &stem.to_lowercase()) {
                     items.push(q);
                 }
             }
@@ -209,4 +223,18 @@ pub fn delete(file: &str) -> Result<u32, String> {
     let n = items.len() as u32;
     trash::delete_all(&items).map_err(|e| e.to_string())?;
     Ok(n)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_own_sub;
+    #[test]
+    fn own_subtitles_only() {
+        for n in ["alien.srt", "alien.en.srt", "alien.tr.forced.srt", "alien.en.2.srt", "alien.pt-br.srt"] {
+            assert!(is_own_sub(n, "alien"), "{n}");
+        }
+        for n in ["aliens.en.srt", "alien.covenant.tr.srt", "alien resurrection.srt", "alien3.srt"] {
+            assert!(!is_own_sub(n, "alien"), "{n}");
+        }
+    }
 }

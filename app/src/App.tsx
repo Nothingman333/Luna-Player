@@ -776,12 +776,16 @@ export default function App() {
     const dur = r?.duration || store.json<{ duration: number } | null>("info:" + path, null)?.duration || 1;
     const entry = { path, title: r?.title ?? path.split(/[\\/]/).pop()!, time: watched ? dur : 0, duration: dur };
     setRecentList(watched ? [entry, ...list.filter((x) => x.path !== path)] : list.filter((x) => x.path !== path));
+    setFinished([path], watched);
   };
   const addSubtitle = (path: string) => setSubDlg(path);
   const attachSubtitle = (path: string, file: string, label: string) => {
     setSubDlg(null);
     store.set("extSub:" + path, file);
     store.set("hasSub:" + path, "1");
+    const pref = store.json<TrackPref>("trk:" + path, {});
+    pref.sidExt = file; delete pref.sid;
+    store.set("trk:" + path, JSON.stringify(pref));
     if (s.path === path) {
       mpv("sub-add", file, "select");
       flash(tt("Altyazı yüklendi · {0}", label), "ok");
@@ -802,7 +806,7 @@ export default function App() {
   };
   const menuEntries = (t: Target): MenuEntry[] => {
     const r = recent.find((x) => x.path === t.path);
-    const watched = pct(r) > 92;
+    const watched = pct(r) > 92 || isFinished(t.path);
     return [
       { label: r && !watched ? tt("Devam et") : tt("Oynat"), act: () => load(t.path) },
       ...(r && !watched ? [{ label: tt("Baştan oynat"), act: () => load(t.path, true) }] : []),

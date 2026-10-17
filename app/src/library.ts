@@ -150,7 +150,7 @@ export async function details(kind: "movie" | "tv", id: number): Promise<Meta> {
 }
 
 export async function seasonEpisodes(tvId: number, season: number): Promise<Episode[]> {
-  const k = `season:${tvId}:${season}`;
+  const k = `season:${locale()}:${tvId}:${season}`;
   const cached = store.json<Episode[] | null>(k, null);
   if (cached) return cached;
   if (!store.get("tmdbKey")) return [];
@@ -236,12 +236,15 @@ export function useLibrary(opened: string[] = []) {
 
   // Show the cached library instantly, refresh from disk in the background.
   useEffect(() => {
-    if (!folders.length) { setFiles([]); return; }
+    if (!folders.length) { setFiles([]); setScanning(false); return; }
+    let alive = true;
     setScanning(true);
     invoke<string[]>("scan_folders", { folders }).then((f) => {
+      if (!alive) return;
       store.set("files", JSON.stringify(f));
       setFiles(f);
-    }).finally(() => setScanning(false));
+    }).finally(() => alive && setScanning(false));
+    return () => { alive = false; };
   }, [folders, tick]);
 
   const items = useMemo(() => {
@@ -271,7 +274,7 @@ export function useLibrary(opened: string[] = []) {
   // Fetch missing metadata, a few at a time.
   useEffect(() => {
     if (!store.get("tmdbKey")) return;
-    const todo = items.filter((i) => !(i.key in meta));
+    const todo = items.filter((i) => !(i.key in meta) && (metaRetry.get(i.key) ?? 0) <= Date.now());
     if (!todo.length) return;
     let alive = true;
     (async () => {
@@ -279,9 +282,11 @@ export function useLibrary(opened: string[] = []) {
         const batch = todo.slice(i, i + 4);
         const res = await Promise.all(batch.map((it) => lookup(it.parsed).catch(() => undefined)));
         if (!alive) return;
+        // undefined = network/key error: left out and asked again a few minutes later, not in a loop
+        batch.forEach((it, j) => { if (res[j] === undefined) metaRetry.set(it.key, Date.now() + 5 * 60_000); });
+        if (res.every((r) => r === undefined)) continue;
         setMeta((m) => {
           const next = { ...m };
-          // undefined = network/key error: leave it out so it's retried later.
           batch.forEach((it, j) => { if (res[j] !== undefined) next[it.key] = res[j]!; });
           store.set("meta", JSON.stringify(next));
           return next;
@@ -344,13 +349,16 @@ async function queued<T>(job: () => Promise<T>): Promise<T> {
 }
 
 const infoMem = new Map<string, Promise<MediaInfo | null>>();
+/** Titles whose TMDB lookup failed (network, key): not asked again before this time. */
+const metaRetry = new Map<string, number>();
+
 export function getMediaInfo(path: string): Promise<MediaInfo | null> {
   const cached = store.json<MediaInfo | null>("info:" + path, null);
   if (cached) return Promise.resolve(cached);
   if (!infoMem.has(path))
     infoMem.set(path, queued(() => invoke<MediaInfo>("probe_video", { path }))
       .then((i) => { store.set("info:" + path, JSON.stringify(i)); return i; })
-      .catch(() => null));
+      .catch(() => { setTimeout(() => infoMem.delete(path), 60_000); return null; }));
   return infoMem.get(path)!;
 }
 
