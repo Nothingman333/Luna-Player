@@ -696,7 +696,7 @@ export function Rematch({ it, onPick, onCustom, onClose }: {
   );
 }
 
-export function Settings({ onClose, onTour }: { onClose: () => void; onTour?: () => void }) {
+export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; onTour?: () => void; onSetup?: () => void }) {
   const [osKey, setOsKey] = useState(store.get("osKey") ?? "");
   const [tmdbKey, setTmdbKey] = useState(store.get("tmdbKey") ?? "");
   const [langs, setLangs] = useState(store.get("langs") ?? defaultSubLangs());
@@ -741,7 +741,7 @@ export function Settings({ onClose, onTour }: { onClose: () => void; onTour?: ()
   return (
     <div className="modal-bg" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal">
-        <h2>{tt("Ayarlar")}{onTour && <button className="tour-again" onClick={onTour}>{tt("Tanıtımı göster")}</button>}</h2>
+        <h2>{tt("Ayarlar")}{onTour && <button className="tour-again" onClick={onTour}>{tt("Tanıtımı göster")}</button>}{onSetup && <button className="tour-again" onClick={onSetup}>{tt("Sistem kontrolü")}</button>}</h2>
         <div className="field">
           <span>{tt("Dil")}</span>
           <div className="seg-row">

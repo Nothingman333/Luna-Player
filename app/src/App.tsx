@@ -25,6 +25,7 @@ import { applyVideoSet, ContextMenu, loadVideoSet, TracksPanel, VideoPanel } fro
 /** Per-video dub/subtitle choice: track ids, an external subtitle file, or subtitles off. */
 type TrackPref = { aid?: number; sid?: number | "no"; sidExt?: string };
 import { Tour, tourSeen } from "./Tour";
+import { Setup, setupSeen } from "./Setup";
 import "./App.css";
 
 const VIDEO_EXT = ["mkv", "mp4", "avi", "mov", "wmv", "webm", "m4v", "ts", "flv", "mpg", "mpeg"];
@@ -44,6 +45,7 @@ export default function App() {
   const [showUi, setShowUi] = useState(true);
   const [settings, setSettings] = useState(false);
   const [tour, setTour] = useState(() => !tourSeen());
+  const [setup, setSetup] = useState(() => !setupSeen());
   const [detailsKey, setDetailsKey] = useState<string | null>(null);
   const [cues, setCues] = useState<[number, number][]>([]);
   const tracksRef = useRef<any[]>([]);
@@ -1098,10 +1100,11 @@ export default function App() {
       )}
       {toast && <div className={"toast " + toast.kind}>{toast.kind === "ok" && <Icon d={I.check} />}{toast.text}</div>}
       {settings && (
-        <Settings onTour={() => { setSettings(false); setTour(true); }}
+        <Settings onTour={() => { setSettings(false); setTour(true); }} onSetup={() => { setSettings(false); setSetup(true); }}
           onClose={() => setSettings(false)} />
       )}
-      {tour && !playing && <Tour onClose={() => setTour(false)} onSettings={() => setSettings(true)} posters={lib.items.map((x) => x.meta?.poster ?? null).filter(Boolean).slice(0, 12)} />}
+      {setup && !playing && <Setup onDone={() => setSetup(false)} />}
+      {tour && !setup && !playing && <Tour onClose={() => setTour(false)} onSettings={() => setSettings(true)} posters={lib.items.map((x) => x.meta?.poster ?? null).filter(Boolean).slice(0, 12)} />}
     </div>
   );
 }

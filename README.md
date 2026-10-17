@@ -36,8 +36,17 @@ and get answers with posters, cast and links.
 
 ![The film assistant](docs/screenshots/assistant.jpg)
 
+**Open links and torrents.** Like VLC's "Open network stream": paste a video link (http, m3u8, rtsp…), a magnet
+link or a `.torrent` file, and Luna plays it. Torrents start playing while they download, and Luna finds the
+title, poster and subtitles for you. Press **Ctrl+N** or just paste a link into the window.
+
+**Sharper picture with AI upscaling.** If you have [Lossless Scaling](https://store.steampowered.com/app/993090/Lossless_Scaling/)
+(a paid app on Steam), Luna can switch it on for you while a video plays: AI and FSR upscaling make lower-resolution
+videos look sharper on big screens, and AI frame generation makes motion smoother. Subtitles stay crisp on top.
+Press **Q** in the player or use the **UP** menu.
+
 **And more:**
-- Open links and torrents directly and start watching while they download
+- A first-run check that tells you if anything is missing, with download links
 - Hide posters of films with disturbing content (optional)
 - English and Turkish (change it in Settings)
 
@@ -73,12 +82,24 @@ Your keys and your library stay on your own computer.
 | F or double-click | Full screen |
 | S | Subtitles |
 | Ctrl+N | Open a link |
+| Q | AI upscaling on / off (needs Lossless Scaling) |
 
 ## For developers
 
 Want to build it yourself or help out? See [BUILDING.md](BUILDING.md).
 
+## Please use it responsibly
+
+Luna is a player: it doesn't come with any content, sites or search sources. Only open and download videos you
+have the right to watch. Downloading copyrighted material without permission is illegal in many countries.
+
+Friends' Letterboxd lists are read from their public Letterboxd pages. This is not an official Letterboxd feature.
+
 ## License
 
 Luna Player is free and open source under the [GPL-3.0](LICENSE) license.
-Film data is provided by [TMDB](https://www.themoviedb.org); Luna is not endorsed or certified by TMDB.
+
+This product uses the TMDB API but is not endorsed or certified by TMDB.
+The installer includes [mpv](https://mpv.io) ([license](https://github.com/mpv-player/mpv/blob/master/Copyright),
+[source](https://github.com/mpv-player/mpv)), built by [shinchiro/mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake).
+Lossless Scaling is a separate product and is not part of Luna.
