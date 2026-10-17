@@ -43,7 +43,7 @@ and get answers with posters, cast and links.
 
 ## Getting started
 
-1. Download **`Luna Player_…_x64-setup.exe`** from the [Releases](../../releases/latest) page and run it.
+1. Download **`Luna.Player_…_x64-setup.exe`** from the [Releases](../../releases/latest) page and run it.
    It works on Windows 10 and 11.
 2. If Windows shows *"Windows protected your PC"*, click **More info → Run anyway**.
    This appears because Luna is a small free project without a paid code-signing certificate.
