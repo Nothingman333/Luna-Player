@@ -1,4 +1,4 @@
-import { tt } from "./i18n";
+import { tt, DEC } from "./i18n";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -23,8 +23,8 @@ export function trackLabel(t: Track & Record<string, any>) {
     const ch = t["demux-channel-count"];
     name += ch >= 6 ? ` (${ch - 1}.1)` : ch === 2 ? " (Stereo)" : "";
   }
-  if (t.forced) name += " [zorunlu]";
-  if (t.external) name += " [harici]";
+  if (t.forced) name += tt(" [zorunlu]");
+  if (t.external) name += tt(" [harici]");
   return name;
 }
 
@@ -302,7 +302,7 @@ type Entry =
 
 const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 3];
 const ASPECTS: [string, string][] = [[tt("Otomatik"), "no"], ["16:9", "16:9"], ["4:3", "4:3"], ["21:9", "2.33"], ["2.35:1", "2.35"], ["1:1", "1"]];
-const fmtSec = (d: number) => (d > 0 ? "+" : "") + d.toFixed(2).replace(".", ",") + tt(" sn");
+const fmtSec = (d: number) => (d > 0 ? "+" : "") + d.toFixed(2).replace(".", DEC) + tt(" sn");
 
 /** VLC-style right-click menu over the video. */
 export function ContextMenu({ s, x, y, extra, onClose }: {

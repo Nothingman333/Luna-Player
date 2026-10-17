@@ -1,4 +1,4 @@
-import { locale } from "./i18n";
+import { locale, DEC } from "./i18n";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { useEffect, useMemo, useState } from "react";
 
@@ -15,6 +15,8 @@ export const store = {
   },
 };
 
+/** A network address (http, rtsp, rtmp…) rather than a file on disk. */
+export const isUrl = (p: string) => /^[a-z][a-z0-9+.-]*:\/\//i.test(p);
 /** Magnet / .torrent a video came from, if any. */
 export const torrentSrc = (path: string) => store.get("tsrc:" + path) || null;
 /** A torrent video whose file isn't (fully) on disk: shown faded and greyed out. */
@@ -149,8 +151,10 @@ export async function details(kind: "movie" | "tv", id: number): Promise<Meta> {
   };
 }
 
+/** Where a season's episode list is cached (per language). */
+export const seasonKey = (tvId: number, season: number) => `season:${locale()}:${tvId}:${season}`;
 export async function seasonEpisodes(tvId: number, season: number): Promise<Episode[]> {
-  const k = `season:${locale()}:${tvId}:${season}`;
+  const k = seasonKey(tvId, season);
   const cached = store.json<Episode[] | null>(k, null);
   if (cached) return cached;
   if (!store.get("tmdbKey")) return [];
@@ -172,7 +176,7 @@ export async function seasonEpisodes(tvId: number, season: number): Promise<Epis
  *  in the library even after they drop off the play history. */
 export const loadPinned = () => store.json<string[]>("pinned", []);
 export function pinFile(path: string) {
-  if (!path || /^https?:/i.test(path)) return;
+  if (!path || isUrl(path)) return;
   const l = loadPinned();
   if (l.includes(path)) return;
   store.set("pinned", JSON.stringify([...l, path]));
@@ -264,7 +268,7 @@ export function useLibrary(opened: string[] = []) {
 
   // Which videos are gone from disk (moved, deleted, drive unplugged).
   useEffect(() => {
-    const paths = items.flatMap((i) => i.files.map((f) => f.path)).filter((p) => !/^https?:/i.test(p));
+    const paths = items.flatMap((i) => i.files.map((f) => f.path)).filter((p) => !isUrl(p));
     if (!paths.length) return;
     invoke<boolean[]>("paths_exist", { paths })
       .then((ok) => setMissing(new Set(paths.filter((_, i) => ok[i] === false))))
@@ -298,7 +302,7 @@ export function useLibrary(opened: string[] = []) {
 
   // Every new video gets its quality read once in the background, so badges show everywhere.
   useEffect(() => {
-    const todo = [...new Set([...files, ...opened])].filter((p) => !store.get("info:" + p));
+    const todo = [...new Set([...files, ...opened])].filter((p) => !isUrl(p) && !store.get("info:" + p));
     let alive = true;
     (async () => {
       for (const p of todo) {
@@ -355,6 +359,7 @@ const metaRetry = new Map<string, number>();
 export function getMediaInfo(path: string): Promise<MediaInfo | null> {
   const cached = store.json<MediaInfo | null>("info:" + path, null);
   if (cached) return Promise.resolve(cached);
+  if (isUrl(path)) return Promise.resolve(null);
   if (!infoMem.has(path))
     infoMem.set(path, queued(() => invoke<MediaInfo>("probe_video", { path }))
       .then((i) => { store.set("info:" + path, JSON.stringify(i)); return i; })
@@ -365,6 +370,7 @@ export function getMediaInfo(path: string): Promise<MediaInfo | null> {
 export function useMediaInfo(path?: string) {
   const [info, setInfo] = useState<MediaInfo | null>(() => path ? store.json("info:" + path, null) : null);
   useEffect(() => {
+    setInfo(path ? store.json("info:" + path, null) : null);
     if (!path) return;
     let alive = true;
     getMediaInfo(path).then((i) => alive && setInfo(i));
@@ -375,9 +381,11 @@ export function useMediaInfo(path?: string) {
 
 const thumbMem = new Map<string, Promise<string | null>>();
 export function useThumb(path: string, enabled: boolean) {
-  const [src, setSrc] = useState<string | null>(() => store.get("thumb:" + path));
+  const [state, setState] = useState<{ path: string; src: string | null }>(() => ({ path, src: store.get("thumb:" + path) }));
+  const src = state.path === path ? state.src : store.get("thumb:" + path);
+  const setSrc = (u: string | null) => setState({ path, src: u });
   useEffect(() => {
-    if (!enabled || src) return;
+    if (!enabled || src || isUrl(path)) return;
     let alive = true;
     if (!thumbMem.has(path))
       thumbMem.set(path, queued(() => invoke<string>("video_thumbnail", { path }))
@@ -420,7 +428,7 @@ export function qualityBadges(info: MediaInfo | null, path = ""): string[] {
 }
 
 export const fmtSize = (b: number) =>
-  b >= 1e9 ? (b / 1e9).toFixed(1).replace(".", ",") + " GB" : Math.round(b / 1e6) + " MB";
+  b >= 1e9 ? (b / 1e9).toFixed(1).replace(".", DEC) + " GB" : Math.round(b / 1e6) + " MB";
 
 /** TMDB keywords of a title (lower-case names), used for content warnings. */
 export async function tmdbKeywords(kind: "movie" | "tv", id: number): Promise<string[]> {

@@ -79,9 +79,9 @@ pub async fn add(source: String, out_dir: String) -> Result<Added, String> {
         .session
         .add_torrent(add, Some(opts))
         .await
-        .map_err(|e| format!("Torrent eklenemedi: {e:#}"))?
+        .map_err(|e| tr!("Torrent eklenemedi: {:#}", "Couldn't add the torrent: {:#}", e))?
         .into_handle()
-        .ok_or("Torrent eklenemedi")?;
+        .ok_or(tr!("Torrent eklenemedi", "Couldn't add the torrent"))?;
 
     // Streaming only works once the torrent has finished checking its files and is live.
     for _ in 0..600 {

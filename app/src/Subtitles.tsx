@@ -1,8 +1,8 @@
 import { defaultSubLangs, lang, locale, tt } from "./i18n";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { parseName, store } from "./library";
+import { groupKey, parseName, store } from "./library";
 
 export type SubHit = {
   fileId: number; language: string; release: string; fileName: string; downloads: number; rating: number;
@@ -31,10 +31,12 @@ export function SubtitleDialog({ path, onAttach, onClose }: {
 
   const parsed = useMemo(() => parseName(path), [path]);
   const title = store.json<Record<string, { title?: string; year?: string } | null>>("meta", {});
-  const metaTitle = Object.entries(title).find(([k]) => k.startsWith(parsed.kind + ":" + parsed.title.toLowerCase()))?.[1];
+  const metaTitle = title[groupKey(parsed)] ?? undefined;
 
+  const runId = useRef(0);
   const run = (k = key, l = langs) => {
     if (!k) return;
+    const my = ++runId.current;
     setErr("");
     setHits(null);
     invoke<SubHit[]>("search_subtitles", {
@@ -44,7 +46,7 @@ export function SubtitleDialog({ path, onAttach, onClose }: {
         year: parsed.year ?? (metaTitle?.year ? Number(metaTitle.year) : undefined),
         season: parsed.season, episode: parsed.episode,
       },
-    }).then(setHits).catch((e) => { setErr(String(e)); setHits([]); });
+    }).then((h) => my === runId.current && setHits(h)).catch((e) => { if (my === runId.current) { setErr(String(e)); setHits([]); } });
   };
   useEffect(() => { run(); }, []);
 

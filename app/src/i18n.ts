@@ -21,5 +21,9 @@ export function tt(s: string, ...args: unknown[]): string {
   const out = isTr ? s : EN[s] ?? s;
   return args.length ? out.replace(/\{(\d+)\}/g, (m, i) => (i < args.length ? String(args[i] ?? "") : m)) : out;
 }
+/** Decimal separator of the UI language (8,1 in Turkish, 8.1 in English). */
+export const DEC = isTr ? "," : ".";
+/** A percentage the way the UI language writes it: %12 / 12%. */
+export const pctText = (n: number | string) => (isTr ? "%" + n : n + "%");
 /** Subtitle languages searched by default, in order. */
 export const defaultSubLangs = () => (isTr ? "tr,en,de" : "en");

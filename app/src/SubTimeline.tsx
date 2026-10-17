@@ -1,4 +1,4 @@
-import { tt } from "./i18n";
+import { tt, DEC } from "./i18n";
 import { useRef } from "react";
 import { setProp } from "./mpv";
 
@@ -15,7 +15,7 @@ type Props = {
 };
 
 const fmtDelay = (d: number) =>
-  (d > 0 ? "+" : d < 0 ? "−" : "") + Math.abs(d).toFixed(3).replace(".", ",") + tt(" sn");
+  (d > 0 ? "+" : d < 0 ? "−" : "") + Math.abs(d).toFixed(3).replace(".", DEC) + tt(" sn");
 
 export default function SubTimeline({ cues, time, delay, embedded, onReset, onOther, onClose }: Props) {
   const strip = useRef<HTMLDivElement>(null);

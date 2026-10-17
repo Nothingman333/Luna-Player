@@ -1,4 +1,4 @@
-import { tt } from "./i18n";
+import { tt, DEC, pctText } from "./i18n";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -37,7 +37,7 @@ export function useTorrents(active: boolean) {
 
 export const speed = (t?: TorrentStat) => {
   const m = t?.live?.download_speed?.mbps ?? 0;
-  return m >= 1 ? m.toFixed(1).replace(".", ",") + tt(" MB/sn") : Math.round(m * 1024) + tt(" KB/sn");
+  return m >= 1 ? m.toFixed(1).replace(".", DEC) + tt(" MB/sn") : Math.round(m * 1024) + tt(" KB/sn");
 };
 export const peers = (t?: TorrentStat) => t?.live?.snapshot?.peer_stats?.live ?? 0;
 export const pct = (t?: TorrentStat) => (t && t.total_bytes ? (t.progress_bytes / t.total_bytes) * 100 : 0);
@@ -69,7 +69,7 @@ export function TorrentDialog({ onOpen, onClose, initial }: { onOpen: (src: stri
         <h2>{tt("Bağlantı aç")}</h2>
         <p className="modal-text">{tt("VLC'deki “Ağ akışı aç” gibi:")} <b>{tt("magnet")}</b> / <b>{tt(".torrent")}</b>  {tt("bağlantısı ya da doğrudan bir video adresi (")}<b>{tt("http(s)")}</b>, <b>.m3u8</b>, <b>{tt("rtsp")}</b>{tt("…) yapıştır. Torrentler hemen oynamaya başlar, kalanı arka planda iner.")}</p>
         <div className="rm-row">
-          <input value={v} autoFocus placeholder="magnet:?xt=… ya da https://…/video.mp4" aria-label={tt("Bağlantı")}
+          <input value={v} autoFocus placeholder={tt("magnet:?xt=… ya da https://…/video.mp4")} aria-label={tt("Bağlantı")}
             onChange={(e) => { setV(e.target.value); setErr(""); }} onKeyDown={(e) => e.key === "Enter" && go()} />
           <button className="primary" disabled={!v.trim()} onClick={go}><Icon d={I.play} fill size={16} />  {tt("Aç")}</button>
         </div>
@@ -110,7 +110,7 @@ export function TorrentLoader({ phase, name, stat, onCancel }: {
         </div>
         {stat && (
           <div className="tl-stats">
-            <span>{peers(stat)}  {tt("eş")}</span><span>{speed(stat)}</span><span>%{pct(stat).toFixed(1).replace(".", ",")}</span>
+            <span>{peers(stat)}  {tt("eş")}</span><span>{speed(stat)}</span><span>{pctText(pct(stat).toFixed(1).replace(".", DEC))}</span>
           </div>
         )}
         <button className="ghost sm" onClick={onCancel}>{tt("Vazgeç")}</button>
@@ -217,7 +217,7 @@ export function DownloadPanel({ pending, stat, onDownload, onCancel }: {
       <div className="dlp-head">
         {!paused && <span className="dlp-spin" />}
         <b>{paused ? tt("Duraklatıldı") : tt("İndiriliyor")}</b>
-        <span className="dlp-pct">%{p.toFixed(1).replace(".", ",")}</span>
+        <span className="dlp-pct">{pctText(p.toFixed(1).replace(".", DEC))}</span>
         <span className="grow" />
         <button className="round" aria-label={paused ? tt("Devam ettir") : tt("Duraklat")} title={paused ? tt("Devam ettir") : tt("Duraklat")}
           onClick={() => invoke("torrent_pause", { id: stat.id, pause: !paused })}>

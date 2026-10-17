@@ -1,5 +1,5 @@
 // Taste data (likes, dislikes, watchlist), recommendations from friends and the Gemini chat.
-import { lang, locale, tt } from "./i18n";
+import { lang, locale, tt, DEC, pctText } from "./i18n";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
@@ -196,7 +196,7 @@ export async function followLetterboxd(person: string, url: string): Promise<str
     made.push(`${name}: ${pl.items.length}`);
   };
   for (const sc of secs) {
-    if (sc.kind === "watched") put("Yüksek puanladıkları (4★+)", { url: sc.url, minStars: 4 }, sc.films);
+    if (sc.kind === "watched") put(tt("Yüksek puanladıkları (4★+)"), { url: sc.url, minStars: 4 }, sc.films);
     else if (sc.films.length) put(sc.kind === "list" ? sc.name : sc.name, { url: sc.url }, sc.films);
   }
   savePlaylists(all);
@@ -499,7 +499,7 @@ function TasteSummary({ items, onOpen }: { items: Item[]; onOpen: (t: DetailTarg
   if (!diary.length && !notes.length) return null;
   const liked = diary.filter((e) => e.vote === "like" || (e.rating ?? 0) >= 7);
   const rated = diary.filter((e) => e.rating);
-  const avg = rated.length ? (rated.reduce((n, e) => n + (e.rating ?? 0), 0) / rated.length).toFixed(1).replace(".", ",") : null;
+  const avg = rated.length ? (rated.reduce((n, e) => n + (e.rating ?? 0), 0) / rated.length).toFixed(1).replace(".", DEC) : null;
   const genreOf = (e: DiaryEntry) => e.genres ?? items.find((i) => seenKey(i.meta?.title ?? i.parsed.title) === seenKey(e.title))?.meta?.genres ?? [];
   const g: Record<string, number> = {};
   for (const e of liked) for (const x of genreOf(e)) g[x] = (g[x] ?? 0) + 1;
@@ -697,13 +697,13 @@ function TitleDetail({ t, items, onClose, onPlay, onTorrent, onAsk }: { t: Detai
             <div className="td-titles">
               <h2>{title}{warn?.length ? <span className="cw-star big" title={tt("İçerik uyarısı: ") + cwLabels(warn).join(", ")}>★</span> : null}</h2>
               <div className="d-meta">
-                {meta?.rating ? <span className="rating">★ {String(meta.rating).replace(".", ",")}</span> : null}
+                {meta?.rating ? <span className="rating">★ {String(meta.rating).replace(".", DEC)}</span> : null}
                 {year && <span>{year}</span>}
                 {meta?.runtime ? <span>{Math.floor(meta.runtime / 60)}  {tt("sa")} {meta.runtime % 60}  {tt("dk")}</span> : null}
                 {meta?.genres.length ? <span>{meta.genres.slice(0, 3).join(", ")}</span> : null}
               </div>
               {(t.from || t.stars) && (
-                <div className="td-from">{t.from && <><b>{t.from}</b>  {tt("önerdi")}</>}{t.stars ? <>  {tt("· Letterboxd'da")} <span className="td-lb">{"★".repeat(Math.floor(t.stars))}{t.stars % 1 ? "½" : ""}</span>  {tt("verdi (")}{String(t.stars).replace(".", ",")}/5)</> : ""}{t.note ? ` · “${t.note}”` : ""}</div>
+                <div className="td-from">{t.from && <><b>{t.from}</b>  {tt("önerdi")}</>}{t.stars ? <>  {tt("· Letterboxd'da")} <span className="td-lb">{"★".repeat(Math.floor(t.stars))}{t.stars % 1 ? "½" : ""}</span>  {tt("verdi (")}{String(t.stars).replace(".", DEC)}/5)</> : ""}{t.note ? ` · “${t.note}”` : ""}</div>
               )}
             </div>
           </div>
@@ -812,7 +812,7 @@ function DiaryList({ onOpen, start, onClose }: { onOpen: (t: DetailTarget) => vo
           <div key={e.title + (e.year ?? "")} className="pl-item diary-item">
             <button className="diary-open" onClick={() => { onClose(); onOpen({ title: e.title, year: e.year }); }}>
               <b className="ellipsis">{e.title}</b>
-              <span className="muted small">{e.year ?? ""}{e.watched ? " · izledin" : ""}{e.note ? ` · “${e.note}”` : ""}</span>
+              <span className="muted small">{e.year ?? ""}{e.watched ? tt(" · izledin") : ""}{e.note ? ` · “${e.note}”` : ""}</span>
             </button>
             <span className={"diary-vote" + (e.vote === "like" ? " like" : e.vote === "dislike" ? " dislike" : "")}>{e.vote === "like" ? "👍" : e.vote === "dislike" ? "👎" : ""}</span>
             <select className="pl-pick" value={e.rating ?? ""} onChange={(ev) => diarySet(e.title, e.year, { rating: ev.target.value ? Number(ev.target.value) : undefined })}>
@@ -895,7 +895,7 @@ function PlaylistView({ pl, owner, items, onPlay, onOpen, onClose }: {
           <h3>{pl.name}</h3>
           <div className="plv-stats">
             <span><b>{all.length}</b>  {tt("film")}</span>
-            {avg > 0 && <span className="rating">★ {avg.toFixed(1).replace(".", ",")}  {tt("ort.")}</span>}
+            {avg > 0 && <span className="rating">★ {avg.toFixed(1).replace(".", DEC)}  {tt("ort.")}</span>}
             {libCount > 0 && <span><b>{libCount}</b>  {tt("kütüphanende")}</span>}
           </div>
         </div>
@@ -919,7 +919,7 @@ function PlaylistView({ pl, owner, items, onPlay, onOpen, onClose }: {
               <div className={"plg-poster clickable" + (cwFlag(t.tmdbId, t.kind) ? " cw-blur" : "")} onClick={() => onOpen?.(target(t))}
                 style={t.poster ? { backgroundImage: `url(${IMG}w342${t.poster})` } : undefined}>
                 {!t.poster && <div className="plg-blank"><Icon d={I.film} size={26} /><span>{t.title}</span></div>}
-                {t.rating ? <span className="tmdb-badge">★ {t.rating.toFixed(1).replace(".", ",")}</span> : null}
+                {t.rating ? <span className="tmdb-badge">★ {t.rating.toFixed(1).replace(".", DEC)}</span> : null}
                 {sort === "order" && <span className="plg-rank">{i + 1}</span>}
                 {(lib || d?.watched) && <span className="plg-flags">{lib ? <span title={tt("Kütüphanende var")}>●</span> : null}{d?.watched ? <span title={tt("İzledin")}>✓</span> : null}</span>}
                 <div className="plg-hover" onClick={(e) => e.stopPropagation()}>
@@ -987,9 +987,8 @@ function Playlists({ items, onPlay, onOpen }: { items: Item[]; onPlay?: (path: s
 type LaterMeta = { poster?: string | null; rating?: number; tmdbId?: number; kind?: "movie" | "tv"; none?: boolean };
 const laterKey = (t: string) => seenKey(t);
 function LaterList({ items, onOpen, onPlay }: { items: Item[]; onOpen: (t: DetailTarget) => void; onPlay?: (path: string) => void }) {
-  const [later, setLater] = useState<string[]>(loadLater);
   useTaste();
-  useEffect(() => setLater(loadLater()), []);
+  const later = loadLater();
   const meta = store.json<Record<string, LaterMeta>>("laterMeta", {});
   const [, bump] = useState(0);
   useEffect(() => {
@@ -1028,13 +1027,13 @@ function LaterList({ items, onOpen, onPlay }: { items: Item[]; onOpen: (t: Detai
               <div className={"plg-poster clickable" + (cwFlag(m?.tmdbId, m?.kind) ? " cw-blur" : "")} onClick={open}
                 style={m?.poster ? { backgroundImage: `url(${IMG}w342${m.poster})` } : undefined}>
                 {!m?.poster && <div className="plg-blank"><Icon d={I.film} size={26} /><span>{title}</span></div>}
-                {m?.rating ? <span className="tmdb-badge">★ {m.rating.toFixed(1).replace(".", ",")}</span> : null}
+                {m?.rating ? <span className="tmdb-badge">★ {m.rating.toFixed(1).replace(".", DEC)}</span> : null}
                 {lib && <span className="plg-flags"><span title={tt("Kütüphanende var")}>●</span></span>}
                 <div className="plg-hover" onClick={(e) => e.stopPropagation()}>
                   {lib && onPlay && <button className="round" title={tt("Oynat")} aria-label={tt("Oynat")} onClick={() => onPlay(lib.files[0].path)}><Icon d={I.play} fill size={18} /></button>}
                   <button className="round" title={tt("YouTube'da Türkçe fragman")} aria-label={tt("Fragman")} onClick={() => openUrl(youtubeTrailer(t))}><Icon d={I.play} fill size={14} /></button>
                   <button className="round" title={tt("Detay")} aria-label={tt("Detay")} onClick={open}>i</button>
-                  <button className="round" title={tt("Listeden çıkar")} aria-label={tt("Çıkar")} onClick={() => setLater(markLater(t, false))}><Icon d={I.x} size={14} /></button>
+                  <button className="round" title={tt("Listeden çıkar")} aria-label={tt("Çıkar")} onClick={() => markLater(t, false)}><Icon d={I.x} size={14} /></button>
                 </div>
               </div>
               <div className="plg-title ellipsis" title={title}><CwStar id={m?.tmdbId} kind={m?.kind} />{title}</div>
@@ -1074,11 +1073,12 @@ export function RecsPage({ items, onPlay, onTorrent, onAsk }: { items: Item[]; o
   useEffect(() => {
     setPick(null);
     if (title.trim().length < 2 || !store.get("tmdbKey")) { setHits([]); return; }
+    let alive = true;
     const t = setTimeout(async () => {
       const [m, tv] = await Promise.all([searchTmdb(title, "movie").catch(() => []), searchTmdb(title, "tv").catch(() => [])]);
-      setHits([...m.slice(0, 4), ...tv.slice(0, 2)]);
+      if (alive) setHits([...m.slice(0, 4), ...tv.slice(0, 2)]);
     }, 350);
-    return () => clearTimeout(t);
+    return () => { alive = false; clearTimeout(t); };
   }, [title]);
 
   const add = () => {
@@ -1121,7 +1121,7 @@ export function RecsPage({ items, onPlay, onTorrent, onAsk }: { items: Item[]; o
         <div className={"plg-poster clickable" + (cwFlag(r.tmdbId, r.kind) ? " cw-blur" : "")} onClick={() => setDetail(target)}
           style={r.poster ? { backgroundImage: `url(${IMG}w342${r.poster})` } : undefined}>
           {!r.poster && <div className="plg-blank"><Icon d={I.film} size={26} /><span>{r.title}</span></div>}
-          {r.rating ? <span className="tmdb-badge">★ {r.rating.toFixed(1).replace(".", ",")}</span> : null}
+          {r.rating ? <span className="tmdb-badge">★ {r.rating.toFixed(1).replace(".", DEC)}</span> : null}
           {r.status && <span className={"rec-state " + (r.status === "dismissed" ? "off" : r.vote ?? "")}>{r.status === "dismissed" ? tt("İlgilenmiyorum") : r.vote === "like" ? `👍${dr ? " " + dr : ""}` : `👎${dr ? " " + dr : ""}`}</span>}
           {inLib(r) && <span className="plg-flags"><span title={tt("Kütüphanende var")}>●</span></span>}
           <div className="plg-hover" onClick={(e) => e.stopPropagation()}>
@@ -1148,7 +1148,7 @@ export function RecsPage({ items, onPlay, onTorrent, onAsk }: { items: Item[]; o
           {askFor?.id === r.id && <RateAsk title={r.title} year={r.year} vote={askFor.vote} onDone={() => setAskFor(null)} />}
         </div>
         <div className="plg-title ellipsis" title={r.title}><CwStar id={r.tmdbId} kind={r.kind} />{r.title}</div>
-        <div className="plg-sub">{r.year ?? ""}{who === "*" && <span className="rec-from">{r.from}</span>}{r.stars ? <span className="plg-stars" title={tt("{0}'ın Letterboxd puanı: {1} / 5", r.from, String(r.stars).replace(".", ","))}>{stars(r.stars)}</span> : null}</div>
+        <div className="plg-sub">{r.year ?? ""}{who === "*" && <span className="rec-from">{r.from}</span>}{r.stars ? <span className="plg-stars" title={tt("{0}'ın Letterboxd puanı: {1} / 5", r.from, String(r.stars).replace(".", DEC))}>{stars(r.stars)}</span> : null}</div>
         {r.tags?.length ? <div className="rec-tags">{[...r.tags].sort((a, b) => tagOrder(a) - tagOrder(b)).slice(0, 3).map((t) => <span key={t} className={"rtag" + (t === "Beğendi" ? " like" : t === "İzlemek istiyor" ? " want" : t.startsWith("Liste") ? " list" : "")} title={tagHelp(t, r.from)}>{tagLabel(t, r.from)}</span>)}{r.tags.length > 3 ? <span className="rtag" title={r.tags.slice(3).map((t) => tagHelp(t, r.from)).join(" · ")}>+{r.tags.length - 3}</span> : null}</div> : null}
         {r.note && <div className="rec-note ellipsis" title={r.note}>“{r.note}”</div>}
       </div>
@@ -1279,7 +1279,7 @@ export function RecsPage({ items, onPlay, onTorrent, onAsk }: { items: Item[]; o
                   <span><b>{mine.length}</b>  {tt("öneri")}</span>
                   {subLists.length > 0 && <span><b>{subLists.length}</b>  {tt("Letterboxd listesi")}</span>}
                   {st && <span><b>{st.total}</b>  {tt("film toplam")}</span>}
-                  {who !== "*" && aff[who]?.rated ? <span>%{Math.round((aff[who].liked / aff[who].rated) * 100)}  {tt("uyum (")}{aff[who].liked}/{aff[who].rated})</span> : null}
+                  {who !== "*" && aff[who]?.rated ? <span>{pctText(Math.round((aff[who].liked / aff[who].rated) * 100))}  {tt("uyum (")}{aff[who].liked}/{aff[who].rated})</span> : null}
                   {mod && st && (
                     <button className={"mod-count" + (modOpen ? " on" : "")} title={tt("Moderasyona takılan filmler · ayrıntı için tıkla")} onClick={() => setModOpen((v) => !v)}>
                       <span className="cw-star">★</span>{st.flagged}<span className="muted"> / {st.total}</span>
@@ -1297,14 +1297,14 @@ export function RecsPage({ items, onPlay, onTorrent, onAsk }: { items: Item[]; o
                 <div className="mod-head">
                   
                   {tt("toplam")} <b>{st.total}</b>  {tt("filmin")} <b className="cw-red">{st.flagged}</b>  {tt("tanesi moderasyona takılıyor")}
-                  {st.total ? <span className="cw-red"> (%{Math.round((st.flagged / st.total) * 100)})</span> : null}
+                  {st.total ? <span className="cw-red"> ({pctText(Math.round((st.flagged / st.total) * 100))})</span> : null}
                   {st.checked < st.total && <span className="muted small">  {tt("· kontrol ediliyor")} {st.checked}/{st.total}</span>}
                 </div>
                 {st.cats.length ? st.cats.map(([c, n]) => (
                   <div key={c} className="mod-row">
                     <span className="mod-cat">{c}</span>
                     <div className="mod-bar"><div style={{ width: `${(n / Math.max(1, st.total)) * 100}%` }} /></div>
-                    <span className="mod-pct">%{((n / Math.max(1, st.total)) * 100).toFixed(1).replace(".", ",")}</span>
+                    <span className="mod-pct">{pctText(((n / Math.max(1, st.total)) * 100).toFixed(1).replace(".", DEC))}</span>
                     <span className="muted small mod-n">{n}  {tt("film")}</span>
                   </div>
                 )) : <div className="muted small">{st.checked ? tt("Takılan film yok.") : tt("Henüz kontrol edilmedi.")}</div>}
@@ -1384,6 +1384,7 @@ export function TrText({ text, className }: { text: string; className?: string }
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     setOrig(false);
+    setBusy(false);
     if (!foreign) { setTr(null); return; }
     const c = store.get(trKey(text));
     if (c) { setTr(c); return; }
@@ -1797,7 +1798,7 @@ function FilmPage({ f, onPlay }: { f: FilmCard; onPlay?: (path: string) => void 
             {f.original && f.original !== f.title && <div className="fp-orig">{f.original}</div>}
             {f.altYear && <div className="fp-orig">{tt("Aynı film · Letterboxd'da")} {f.altYear}  {tt("olarak geçiyor (ilk gösterim / vizyon yılı farkı)")}</div>}
             <div className="fp-meta">
-              {f.rating ? <span className="rating">★ {String(f.rating).replace(".", ",")}</span> : null}
+              {f.rating ? <span className="rating">★ {String(f.rating).replace(".", DEC)}</span> : null}
               {f.runtime ? <span>{Math.floor(f.runtime / 60) ? `${Math.floor(f.runtime / 60)} sa ` : ""}{f.runtime % 60}  {tt("dk")}</span> : null}
               {f.genres.length ? <span>{f.genres.slice(0, 3).join(", ")}</span> : null}
               {f.kind === "tv" && <span>{tt("Dizi")}</span>}
@@ -1991,7 +1992,8 @@ async function runTool(name: string, a: any): Promise<string> {
     const t = seenKey(String(a?.title ?? "").replace(/\s*\(\d{4}\)\s*$/, ""));
     const all = loadRecs();
     const r = all.find((x) => seenKey(x.title) === t && (!a?.year || !x.year || x.year === String(a.year)))
-      ?? all.find((x) => seenKey(x.title).includes(t) || t.includes(seenKey(x.title)));
+      // a partial name only when it's long enough to mean one film ("Up" must not hit "Upgrade")
+      ?? (t.length >= 6 ? all.find((x) => seenKey(x.title).includes(t) || (seenKey(x.title).length >= 6 && t.includes(seenKey(x.title)))) : undefined);
     if (!r) return `Önerilerde bulunamadı: ${a?.title}`;
     const changes: string[] = [];
     if (a?.new_title) { r.title = String(a.new_title); changes.push("ad"); }
@@ -2287,6 +2289,8 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
     if (!viewing) store.set(thread + "@id", convId);
     bumpHist((n) => n + 1); // the list on the left shows it right away
   }, [msgs]);
+  const convRef = useRef(convId);
+  convRef.current = convId;
   const newChat = () => { setMsgs([]); setConvId(Date.now().toString(36) + Math.random().toString(36).slice(2, 5)); setErr(""); };
   const openConv = (c: Conv) => { setMsgs(c.msgs); setConvId(c.id); setErr(""); };
   const delConv = (id: string) => { store.set("chatHistory", JSON.stringify(loadConvs().filter((c) => c.id !== id))); if (id === convId) newChat(); else setQ((x) => x); bumpHist((n) => n + 1); };
@@ -2374,12 +2378,13 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
   const send = async (text: string, base?: Msg[]) => {
     if (!text.trim() || busy) return;
     const next: Msg[] = [...(base ?? msgs), { role: "user", text: text.trim() }];
+    const myConv = convId;
     setMsgs(next); setInput(""); setErr(""); setBusy(true); setSteps([]);
     toolCtx.media = { images: [], people: [], links: [] };
     try {
       // Trivia / behind-the-scenes questions are answered from a live Google search, with sources.
       const ground = TRIVIA.test(text);
-      const wantsPick = /öner|ne izle|izlesem|uygun|hangisi|seç/i.test(text);
+      const wantsPick = /öner|ne izle|izlesem|uygun|hangisi|seç|recommend|suggest|what should i watch|pick/i.test(text);
       if (ground) step("search", tt("İnternette araştırıyorum"));
       else if (URL_RE.test(text)) step("page", tt("Bağlantıya bakıyorum"));
       else if (wantsPick && !viewing && getRecsView()) { step("list", tt("Listeyi tarıyorum")); setTimeout(() => step("taste", tt("Zevkine göre seçiyorum")), 1600); }
@@ -2469,6 +2474,13 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
       const md_ = toolCtx.media;
       const media = { ...(md_.choices && !md_.film ? { choices: md_.choices } : {}), ...(md_.source ? { source: md_.source } : {}), ...(md_.film ? { film: md_.film } : {}), ...(md_.images.length ? { images: md_.images } : {}), ...(md_.people.length ? { people: md_.people } : {}), ...(md_.links.length ? { links: md_.links } : {}) };
       const done: Msg[] = [...next, { role: "model", text: out || tt("(boş yanıt)"), ...media, ...(sources.length ? { sources } : {}), ...((used.note || done_.length) ? { note: [...done_.map((d) => "✓ " + d), used.note].filter(Boolean).join(" · ") } : {}) }];
+      if (convRef.current !== myConv) {
+        // another chat is open now: the answer is kept in its own conversation
+        const c = loadConvs().find((x) => x.id === myConv);
+        if (c) saveConv({ ...c, at: Date.now(), msgs: done.slice(-60) });
+        bumpHist((n) => n + 1);
+        return;
+      }
       saveThread(done); // keeps the answer even if the user already switched pages
       setMsgs(done);
     } catch (e) {
@@ -2516,7 +2528,7 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
                     <button key={c.kind + c.id} className="choice" onClick={() => toolCtx.pickFilm?.(c)} title={tt("{0} ({1}) sayfasını aç", c.title, c.year)}>
                       <div className="choice-poster" style={c.poster ? { backgroundImage: `url(${IMG}w185${c.poster})` } : undefined}>{!c.poster && <Icon d={I.film} size={20} />}</div>
                       <b className="ellipsis">{c.title}</b>
-                      <span>{c.year}{c.kind === "tv" ? tt(" · Dizi") : ""}{c.rating ? ` · ★ ${String(c.rating).replace(".", ",")}` : ""}</span>
+                      <span>{c.year}{c.kind === "tv" ? tt(" · Dizi") : ""}{c.rating ? ` · ★ ${String(c.rating).replace(".", DEC)}` : ""}</span>
                     </button>
                   ))}
                 </div>

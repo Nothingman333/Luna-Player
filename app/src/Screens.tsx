@@ -1,4 +1,4 @@
-import { defaultSubLangs, lang, setLang, tt } from "./i18n";
+import { defaultSubLangs, lang, setLang, tt, DEC } from "./i18n";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -238,7 +238,7 @@ function HeroSlider({ slides, a }: { slides: Slide[]; a: Actions }) {
           </>
         ) : (
           <div className="muted hero-meta">
-            {it?.meta?.rating ? `★ ${String(it.meta.rating).replace(".", ",")} · ` : ""}{it?.meta?.year}
+            {it?.meta?.rating ? `★ ${String(it.meta.rating).replace(".", DEC)} · ` : ""}{it?.meta?.year}
             {it?.meta?.genres.length ? " · " + it.meta.genres.slice(0, 3).join(", ") : ""}
             {it?.meta?.overview && <p className="hero-ov">{it.meta.overview}</p>}
           </div>
@@ -512,7 +512,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
             {m && m.rating > 0 && (
               <button className="rating" title={tt("TMDB sayfasını aç")}
                 onClick={() => openUrl(m.id > 0 ? `https://www.themoviedb.org/${m.kind}/${m.id}?language=${lang()}` : `https://www.themoviedb.org/search?query=${encodeURIComponent(m.title)}`)}>
-                ★ {String(m.rating).replace(".", ",")}
+                ★ {String(m.rating).replace(".", DEC)}
               </button>
             )}
             {m?.year && <span>{m.year}</span>}
@@ -602,7 +602,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
                 <WideCard key={f.path} path={f.path} item={it} a={a} progress={r ? p : undefined}
                   still={e?.still ? `${IMG}w300${e.still}` : null}
                   title={`${f.episode}. ${e?.name ?? fileName(f.path)}`}
-                  sub={[e?.runtime ? e.runtime + tt(" dk") : "", p > 92 ? tt("İzlendi") : r ? tt("{0} kaldı", fmtTime(r.duration - r.time)) : ""].filter(Boolean).join(" · ")} />
+                  sub={[e?.runtime ? e.runtime + tt(" dk") : "", p > 92 || isFinished(f.path) ? tt("İzlendi") : r ? tt("{0} kaldı", fmtTime(r.duration - r.time)) : ""].filter(Boolean).join(" · ")} />
               );
             })}
           </div>
@@ -661,8 +661,9 @@ export function Rematch({ it, onPick, onCustom, onClose }: {
     if (!q.trim() || !store.get("tmdbKey")) { setHits([]); return; }
     setErr("");
     setHits(null);
-    const id = setTimeout(() => searchTmdb(q, kind).then(setHits).catch((e) => { setErr(String(e)); setHits([]); }), 350);
-    return () => clearTimeout(id);
+    let alive = true;
+    const id = setTimeout(() => searchTmdb(q, kind).then((h) => alive && setHits(h)).catch((e) => { if (alive) { setErr(String(e)); setHits([]); } }), 350);
+    return () => { alive = false; clearTimeout(id); };
   }, [q, kind]);
   const saveName = () => q.trim() && onCustom(q.trim(), kind);
   return (
@@ -719,7 +720,8 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
     const d = await open({ directory: true, multiple: false });
     if (typeof d === "string") setDlDir(d);
   };
-  const save = () => {
+  // everything on the form, without closing (also used before the language switch reloads the app)
+  const persist = () => {
     const keyChanged = tmdbKey.trim() !== (store.get("tmdbKey") ?? "");
     if (keyChanged) {
       // Forget earlier "not found" results so everything is looked up again with the new key.
@@ -734,6 +736,9 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
     if (dlDir) store.set("dlDir", dlDir);
     store.set("geminiKey", gemKey.trim());
     store.set("geminiModel", gemModel.trim() || "gemini-flash-latest");
+  };
+  const save = () => {
+    persist();
     onClose();
     // Reload so the library, posters and details pick up the new settings right away.
     window.location.reload();
@@ -745,8 +750,8 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
         <div className="field">
           <span>{tt("Dil")}</span>
           <div className="seg-row">
-            <button className={"seg" + (lang() === "en" ? " on" : "")} onClick={() => lang() !== "en" && setLang("en")}>English</button>
-            <button className={"seg" + (lang() === "tr" ? " on" : "")} onClick={() => lang() !== "tr" && setLang("tr")}>Türkçe</button>
+            <button className={"seg" + (lang() === "en" ? " on" : "")} onClick={() => { if (lang() !== "en") { persist(); setLang("en"); } }}>English</button>
+            <button className={"seg" + (lang() === "tr" ? " on" : "")} onClick={() => { if (lang() !== "tr") { persist(); setLang("tr"); } }}>Türkçe</button>
           </div>
         </div>
         <label>{tt("TMDB API anahtarı (afiş, özet, oyuncular)")}

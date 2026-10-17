@@ -142,15 +142,10 @@ export const SUB_COLORS: [string, string][] = [
 export function loadSubOpts(): SubOpts {
   try {
     const o = JSON.parse(localStorage.getItem("subOpts") ?? "null");
-    // Netflix Sans became the default; move the old Inter default over once.
-    if (o && o.font === "Inter SemiBold" && !localStorage.getItem("nfMigrated")) {
-      o.font = "Netflix Sans Medium";
-      localStorage.setItem("nfMigrated", "1");
-      localStorage.setItem("subOpts", JSON.stringify(o));
-    }
     if (o) return { ...SUB_PRESETS.netflix.opts, ...o };
   } catch {}
-  return { ...SUB_PRESETS.netflix.opts };
+  // Netflix Sans can't be shipped: a fresh install uses the bundled Inter until the user adds it
+  return { ...SUB_PRESETS.netflix.opts, font: "Inter SemiBold" };
 }
 
 export function applySubOpts(o: SubOpts) {

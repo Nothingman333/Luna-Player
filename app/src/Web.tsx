@@ -78,7 +78,7 @@ export function WebResults({ query, onStream, onDownload }: {
         )}
       </h2>
       {showErr && (
-        <div className="web-errors">{state.errors.map(([p, e], i) => <div key={i}><b>{p || "Arama"}</b>: {e}</div>)}</div>
+        <div className="web-errors">{state.errors.map(([p, e], i) => <div key={i}><b>{p || tt("Arama")}</b>: {e}</div>)}</div>
       )}
       {state.busy && !state.hits.length && <div className="web-loading"><span className="dlp-spin" /> {active.length}  {tt("eklentide aranıyor…")}</div>}
       {!state.busy && !state.hits.length && <div className="muted empty-note">{tt("Web'de sonuç bulunamadı.")}</div>}

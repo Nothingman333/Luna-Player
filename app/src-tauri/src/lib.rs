@@ -158,12 +158,16 @@ fn walk(dir: &std::path::Path, out: &mut Vec<String>, depth: u32) {
 /// Every video file under the library folders.
 #[tauri::command]
 async fn scan_folders(folders: Vec<String>) -> Vec<String> {
-    let mut out = Vec::new();
-    for f in folders {
-        walk(std::path::Path::new(&f), &mut out, 0);
-    }
-    out.sort();
-    out
+    blocking(move || {
+        let mut out = Vec::new();
+        for f in folders {
+            walk(std::path::Path::new(&f), &mut out, 0);
+        }
+        out.sort();
+        Ok(out)
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -224,7 +228,7 @@ async fn gemini(key: String, model: String, body: Value) -> Result<Value, String
     let status = res.status();
     let v: Value = res.json().await.map_err(|e| e.to_string())?;
     if !status.is_success() {
-        let msg = v["error"]["message"].as_str().unwrap_or("bilinmeyen hata");
+        let msg = v["error"]["message"].as_str().map(str::to_string).unwrap_or_else(|| tr!("bilinmeyen hata", "unknown error"));
         return Err(tr!("Gemini hatası ({}): {}", "Gemini error ({}): {}", status, msg));
     }
     Ok(v)

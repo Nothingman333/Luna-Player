@@ -1,4 +1,4 @@
-import { defaultSubLangs, tt } from "./i18n";
+import { defaultSubLangs, tt, pctText, lang } from "./i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -6,7 +6,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { applySubOpts, fmtTime, isImageSub, isPgs, loadSubOpts, mpv, setProp, useMpv } from "./mpv";
 import { listen } from "@tauri-apps/api/event";
-import { customMeta, details, isRemote, torrentSrc, pinFile, relinkFile, isFinished, setFinished, nearEnd, Episode, Item, loadRecent, parseName, Recent, store, useLibrary } from "./library";
+import { customMeta, details, seasonKey, isRemote, torrentSrc, pinFile, relinkFile, isFinished, setFinished, nearEnd, Episode, Item, loadRecent, parseName, Recent, store, useLibrary } from "./library";
 import { SubtitleDialog } from "./Subtitles";
 import { Added, DownloadPanel, Downloads, DownloadsSection, downloadDir, RemoveMode, isOpenableLink, isTorrentSource, TorrentDialog, TorrentLoader, useTorrents } from "./Torrent";
 import {
@@ -124,7 +124,7 @@ export default function App() {
     if (name === "start-file") restoring.current = true;
     if (name === "playback-restart" || (name === "end-file" && ev.reason === "error")) setTLoad(null);
     if (name === "end-file" && ev.reason === "error") {
-      flash(tt("Bu dosya açılamadı: ") + (ev.file_error ?? "bilinmeyen hata"), "warn", 8000);
+      flash(tt("Bu dosya açılamadı: ") + (ev.file_error ?? tt("bilinmeyen hata")), "warn", 8000);
     }
     if (name === "file-loaded") {
       setNextUp(null);
@@ -304,6 +304,7 @@ export default function App() {
     // German joined the default subtitle languages.
     if (store.get("langs") === "tr,en") store.set("langs", "tr,en,de");
     setProp("screenshot-directory", "~~desktop/");
+    setProp("slang", lang() === "tr" ? "tr,tur,en,eng" : "en,eng");
     // This is a desktop app: no browser context menu, reload, find or zoom.
     const noMenu = (e: MouseEvent) => e.preventDefault();
     const noBrowserKeys = (e: KeyboardEvent) => {
@@ -367,7 +368,7 @@ export default function App() {
   const nextFile = current?.parsed.kind === "tv" && curIdx >= 0 ? current.files[curIdx + 1] : undefined;
   const prevFile = current?.parsed.kind === "tv" && curIdx > 0 ? current.files[curIdx - 1] : undefined;
   const epName = current?.meta && curFile?.season != null
-    ? store.json<Episode[]>(`season:${current.meta.id}:${curFile.season}`, []).find((e) => e.episode === curFile.episode)?.name
+    ? store.json<Episode[]>(seasonKey(current.meta.id, curFile.season), []).find((e) => e.episode === curFile.episode)?.name
     : undefined;
   const titleParts = {
     show: current ? current.meta?.title ?? current.parsed.title : s.title,
@@ -750,7 +751,7 @@ export default function App() {
   const downloadedPct = Math.round(haves.reduce((n, [a, b]) => n + b - a, 0) * 100);
 
   const subLabel = s.sub
-    ? (s.sub.lang ? s.sub.lang.toUpperCase() : tt("Altyazı")) + (s.sub.external ? " · harici" : "")
+    ? (s.sub.lang ? s.sub.lang.toUpperCase() : tt("Altyazı")) + (s.sub.external ? tt(" · harici") : "")
     : tt("Altyazı yok");
   const detailsItem = detailsKey ? lib.items.find((i) => i.key === detailsKey) : undefined;
   const detailsMissing = detailsItem ? detailsItem.files.map((f) => f.path).filter((p) => lib.missing.has(p) && !isRemote(p)) : [];
@@ -903,7 +904,7 @@ export default function App() {
         <CardMenu x={cardMenu.x} y={cardMenu.y} entries={menuEntries(cardMenu.t)} onClose={() => setCardMenu(null)} />
       )}
       {confirmDel && (
-        <Confirm title={tt("Dosya silinsin mi?")} danger ok="Evet, sil" onCancel={() => setConfirmDel(null)} onOk={() => doDelete(confirmDel)}
+        <Confirm title={tt("Dosya silinsin mi?")} danger ok={tt("Evet, sil")} onCancel={() => setConfirmDel(null)} onOk={() => doDelete(confirmDel)}
           text={tt("“{0}” diskten silinecek ve Geri Dönüşüm Kutusu'na taşınacak. Aynı adlı altyazı dosyaları da silinir.", confirmDel.path.split(/[\\/]/).pop())} />
       )}
       {rematch?.item && (
@@ -947,17 +948,17 @@ export default function App() {
                 <div className="fill" style={{ width: (s.duration ? (s.time / s.duration) * 100 : 0) + "%" }} />
               </div>
               <span className="t right">{fmtTime(s.duration - s.time)}</span>
-              {haves.length > 0 && downloadedPct < 100 && <span className="dl-pct" title={tt("İnen kısım")}>↓ %{downloadedPct}</span>}
+              {haves.length > 0 && downloadedPct < 100 && <span className="dl-pct" title={tt("İnen kısım")}>↓ {pctText(downloadedPct)}</span>}
             </div>
             <div className="controls">
               <div className="c-side">
                 <button className="nf" aria-label={s.paused ? tt("Oynat") : tt("Duraklat")} onClick={() => mpv("cycle", "pause")}>
                   <Icon d={s.paused ? I.play : I.pause} fill size={38} />
                 </button>
-                <button className="nf" aria-label="10 saniye geri" onClick={() => mpv("seek", -10)}>
+                <button className="nf" aria-label={tt("10 saniye geri")} onClick={() => mpv("seek", -10)}>
                   <Icon d={I.back} size={38} /><span className="ten">10</span>
                 </button>
-                <button className="nf" aria-label="10 saniye ileri" onClick={() => mpv("seek", 10)}>
+                <button className="nf" aria-label={tt("10 saniye ileri")} onClick={() => mpv("seek", 10)}>
                   <Icon d={I.fwd} size={38} /><span className="ten">10</span>
                 </button>
                 <button className={"nf" + (countdown != null ? " on" : "")} aria-label={tt("3'ten geri say ve başlat")}

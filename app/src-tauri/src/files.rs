@@ -21,6 +21,40 @@ fn mpv_com(mpv_exe: &Path) -> PathBuf {
     mpv_exe.with_file_name("mpv.com")
 }
 
+/// Runs `cmd` and returns its stdout, killing it if it takes longer than `secs`.
+fn run_limited(mut cmd: Command, secs: u64) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    use std::process::Stdio;
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let mut out = child.stdout.take();
+    let reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(o) = out.as_mut() {
+            let _ = o.read_to_end(&mut buf);
+        }
+        buf
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(50)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = reader.join();
+                return Err(tr!("Zaman aşımı", "Timed out"));
+            }
+        }
+    }
+    Ok(reader.join().unwrap_or_default())
+}
+
 #[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaInfo {
@@ -40,15 +74,10 @@ pub fn probe(mpv_exe: &Path, file: &str) -> Result<MediaInfo, String> {
     let fmt = "--term-playing-msg=MPINFO|${width}|${height}|${current-tracks/video/codec}|\
 ${video-params/gamma}|${current-tracks/video/dolby-vision-profile}|${current-tracks/audio/codec}|\
 ${current-tracks/audio/demux-channel-count}|${=duration}";
-    let out = Command::new(mpv_com(mpv_exe))
-        .args([
-            "--no-config", "--vo=null", "--ao=null", "--frames=1", "--hwdec=no",
-            "--term-status-msg=", fmt, file,
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
-    let text = String::from_utf8_lossy(&out.stdout);
+    let mut cmd = Command::new(mpv_com(mpv_exe));
+    cmd.args(["--no-config", "--vo=null", "--ao=null", "--frames=1", "--hwdec=no", "--term-status-msg=", fmt, file]);
+    let out = run_limited(cmd, 30)?;
+    let text = String::from_utf8_lossy(&out);
     let line = text.lines().find(|l| l.starts_with("MPINFO|")).ok_or(tr!("Bilgi okunamadı", "Couldn't read the info"))?;
     let f: Vec<&str> = line.split('|').collect();
     let num = |i: usize| f.get(i).and_then(|s| s.trim().parse::<f64>().ok()).unwrap_or(0.0);
@@ -83,23 +112,23 @@ pub fn thumbnail(mpv_exe: &Path, file: &str, cache: &Path) -> Result<String, Str
     std::fs::create_dir_all(cache).map_err(|e| e.to_string())?;
     let tmp = cache.join(format!("tmp-{:016x}", h.finish()));
     let _ = std::fs::create_dir_all(&tmp);
-    Command::new(mpv_com(mpv_exe))
-        .args([
-            "--no-config", "--ao=null", "--sid=no", "--frames=1", "--start=15%", "--hwdec=no",
-            "--vo=image", "--vo-image-format=jpg", "--vo-image-jpeg-quality=82",
-            "--vf=scale=480:-2", "--really-quiet",
-        ])
-        .arg(format!("--vo-image-outdir={}", tmp.display()))
-        .arg(file)
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let mut cmd = Command::new(mpv_com(mpv_exe));
+    cmd.args([
+        "--no-config", "--ao=null", "--sid=no", "--frames=1", "--start=15%", "--hwdec=no",
+        "--vo=image", "--vo-image-format=jpg", "--vo-image-jpeg-quality=82",
+        "--vf=scale=480:-2", "--really-quiet",
+    ])
+    .arg(format!("--vo-image-outdir={}", tmp.display()))
+    .arg(file);
+    let ran = run_limited(cmd, 30);
     let produced = std::fs::read_dir(&tmp)
-        .map_err(|e| e.to_string())?
-        .flatten()
-        .map(|e| e.path())
-        .find(|p| p.extension().is_some_and(|x| x == "jpg"))
-        .ok_or(tr!("Kare alınamadı", "Couldn't grab a frame"))?;
+        .ok()
+        .and_then(|rd| rd.flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|x| x == "jpg")));
+    let Some(produced) = produced else {
+        let _ = std::fs::remove_dir_all(&tmp);
+        ran?;
+        return Err(tr!("Kare alınamadı", "Couldn't grab a frame"));
+    };
     std::fs::rename(&produced, &target).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_dir_all(&tmp);
     Ok(target.to_string_lossy().into_owned())
@@ -236,5 +265,24 @@ mod tests {
         for n in ["aliens.en.srt", "alien.covenant.tr.srt", "alien resurrection.srt", "alien3.srt"] {
             assert!(!is_own_sub(n, "alien"), "{n}");
         }
+    }
+}
+
+#[cfg(test)]
+mod probe_tests {
+    /// mpv reads a real file's streams; an address that never answers is cut off by the time limit.
+    #[test]
+    #[ignore]
+    fn probe_and_timeout() {
+        let exe = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("mpv").join("mpv.exe");
+        let file = std::env::var("LUNA_TEST_VIDEO").unwrap();
+        let t = std::time::Instant::now();
+        let info = super::probe(&exe, &file).expect("probe");
+        println!("{}x{} {} {:.0}s in {:?}", info.width, info.height, info.codec, info.duration, t.elapsed());
+        let t = std::time::Instant::now();
+        // 10.255.255.1 is unroutable: the connection just hangs
+        let r = super::probe(&exe, "http://10.255.255.1/video.mkv");
+        println!("unreachable: {:?} after {:?}", r.err(), t.elapsed());
+        assert!(t.elapsed().as_secs() <= 35);
     }
 }
