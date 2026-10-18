@@ -842,4 +842,5 @@ export const EN: Record<string, string> = {
   " · izledin": " · watched",
   "Arama": "Search",
   "Yüksek puanladıkları (4★+)": "Rated 4★+",
+  "Sinema": "Cinema",
 };
