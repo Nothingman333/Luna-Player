@@ -104,6 +104,10 @@ export function VideoPanel({ path, onClose }: { path: string; onClose: () => voi
   // Sharpness and grain removal rebuild a video filter (expensive): applied when the slider is released.
   const commit = () => setV((cur) => { applyVideoSet(cur); save(cur); return cur; });
   const set = (patch: Partial<VideoSet>) => {
+    // a slider value still waiting to be sent would land after this and undo it (e.g. Reset)
+    clearTimeout(timer.current);
+    timer.current = 0;
+    pending.current = {};
     const next = { ...v, ...patch };
     setV(next);
     applyVideoSet(next);

@@ -65,6 +65,15 @@ fn is_video(name: &str) -> bool {
     name.rsplit('.').next().is_some_and(|x| VIDEO_EXT.contains(&x.to_lowercase().as_str()))
 }
 
+/// The first file a magnet asks for with BEP 53 `so=` (e.g. `so=4` or `so=4,5`).
+fn selected_file(source: &str) -> Option<usize> {
+    let query = source.strip_prefix("magnet:")?.split_once('?').map_or("", |(_, q)| q);
+    query
+        .split('&')
+        .find_map(|p| p.strip_prefix("so="))
+        .and_then(|v| v.split([',', '-']).next()?.parse().ok())
+}
+
 /// `source` is a magnet link, an http(s) .torrent URL or a local .torrent file.
 pub async fn add(source: String, out_dir: String) -> Result<Added, String> {
     let out = PathBuf::from(&out_dir);
@@ -104,8 +113,19 @@ pub async fn add(source: String, out_dir: String) -> Result<Added, String> {
                 .map(|(idx, f)| TFile { idx, name: f.relative_filename.to_string_lossy().into_owned(), len: f.len })
                 .collect()
         })
-        .map_err(|e| e.to_string())?;
-    let video_idx = files.iter().filter(|f| is_video(&f.name)).max_by_key(|f| f.len).map(|f| f.idx);
+        .map_err(|e| e.to_string())?;    // A file named by the link (one episode of a season pack) plays instead of the biggest video;
+    // if the torrent was already here with other files selected, that file is added to them.
+    let picked = selected_file(&source).filter(|&i| files.get(i).is_some_and(|f| is_video(&f.name)));
+    if let Some(i) = picked {
+        if let Some(mut only) = handle.only_files() {
+            if !only.contains(&i) {
+                only.push(i);
+                let set: std::collections::HashSet<usize> = only.into_iter().collect();
+                let _ = eng.session.update_only_files(&handle, &set).await;
+            }
+        }
+    }
+    let video_idx = picked.or_else(|| files.iter().filter(|f| is_video(&f.name)).max_by_key(|f| f.len).map(|f| f.idx));
     let folder = handle.output_folder().to_path_buf();
     Ok(Added {
         id,
@@ -139,11 +159,10 @@ pub fn haves(id: usize, idx: usize) -> Result<Vec<(f64, f64)>, String> {
     let h = eng.session.get(id.into()).ok_or(tr!("Torrent bulunamadı", "Torrent not found"))?;
     let (off, len, plen) = h
         .with_metadata(|m| {
-            let f = &m.file_infos[idx];
-            (f.offset_in_torrent, f.len, m.info.lengths().default_piece_length() as u64)
+            let f = m.file_infos.get(idx).ok_or_else(|| tr!("Dosya bulunamadı", "File not found"))?;
+            Ok::<_, String>((f.offset_in_torrent, f.len, m.info.lengths().default_piece_length() as u64))
         })
-        .map_err(|e| e.to_string())?;
-    if len == 0 {
+        .map_err(|e| e.to_string())??;    if len == 0 {
         return Ok(vec![]);
     }
     let (bf, _) = eng.api.api_dump_haves(id.into()).map_err(|e| e.to_string())?;
@@ -176,6 +195,16 @@ pub async fn remove(id: usize, delete_files: bool) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn selected_file() {
+        use super::selected_file as sel;
+        assert_eq!(sel("magnet:?xt=urn:btih:abc&so=4"), Some(4));
+        assert_eq!(sel("magnet:?xt=urn:btih:abc&dn=x&so=2,3&tr=udp://t"), Some(2));
+        assert_eq!(sel("magnet:?xt=urn:btih:abc&so=7-9"), Some(7));
+        assert_eq!(sel("magnet:?xt=urn:btih:abc"), None);
+        assert_eq!(sel("https://x/a.torrent?so=1"), None);
+    }
+
     /// Streams the first bytes of Big Buck Bunny (Creative Commons) through the local HTTP API.
     #[tokio::test(flavor = "multi_thread")]
     #[ignore]

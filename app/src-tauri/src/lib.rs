@@ -5,6 +5,7 @@ macro_rules! tr {
         if $crate::is_tr() { format!($t $(, $a)*) } else { format!($e $(, $a)*) }
     };
 }
+use std::io::Read;
 static UI_TR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub fn is_tr() -> bool {
     UI_TR.load(std::sync::atomic::Ordering::Relaxed)
@@ -19,11 +20,14 @@ mod preview;
 mod fonts;
 mod indexers;
 mod letterboxd;
+mod books;
 mod mpv;
+mod music;
 mod pgs;
 mod subs;
 mod torrent;
 mod upscaler;
+mod yt;
 
 use serde_json::Value;
 use std::path::PathBuf;
@@ -153,6 +157,73 @@ fn walk(dir: &std::path::Path, out: &mut Vec<String>, depth: u32) {
             out.push(p.to_string_lossy().into_owned());
         }
     }
+}
+
+/// Every audio file under the music folders, with tags and cached covers.
+#[tauri::command]
+async fn music_scan(app: AppHandle, folders: Vec<String>) -> Result<Vec<music::Track>, String> {
+    let index = app.path().app_data_dir().map_err(|e| e.to_string())?.join("music-index.json");
+    let covers = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("covers");
+    blocking(move || Ok(music::scan(&folders, &index, &covers))).await
+}
+
+/// YouTube results for a song (yt-dlp next to mpv).
+#[tauri::command]
+async fn yt_search(app: AppHandle, query: String, n: Option<u32>) -> Result<Vec<yt::Hit>, String> {
+    let n = n.unwrap_or(6);
+    // YouTube's own search first (fast); yt-dlp when that fails (YouTube changed something)
+    if let Ok(hits) = yt::search_api(&query, n).await {
+        return Ok(hits);
+    }
+    let ytdlp = mpv_exe(&app).with_file_name("yt-dlp.exe");
+    blocking(move || yt::search(&ytdlp, &query, n)).await
+}
+
+/// What a YouTube (or other supported) link is: a video or a playlist's videos.
+#[tauri::command]
+async fn yt_info(app: AppHandle, url: String) -> Result<Vec<yt::Hit>, String> {
+    let ytdlp = mpv_exe(&app).with_file_name("yt-dlp.exe");
+    blocking(move || yt::info(&ytdlp, &url)).await
+}
+
+/// Every book (EPUB, PDF, CBZ) under the book folders.
+#[tauri::command]
+async fn books_scan(app: AppHandle, folders: Vec<String>) -> Result<Vec<books::Book>, String> {
+    let index = app.path().app_data_dir().map_err(|e| e.to_string())?.join("books-index.json");
+    let covers = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("covers");
+    blocking(move || Ok(books::scan(&folders, &index, &covers))).await
+}
+
+/// A book file's bytes, for the reader.
+#[tauri::command]
+async fn book_bytes(path: String) -> Result<tauri::ipc::Response, String> {
+    blocking(move || {
+        let len = std::fs::metadata(&path).map_err(|e| e.to_string())?.len();
+        if len > 300 * 1024 * 1024 {
+            return Err(tr!("Dosya çok büyük", "File too big"));
+        }
+        std::fs::read(&path).map(tauri::ipc::Response::new).map_err(|e| e.to_string())
+    }).await
+}
+#[tauri::command]
+async fn cbz_pages(path: String) -> Result<Vec<String>, String> {
+    blocking(move || books::cbz_pages(std::path::Path::new(&path))).await
+}
+
+#[tauri::command]
+async fn cbz_page(path: String, name: String) -> Result<tauri::ipc::Response, String> {
+    blocking(move || books::cbz_page(std::path::Path::new(&path), &name).map(tauri::ipc::Response::new)).await
+}
+
+/// Where books from the open libraries are saved unless the user picked a book folder.
+#[tauri::command]
+fn books_default_dir(app: AppHandle) -> Option<String> {
+    app.path().document_dir().ok().map(|d| d.join("Luna Books").to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+async fn book_download(url: String, dir: String, title: String, author: String, kind: Option<String>, fallback: Option<String>) -> Result<books::Downloaded, String> {
+    books::download(&url, std::path::Path::new(&dir), &title, &author, kind.as_deref().unwrap_or(""), fallback.as_deref().unwrap_or("")).await
 }
 
 /// Every video file under the library folders.
@@ -290,13 +361,23 @@ async fn web_search(app: AppHandle, query: String, disabled: Vec<String>) -> Res
     Ok(indexers::search(&plugins_dir(&app), query, disabled).await)
 }
 
+
+fn safe_plugin_file(file: &str) -> Result<(), String> {
+    let p = std::path::Path::new(file);
+    if file.trim().is_empty() || p.is_absolute() || p.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_))) {
+        return Err(tr!("Geçersiz eklenti dosyası", "Invalid plugin file"));
+    }
+    Ok(())
+}
 #[tauri::command]
 async fn plugin_test(app: AppHandle, file: String, query: String) -> Result<Vec<indexers::Hit>, String> {
+    safe_plugin_file(&file)?;
     indexers::search_one(&plugins_dir(&app).join(file), &query).await
 }
 
 #[tauri::command]
 async fn web_resolve(app: AppHandle, file: String, url: String) -> Result<String, String> {
+    safe_plugin_file(&file)?;
     indexers::resolve(&plugins_dir(&app).join(file), &url).await
 }
 
@@ -420,11 +501,19 @@ fn state_file(app: &AppHandle) -> PathBuf {
 /// storage away (e.g. after a crash); Luna then restores from this file at startup.
 #[tauri::command]
 async fn state_save(app: AppHandle, json: String) -> Result<(), String> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    static WRITTEN: std::sync::Mutex<u64> = std::sync::Mutex::new(0);
+    let ticket = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let path = state_file(&app);
     blocking(move || {
         if json.len() < 10 {
             return Ok(());
         }
+        let mut written = WRITTEN.lock().unwrap_or_else(|e| e.into_inner());
+        if ticket < *written {
+            return Ok(());
+        }
+        *written = ticket;
         std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
         // Keep the previous good copy, then replace atomically.
         if path.exists() {
@@ -444,11 +533,15 @@ async fn state_load(app: AppHandle) -> Option<String> {
     blocking(move || {
         if let Some(seed) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("luna-restore.json"))) {
             if let Ok(s) = std::fs::read_to_string(&seed) {
-                let _ = std::fs::rename(&seed, seed.with_extension("json.used"));
-                return Ok(Some(s));
-            }
-        }
-        Ok(std::fs::read_to_string(&path).or_else(|_| std::fs::read_to_string(path.with_extension("json.bak"))).ok())
+                if serde_json::from_str::<Value>(&s).is_ok() {
+                    let _ = std::fs::rename(&seed, seed.with_extension("json.used"));
+                    return Ok(Some(s));
+                }
+                // a broken restore file must not hide the real saved state
+                let _ = std::fs::rename(&seed, seed.with_extension("json.bad"));
+            }        }
+        let valid = |p: PathBuf| std::fs::read_to_string(p).ok().filter(|s| serde_json::from_str::<Value>(s).is_ok());
+        Ok(valid(path.clone()).or_else(|| valid(path.with_extension("json.bak"))))
     })
     .await
     .unwrap_or(None)
@@ -523,12 +616,124 @@ pub(crate) fn forward_sub_text(app: &AppHandle, text: &str) {
     }
 }
 
+/// The CSV files of a data export (Letterboxd): every .csv inside a .zip, or the .csv files themselves.
+#[tauri::command]
+async fn read_export(paths: Vec<String>) -> Result<Vec<(String, String)>, String> {
+    blocking(move || {
+        const MAX: u64 = 50_000_000;
+        let mut out = Vec::new();
+        for p in paths {
+            let path = std::path::Path::new(&p);
+            if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")) {
+                let mut z = zip::ZipArchive::new(std::fs::File::open(path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+                for i in 0..z.len() {
+                    let mut f = z.by_index(i).map_err(|e| e.to_string())?;
+                    if !f.name().to_lowercase().ends_with(".csv") || f.size() > MAX {
+                        continue;
+                    }
+                    let name = f.name().replace('\\', "/");
+                    let mut text = String::new();
+                    std::io::Read::take(&mut f, MAX).read_to_string(&mut text).map_err(|e| e.to_string())?;
+                    out.push((name, text));
+                }
+            } else {
+                let len = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
+                if len > MAX {
+                    return Err(tr!("Dosya çok büyük", "File too big"));
+                }
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let mut text = String::new();
+                std::io::Read::take(std::fs::File::open(path).map_err(|e| e.to_string())?, MAX)
+                    .read_to_string(&mut text).map_err(|e| e.to_string())?;
+                out.push((name, text));
+            }
+        }
+        Ok(out)
+    })
+    .await
+}
+/// One GET returning text (OPDS catalogs, podcast feeds: XML that pages can't fetch across origins).
+#[tauri::command]
+async fn http_text(url: String, bearer: Option<String>) -> Result<String, String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(tr!("Geçersiz adres", "Invalid address"));
+    }
+    let mut req = reqwest::Client::builder()
+        .user_agent("Luna Player")
+        .timeout(std::time::Duration::from_secs(25))
+        .build()
+        .map_err(|e| e.to_string())?
+        .get(&url);
+    if let Some(t) = bearer {
+        req = req.bearer_auth(t).header(reqwest::header::ACCEPT, "application/json");
+    }
+    let res = req
+        .send()
+        .await
+        .map_err(|e| tr!("Ulaşılamadı: {}", "Couldn't reach it: {}", e))?;
+    if !res.status().is_success() {
+        return Err(tr!("Sunucu hata verdi ({})", "The server returned an error ({})", res.status()));
+    }
+    if res.content_length().is_some_and(|n| n > 20 * 1024 * 1024) {
+        return Err(tr!("Yanıt çok büyük", "The answer is too big"));
+    }    let bytes = res.bytes().await.map_err(|e| e.to_string())?;
+    if bytes.len() > 20 * 1024 * 1024 {
+        return Err(tr!("Yanıt çok büyük", "The answer is too big"));
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// One GET from a Stremio addon (manifest, catalog, meta or streams), as JSON. Done here rather than
+/// in the page because not every addon sends CORS headers.
+#[tauri::command]
+async fn addon_get(url: String) -> Result<Value, String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(tr!("Geçersiz eklenti adresi", "Not a valid addon address"));
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let res = client
+        .get(&url)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| tr!("Eklentiye ulaşılamadı: {}", "Couldn't reach the addon: {}", e))?;
+    if !res.status().is_success() {
+        return Err(tr!("Eklenti hata verdi ({})", "The addon returned an error ({})", res.status()));
+    }
+    res.json::<Value>()
+        .await
+        .map_err(|e| tr!("Eklentinin yanıtı okunamadı: {}", "Couldn't read the addon's answer: {}", e))
+}
+
 /// Downloads a web page (e.g. a Letterboxd / IMDb list) and returns its readable text, including the
 /// film names that only live in poster alt texts. Letterboxd lists: the first pages are followed too.
 #[tauri::command]
+fn is_private_url(u: &str) -> bool {
+    let host = match reqwest::Url::parse(u) {
+        Ok(x) => x.host_str().unwrap_or("").to_string(),
+        Err(_) => return true,
+    };
+    let h = host.trim_start_matches('[').trim_end_matches(']').to_lowercase();
+    if h == "localhost" || h.ends_with(".localhost") || h == "0.0.0.0" {
+        return true;
+    }
+    if let Ok(ip) = h.parse::<std::net::IpAddr>() {
+        return match ip {
+            std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || v4.is_link_local() || v4.is_unspecified(),
+            std::net::IpAddr::V6(v6) => v6.is_loopback() || v6.is_unspecified(),
+        };
+    }
+    false
+}
+#[tauri::command]
 async fn fetch_page_text(url: String) -> Result<String, String> {
     use scraper::{Html, Selector};
-    let client = reqwest::Client::builder()
+    if !(url.starts_with("https://") || url.starts_with("http://")) || is_private_url(&url) {
+        return Err(tr!("Bu adres güvenli değil", "This address isn't allowed"));
+    }    let client = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36")
         .timeout(std::time::Duration::from_secs(20))
         .build()
@@ -549,7 +754,12 @@ async fn fetch_page_text(url: String) -> Result<String, String> {
             }
             break;
         }
-        let html = res.text().await.map_err(|e| e.to_string())?;
+        let body = res.bytes().await.map_err(|e| e.to_string())?;
+        if body.len() > 4 * 1024 * 1024 {
+            if i == 0 { return Err(tr!("Sayfa çok büyük", "The page is too big")); }
+            break;
+        }
+        let html = String::from_utf8_lossy(&body).into_owned();
         let text = {
             let doc = Html::parse_document(&html);
             let mut t = String::new();
@@ -698,6 +908,15 @@ pub fn run() {
             download_subtitle,
             subtitle_cues,
             scan_folders,
+            music_scan,
+            books_scan,
+            yt_search,
+            yt_info,
+            book_bytes,
+            cbz_pages,
+            cbz_page,
+            books_default_dir,
+            book_download,
             probe_video,
             video_thumbnail,
             seek_preview,
@@ -717,6 +936,9 @@ pub fn run() {
             pgs_clear,
             upscaler_note,
             fetch_page_text,
+            addon_get,
+            http_text,
+            read_export,
             letterboxd_read,
             plugins_list,
             plugins_add,

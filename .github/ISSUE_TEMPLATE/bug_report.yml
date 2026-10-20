@@ -1,0 +1,53 @@
+name: Bug report
+description: Something in Luna Player does not work as expected.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing Luna. Please do not paste API keys, personal file paths or copyrighted content.
+        For security problems use SECURITY.md instead of a public issue.
+  - type: input
+    id: version
+    attributes:
+      label: Luna version
+      description: Settings → About, or the setup file name.
+      placeholder: 0.3.0
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 23H2
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Click ...
+        3. See ...
+  - type: textarea
+    id: logs
+    attributes:
+      label: Screenshots, logs or a sample file
+      description: Remove personal information first. A short video of the problem helps a lot.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I am using the latest release.
+        - label: I have not included API keys or private data in this report.
+          required: true

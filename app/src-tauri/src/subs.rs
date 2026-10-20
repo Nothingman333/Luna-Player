@@ -147,6 +147,11 @@ pub async fn search(video: &str, key: &str, langs: &str, q: Query) -> Result<Vec
 }
 
 /// Downloads one subtitle next to the video (or into the cache if that folder is read-only).
+fn looks_like_html(b: &[u8]) -> bool {
+    let head = String::from_utf8_lossy(&b[..b.len().min(512)]).trim_start_matches('\u{feff}').trim_start().to_ascii_lowercase();
+    b.is_empty() || head.starts_with("<!doctype html") || head.starts_with("<html") || head.starts_with("<?xml")
+}
+
 pub async fn download(video: &str, key: &str, hit_id: i64, language: &str, cache: PathBuf) -> Result<String, String> {
     let http = reqwest::Client::new();
     let res = http
@@ -171,9 +176,15 @@ pub async fn download(video: &str, key: &str, hit_id: i64, language: &str, cache
         .send()
         .await
         .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| tr!("Altyazı indirilemedi: {}", "Couldn't download the subtitle: {}", e))?
         .bytes()
         .await
         .map_err(|e| e.to_string())?;
+    // an error page served with a success code is still not a subtitle
+    if looks_like_html(&bytes) {
+        return Err(tr!("Altyazı yerine bir hata sayfası geldi", "Got an error page instead of a subtitle"));
+    }
 
     let path = Path::new(video);
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("video");
@@ -241,4 +252,17 @@ pub fn cues(file: &str) -> Result<Vec<(f64, f64)>, String> {
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn html_is_not_a_subtitle() {
+        use super::looks_like_html as h;
+        assert!(h(b"<!DOCTYPE html><html><body>403</body></html>"));
+        assert!(h(b"  <html>"));
+        assert!(h(b""));
+        assert!(!h(b"1\r\n00:00:01,000 --> 00:00:02,000\r\nHello\r\n"));
+        assert!(!h("\u{feff}1\n00:00:01,000 --> 00:00:02,000\nMerhaba\n".as_bytes()));
+    }
 }

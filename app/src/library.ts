@@ -8,7 +8,13 @@ export const store = {
     try { return localStorage.getItem(k); } catch { return null; }
   },
   set: (k: string, v: string) => {
-    try { localStorage.setItem(k, v); } catch {}
+    try { localStorage.setItem(k, v); return true; } catch {
+      try { window.dispatchEvent(new Event("luna-storage-full")); } catch {}
+      return false;
+    }
+  },
+  remove: (k: string) => {
+    try { localStorage.removeItem(k); } catch {}
   },
   json<T>(k: string, fallback: T): T {
     try { return JSON.parse(localStorage.getItem(k) ?? "") ?? fallback; } catch { return fallback; }
@@ -64,11 +70,15 @@ export function parseName(path: string): Parsed {
     }
     return { kind: "tv", title, season: +ep[2], episode: +ep[3] };
   }
-  const y = name.match(/^(.*?)[\s._([-]+((?:19|20)\d{2})(?!\d)/);
-  if (y && clean(y[1])) return { kind: "movie", title: clean(y[1]), year: +y[2] };
-  return { kind: "movie", title: clean(name) || clean(parentDir(path)) };
+  const maxYear = new Date().getFullYear() + 2;
+  // "1920x1080" is a resolution, not a year: remove it before looking for the year
+  const scrubbed = name.replace(/\b\d{3,4}\s*[x×]\s*\d{3,4}\b/gi, " ");
+  let y: { at: number; year: number } | null = null;
+  for (const m of scrubbed.matchAll(/[\s._([-]+((?:19|20)\d{2})(?![\dx×])/g))
+    if (+m[1] <= maxYear && clean(scrubbed.slice(0, m.index))) y = { at: m.index!, year: +m[1] };
+  if (y) return { kind: "movie", title: clean(scrubbed.slice(0, y.at)), year: y.year };
+  return { kind: "movie", title: clean(scrubbed) || clean(parentDir(path)) };
 }
-
 export const groupKey = (p: Parsed) =>
   p.kind === "tv" ? "tv:" + p.title.toLowerCase() : "movie:" + p.title.toLowerCase() + ":" + (p.year ?? "");
 
@@ -108,7 +118,47 @@ async function tmdb(path: string, params: Record<string, string> = {}) {
   return r.json();
 }
 
-export type SearchHit = { id: number; kind: "movie" | "tv"; title: string; year: string; poster: string | null; rating?: number };
+export type SearchHit = { id: number; kind: "movie" | "tv"; title: string; year: string; poster: string | null; rating?: number; backdrop?: string | null; overview?: string };
+
+const toHit = (h: any, kind?: "movie" | "tv"): SearchHit => ({
+  id: h.id, kind: kind ?? (h.media_type === "tv" ? "tv" : "movie"), title: h.title ?? h.name,
+  year: (h.release_date ?? h.first_air_date ?? "").slice(0, 4), poster: h.poster_path,
+  rating: Math.round((h.vote_average ?? 0) * 10) / 10, backdrop: h.backdrop_path, overview: h.overview,
+});
+
+/** A TMDB list (trending, popular, now playing…), cached for a few hours. */
+export async function tmdbList(path: string, kind?: "movie" | "tv", params: Record<string, string> = {}): Promise<SearchHit[]> {
+  const k = `tlist:${locale()}:${path}:${JSON.stringify(params)}`;
+  const c = store.json<{ at: number; hits: SearchHit[] } | null>(k, null);
+  if (c && Date.now() - c.at < 6 * 3600e3) return c.hits;
+  const r = await tmdb(path, { language: locale(), ...params });
+  const hits = (r.results ?? []).filter((h: any) => h.media_type !== "person" && h.poster_path).map((h: any) => toHit(h, kind));
+  // lists not opened for two days go (localStorage is mirrored to disk; keep it small)
+  try {
+    for (const old of Object.keys(localStorage))
+      if (old.startsWith("tlist:") && Date.now() - (store.json<{ at: number }>(old, { at: 0 }).at ?? 0) > 2 * 86400e3) localStorage.removeItem(old);
+  } catch {}
+  store.set(k, JSON.stringify({ at: Date.now(), hits }));
+  return hits;
+}
+
+/** The IMDb id of a TMDB title (what Stremio addons go by). */
+export async function imdbOf(kind: "movie" | "tv", id: number): Promise<string | null> {
+  const k = `imdb:${kind}:${id}`;
+  const c = store.get(k);
+  if (c) return c;
+  const r = await tmdb(`/${kind}/${id}/external_ids`).catch(() => null);
+  const imdb: string | null = r?.imdb_id || null;
+  if (imdb) store.set(k, imdb);
+  return imdb;
+}
+
+/** The TMDB title behind an IMDb id. */
+export async function fromImdb(imdb: string): Promise<SearchHit | null> {
+  const r = await tmdb(`/find/${imdb}`, { external_source: "imdb_id", language: locale() }).catch(() => null);
+  const h = r?.movie_results?.[0] ?? r?.tv_results?.[0];
+  return h ? toHit(h, r.movie_results?.[0] ? "movie" : "tv") : null;
+}
 
 export async function searchTmdb(query: string, kind: "movie" | "tv", year?: number): Promise<SearchHit[]> {
   const r = await tmdb(`/search/${kind}`, {
@@ -184,7 +234,8 @@ export function pinFile(path: string) {
 }
 
 /** Watched to the end (or marked by hand). Credits don't count: the last 5 minutes are enough. */
-export const loadFinished = () => store.json<Record<string, number>>("finished", {});
+let finishedCache: Record<string, number> | null = null;
+export const loadFinished = () => (finishedCache ??= store.json<Record<string, number>>("finished", {}));
 export const isFinished = (path: string) => !!loadFinished()[path];
 export function setFinished(paths: string[], on: boolean) {
   const f = loadFinished();
@@ -218,6 +269,8 @@ export function relinkFile(from: string, to: string) {
 export type LibFile = { path: string; season?: number; episode?: number };
 export type Item = { key: string; parsed: Parsed; files: LibFile[]; meta: Meta | null };
 
+const normDir = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+
 export function useLibrary(opened: string[] = []) {
   const [folders, setFoldersState] = useState<string[]>(() => store.json("folders", []));
   const [files, setFiles] = useState<string[]>(() => store.json("files", []));
@@ -240,14 +293,21 @@ export function useLibrary(opened: string[] = []) {
 
   // Show the cached library instantly, refresh from disk in the background.
   useEffect(() => {
-    if (!folders.length) { setFiles([]); setScanning(false); return; }
+    if (!folders.length) { store.set("files", "[]"); setFiles([]); setScanning(false); return; }
     let alive = true;
     setScanning(true);
-    invoke<string[]>("scan_folders", { folders }).then((f) => {
+    (async () => {
+      let f = await invoke<string[]>("scan_folders", { folders });
+      const ok = await invoke<boolean[]>("paths_exist", { paths: folders }).catch(() => folders.map(() => true));
+      const gone = folders.filter((_, i) => ok[i] === false).map(normDir);
+      if (gone.length) {
+        const keep = store.json<string[]>("files", []).filter((p) => gone.some((r) => normDir(p).startsWith(r + "/")));
+        f = [...new Set([...f, ...keep])].sort();
+      }
       if (!alive) return;
       store.set("files", JSON.stringify(f));
       setFiles(f);
-    }).finally(() => alive && setScanning(false));
+    })().catch(() => {}).finally(() => alive && setScanning(false));
     return () => { alive = false; };
   }, [folders, tick]);
 
@@ -260,6 +320,9 @@ export function useLibrary(opened: string[] = []) {
       const it = map.get(key) ?? { key, parsed, files: [], meta: meta[key] ?? null };
       it.files.push({ path, season: parsed.season, episode: parsed.episode });
       map.set(key, it);
+    }
+    for (const it of map.values()) {
+      if (it.meta && it.meta.kind !== it.parsed.kind) it.parsed = { ...it.parsed, kind: it.meta.kind };
     }
     for (const it of map.values())
       it.files.sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? 0) - (b.episode ?? 0));

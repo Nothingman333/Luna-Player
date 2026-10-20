@@ -10,10 +10,8 @@
 </p>
 
 <p align="center">
-  <a href="../../releases/latest"><b>⬇ Download for Windows</b></a>
+  <a href="releases/latest"><b>⬇ Download for Windows</b></a>
 </p>
-
-![Luna Player home screen](docs/screenshots/home.jpg)
 
 ## What it does
 
@@ -21,20 +19,14 @@
 series and adds posters, summaries, cast and trailers, so your collection looks like a streaming service.
 It remembers where you stopped.
 
-![Film details with cast](docs/screenshots/details.jpg)
-
 **Plays almost anything.** Luna is built on [mpv](https://mpv.io), so nearly every video format just works.
 If a film has no subtitles, Luna finds them for you.
 
 **Helps you choose.** Like or dislike what you watch and Luna learns your taste. Add the films your friends
 recommend, or connect their Letterboxd, and see everything in one place.
 
-![Recommendations from friends](docs/screenshots/recommendations.jpg)
-
 **A film assistant you can talk to.** Ask things like *"What should I watch tonight?"* or *"Who's in Dune?"*
 and get answers with posters, cast and links.
-
-![The film assistant](docs/screenshots/assistant.jpg)
 
 **Open links and torrents.** Like VLC's "Open network stream": paste a video link (http, m3u8, rtsp…), a magnet
 link or a `.torrent` file, and Luna plays it. Torrents start playing while they download, and Luna finds the
@@ -52,13 +44,17 @@ Press **Q** in the player or use the **UP** menu.
 
 ## Getting started
 
-1. Download **`Luna.Player_…_x64-setup.exe`** from the [Releases](../../releases/latest) page and run it.
+1. Download **`Luna Player_…_x64-setup.exe`** from the [Releases](releases/latest) page and run it.
    It works on Windows 10 and 11.
 2. If Windows shows *"Windows protected your PC"*, click **More info → Run anyway**.
    This appears because Luna is a small free project without a paid code-signing certificate.
 3. A short tour shows you around on first launch.
 
-![First-run tour](docs/screenshots/tour.jpg)
+### Portable version
+
+There is also a **`Luna Player_…_x64-portable.zip`** on the same Releases page. Extract it anywhere and run
+`Luna Player.exe`; it keeps its data in the same folder and needs no installer (WebView2 must already be on the
+computer, which is the case on Windows 10/11).
 
 ### Optional: free keys for the extra features
 
@@ -86,7 +82,8 @@ Your keys and your library stay on your own computer.
 
 ## For developers
 
-Want to build it yourself or help out? See [BUILDING.md](BUILDING.md).
+Want to build it yourself or help out? See [BUILDING.md](BUILDING.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+The source is the whole repository: React/TypeScript in `app/src`, Rust/Tauri in `app/src-tauri`.
 
 ## Please use it responsibly
 
@@ -98,6 +95,10 @@ Friends' Letterboxd lists are read from their public Letterboxd pages. This is n
 ## License
 
 Luna Player is free and open source under the [GPL-3.0](LICENSE) license.
+
+The source code is this repository. Contributions are welcome; read [CONTRIBUTING.md](CONTRIBUTING.md) and
+[SECURITY.md](SECURITY.md) first. The installers include GPLv2+ mpv and Unlicense yt-dlp binaries; see
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for their licenses, source links and the shipped copyright texts.
 
 This product uses the TMDB API but is not endorsed or certified by TMDB.
 The installer includes [mpv](https://mpv.io) ([license](https://github.com/mpv-player/mpv/blob/master/Copyright),

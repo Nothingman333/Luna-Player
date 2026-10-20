@@ -64,9 +64,9 @@ const SLIDES: Slide[] = [
       <div className="ts ts-link">
         <div className="box">
           <div className="lbl"><Icon d={I.magnet} size={16} />  {tt("Bağlantı aç")}</div>
-          <div className="input"><span className="typed">{tt("magnet:?xt=urn:btih:9f2c…&dn=Interstellar.2014")}</span><i className="caret" /></div>
+          <div className="input"><span className="typed">{"magnet:?xt=urn:btih:0123abcd…&dn=Medya"}</span><i className="caret" /></div>
           <div className="dl">
-            <div className="row"><b>{tt("Interstellar (2014)")}</b><span>{tt("izlemeye hazır")}</span></div>
+            <div className="row"><b>{tt("Medya İndiriliyor")}</b><span>{tt("izlemeye hazır")}</span></div>
             <div className="prog"><i /></div>
           </div>
         </div>

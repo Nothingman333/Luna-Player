@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Luna Player",
-  "version": "0.2.3",
+  "version": "1.0.1",
   "identifier": "com.modernplayer.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -29,6 +29,7 @@
         "enable": true,
         "scope": [
           "$APPCACHE/thumbs/**",
+          "$APPCACHE/covers/**",
           "$APPCACHE/previews/**",
           "$APPLOCALDATA/fonts/**"
         ]
@@ -43,9 +44,14 @@
     "resources": {
       "mpv/mpv.exe": "mpv/mpv.exe",
       "mpv/mpv.com": "mpv/mpv.com",
+      "mpv/yt-dlp.exe": "mpv/yt-dlp.exe",
       "fonts/": "fonts/",
       "mpv/d3dcompiler_43.dll": "mpv/d3dcompiler_43.dll",
-      "mpv/mpv/fonts.conf": "mpv/mpv/fonts.conf"
+      "mpv/mpv/fonts.conf": "mpv/mpv/fonts.conf",
+      "mpv/Copyright": "mpv/Copyright",
+      "mpv/LICENSE.GPL": "mpv/LICENSE.GPL",
+      "mpv/LICENSE.LGPL": "mpv/LICENSE.LGPL",
+      "mpv/yt-dlp-LICENSE.txt": "mpv/yt-dlp-LICENSE.txt"
     },
     "icon": [
       "icons/32x32.png",

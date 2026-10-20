@@ -89,6 +89,7 @@ fn parse_track(r: &mut BufReader<File>, end: u64) -> std::io::Result<TrackInfo> 
         match id {
             TRACK_NUMBER => t.number = read_uint(r, size)?,
             CODEC_ID => {
+                if size > 16 * 1024 * 1024 { break; }
                 let mut b = vec![0u8; size as usize];
                 r.read_exact(&mut b)?;
                 t.codec = String::from_utf8_lossy(&b).trim_end_matches('\0').to_string();
@@ -99,6 +100,7 @@ fn parse_track(r: &mut BufReader<File>, end: u64) -> std::io::Result<TrackInfo> 
             }
             COMP_ALGO => t.comp_algo = Some(read_uint(r, size)?),
             COMP_SETTINGS => {
+                if size > 16 * 1024 * 1024 { break; }
                 let mut b = vec![0u8; size as usize];
                 r.read_exact(&mut b)?;
                 t.comp_settings = b;
@@ -205,13 +207,14 @@ fn read_track(path: &Path, track_number: u64, progress: &dyn Fn(f32)) -> Result<
                     let mut hdr = [0u8; 3];
                     r.read_exact(&mut hdr).map_err(e)?;
                     let rel = i16::from_be_bytes([hdr[0], hdr[1]]) as i64;
-                    let len = blk_size as usize - tlen - 3;
+                    let Some(len) = (blk_size as usize).checked_sub(tlen as usize + 3) else { break; };
+                    if len > 16 * 1024 * 1024 { break; }
                     let mut data = vec![0u8; len];
                     r.read_exact(&mut data).map_err(e)?;
                     let data = match track.comp_algo {
                         Some(0) => {
                             let mut out = vec![];
-                            flate2::read::ZlibDecoder::new(&data[..]).read_to_end(&mut out).map_err(e)?;
+                            std::io::Read::take(flate2::read::ZlibDecoder::new(&data[..]), 16 * 1024 * 1024).read_to_end(&mut out).map_err(e)?;
                             out
                         }
                         Some(3) => [track.comp_settings.clone(), data].concat(),

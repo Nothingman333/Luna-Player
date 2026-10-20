@@ -59,8 +59,10 @@ pub fn mpv_exe(resource_dir: Option<PathBuf>) -> PathBuf {
 /// Starts mpv idle inside `hwnd` so that opening a file later is instant.
 pub fn start(app: AppHandle, exe: PathBuf, hwnd: isize, fonts: PathBuf) -> Mpv {
     let pipe = format!(r"\\.\pipe\modernplayer-{}", std::process::id());
+    let ytdlp = exe.with_file_name("yt-dlp.exe");
     let child = Command::new(&exe)
         .arg(format!("--sub-fonts-dir={}", fonts.display()))
+        .arg(format!("--script-opts=ytdl_hook-ytdl_path={}", ytdlp.display()))
         .args([
             format!("--wid={hwnd}"),
             format!("--input-ipc-server={pipe}"),
@@ -87,17 +89,27 @@ pub fn start(app: AppHandle, exe: PathBuf, hwnd: isize, fonts: PathBuf) -> Mpv {
             "--background-color=#000000".into(),
         ])
         .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-        .ok();
+        .spawn();
+    let spawn_err = child.as_ref().err().map(|e| e.to_string());
+    let child = child.ok();
 
     let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
 
     tauri::async_runtime::spawn(async move {
-        // mpv needs a moment to create the pipe.
+        if let Some(e) = spawn_err {
+            let _ = app.emit("mpv-error", tr!("Video motoru (mpv) başlatılamadı: {}", "The video engine (mpv) couldn't start: {}", e));
+            return;
+        }
+        // mpv needs a moment to create the pipe; if it never does (crashed at start), give up.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         let client = loop {
             match ClientOptions::new().open(&pipe) {
                 Ok(c) => break c,
-                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(15)).await,
+                Err(_) if std::time::Instant::now() < deadline => tokio::time::sleep(std::time::Duration::from_millis(15)).await,
+                Err(_) => {
+                    let _ = app.emit("mpv-error", tr!("Video motoru (mpv) yanıt vermiyor", "The video engine (mpv) isn't responding"));
+                    return;
+                }
             }
         };
         let (read, mut write) = tokio::io::split(client);

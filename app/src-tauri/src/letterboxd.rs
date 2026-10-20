@@ -66,7 +66,7 @@ async fn read_pages(client: &reqwest::Client, url: &str, max_pages: u32) -> Resu
         for attempt in 0..5u64 {
             match client.get(&u).send().await {
                 Ok(res) if res.status().is_success() => {
-                let text = res.text().await.unwrap_or_default();
+                let text = match res.bytes().await { Ok(b) if b.len() <= 8 * 1024 * 1024 => String::from_utf8_lossy(&b).into_owned(), _ => String::new() };
                 // a challenge page comes back as 200 without posters: treat it as a failure, except on a real last page
                 if !parse(&text).is_empty() || text.contains("class=\"pagination") || attempt >= 3 { body = Some(text); break; }
                 last = tr!("boş sayfa", "empty page");
@@ -111,7 +111,9 @@ async fn user_lists(client: &reqwest::Client, user: &str) -> Vec<(String, String
         let u = if page == 1 { format!("https://letterboxd.com/{user}/lists/") } else { format!("https://letterboxd.com/{user}/lists/page/{page}/") };
         let Ok(res) = client.get(&u).send().await else { break };
         if !res.status().is_success() { break }
-        let Ok(html) = res.text().await else { break };
+        let Ok(body) = res.bytes().await else { break };
+        if body.len() > 8 * 1024 * 1024 { break; }
+        let html = String::from_utf8_lossy(&body).into_owned();
         let before = out.len();
         {
             let doc = Html::parse_document(&html);

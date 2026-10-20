@@ -125,8 +125,8 @@ export function useMpv(onEvent?: (name: string, ev: any) => void) {
 export type SubOpts = { font: string; size: number; color: string; bg: "none" | "shadow" | "box"; bold: boolean; margin: number };
 
 export const SUB_PRESETS: Record<string, { label: string; opts: SubOpts }> = {
-  netflix: { label: tt("Sinema"), opts: { font: "Netflix Sans Medium", size: 46, color: "#FFFFFF", bg: "shadow", bold: false, margin: 48 } },
-  box: { label: tt("Kutulu"), opts: { font: "Netflix Sans Medium", size: 44, color: "#FFFFFF", bg: "box", bold: false, margin: 48 } },
+  netflix: { label: tt("Sinema"), opts: { font: "Inter SemiBold", size: 46, color: "#FFFFFF", bg: "shadow", bold: false, margin: 48 } },
+  box: { label: tt("Kutulu"), opts: { font: "Inter SemiBold", size: 44, color: "#FFFFFF", bg: "box", bold: false, margin: 48 } },
   yellow: { label: tt("Klasik sarı"), opts: { font: "Inter Bold", size: 46, color: "#FFE15A", bg: "shadow", bold: false, margin: 48 } },
 };
 export const SUB_FONTS: [string, string][] = [

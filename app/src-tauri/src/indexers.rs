@@ -655,8 +655,17 @@ pub async fn search_one(path: &Path, query: &str) -> Result<Vec<Hit>, String> {
 pub async fn resolve(path: &Path, url: &str) -> Result<String, String> {
     let def = load(path)?;
     let base = base_url(&def);
-    let body = client().get(url).send().await.map_err(|e| e.to_string())?.text().await.map_err(|e| e.to_string())?;
+    let res = client().get(url).send().await.map_err(|e| e.to_string())?;
+    let page = res.url().clone();
+    let body = res.text().await.map_err(|e| e.to_string())?;
     let doc = Html::parse_document(&body);
+    // <base href> on the page wins, like in a browser
+    let page = Selector::parse("base[href]").ok()
+        .and_then(|b| doc.select(&b).next().and_then(|e| e.value().attr("href")).and_then(|h| page.join(h).ok()))
+        .unwrap_or(page);
+    let resolve_link = |v: &str| -> String {
+        if v.starts_with("magnet:") || v.contains("://") { v.to_string() } else { page.join(v).map(|u| u.to_string()).unwrap_or_else(|_| absolutize(&base, v)) }
+    };
     let sels = def.get("download").and_then(|d| d.get("selectors")).and_then(|v| v.as_sequence()).cloned().unwrap_or_default();
     for sd in &sels {
         let Ok(css) = Selector::parse(&s(sd, "selector")) else { continue };
@@ -666,7 +675,7 @@ pub async fn resolve(path: &Path, url: &str) -> Result<String, String> {
                 let empty = HashMap::new();
                 let config = config_defaults(&def);
                 let ctx = Ctx { keywords: String::new(), config: &config, result: &empty };
-                return Ok(absolutize(&base, &apply_filters(v.to_string(), sd.get("filters"), &ctx)));
+                return Ok(resolve_link(&apply_filters(v.to_string(), sd.get("filters"), &ctx)));
             }
         }
     }

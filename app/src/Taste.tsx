@@ -3,9 +3,14 @@ import { lang, locale, tt, DEC, pctText } from "./i18n";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { details, IMG, isFinished, Item, Meta, Recent, SearchHit, searchTmdb, store, tmdbGet, tmdbKeywords } from "./library";
-import { I, Icon, pct } from "./Screens";
+import { details, Episode, fromImdb, IMG, imdbOf, isFinished, Item, Meta, Recent, SearchHit, searchTmdb, seasonEpisodes, store, tmdbGet, tmdbKeywords } from "./library";
+import { StreamList, streamAddons, useAddons } from "./Addons";
+import { I, Icon, Mode, pct } from "./Screens";
+import { findPodcast, findStations, forgetTracks, groupAlbums, isSpotifyList, loadMusicFolders, loadMusicLibrary, loadMusicPlaylists, mostPlayed, useMusic, nowPlaying, playQueue, QItem, saveMusicPlaylists, showPlaylist, SpotifyMove, trackItem } from "./Music";
+import { abAuthor, abChapters, abTitle, fetchAndOpenBook, getPos, librivox, loadAbRecent, loadBookLibrary, loadBookNotes, rememberAb, requestOpenBook, clearBookRecord, forgetBooks } from "./Books";
+import { fetchFeed, gutenbergBooks, gutenbergSearch } from "./Opds";
 
 // ---------- taste store ----------
 export type Vote = "like" | "dislike";
@@ -38,13 +43,35 @@ export const markSeen = (t: string, on?: boolean) => {
   return l;
 };
 export const markLater = (t: string, on?: boolean) => toggleList("laterList", t, on);
+/** Takes a title off "Sonra izle" whether it was saved with its year or without (11). */
+export function laterOff(title: string, year?: string) {
+  const plain = seenKey(title.replace(/\s*\(\d{4}\)\s*$/, ""));
+  const next = loadLater().filter((x) => {
+    const y = x.match(/\((\d{4})\)\s*$/)?.[1];
+    return !(seenKey(x.replace(/\s*\(\d{4}\)\s*$/, "")) === plain && (!y || !year || y === year));
+  });
+  store.set("laterList", JSON.stringify(next));
+  listeners.forEach((f) => f());
+}
+/** The library title a film or series is: the same TMDB id AND kind, else the same name (and year when both are known) (10). */
+export function libMatch(items: Item[], t: { title: string; year?: string | number; tmdbId?: number; kind?: "movie" | "tv" }): Item | undefined {
+  const byId = t.tmdbId ? items.find((i) => i.meta && i.meta.id === t.tmdbId && i.meta.kind === (t.kind ?? "movie")) : undefined;
+  if (byId) return byId;
+  const name = seenKey(t.title.replace(/\s*\(\d{4}\)\s*$/, ""));
+  return items.find((i) => {
+    if (seenKey(i.meta?.title ?? i.parsed.title) !== name) return false;
+    const iy = i.meta?.year || (i.parsed.year ? String(i.parsed.year) : "");
+    return !t.year || !iy || String(t.year) === iy;
+  });
+}
 export const youtubeTrailer = (t: string) =>
   "https://www.youtube.com/results?search_query=" + (encodeURIComponent(t.replace(/\s*\((\d{4})\)\s*$/, " $1") + tt(" türkçe fragman")));
 
 /** Adds a friend's recommendation (matched on TMDB when possible). Returns false if it was already there. */
 export async function addRecommendation(title: string, year?: string, from?: string, note?: string, quick = false): Promise<boolean> {
   const name = title.trim();
-  if (!name || loadRecs().some((r) => seenKey(r.title) === seenKey(name) && (!year || !r.year || r.year === year))) return false;
+  const who = seenKey((from ?? "").trim() || "Biri");
+  if (!name || loadRecs().some((r) => seenKey(r.from) === who && seenKey(r.title) === seenKey(name) && (!year || !r.year || r.year === year))) return false;
   let hit: SearchHit | undefined;
   if (!quick && store.get("tmdbKey")) {
     const y = year ? Number(year) : undefined;
@@ -68,14 +95,19 @@ const dKey = (title: string, year?: string) => seenKey(title.replace(/\s*\((\d{4
 export const loadDiary = () => store.json<Record<string, DiaryEntry>>("diary", {});
 export function diaryGet(title: string, year?: string): DiaryEntry | undefined {
   const d = loadDiary();
-  return d[dKey(title, year)] ?? Object.values(d).find((e) => seenKey(e.title) === seenKey(title.replace(/\s*\(\d{4}\)\s*$/, "")));
+  const y = year ?? title.match(/\((\d{4})\)\s*$/)?.[1];
+  const name = seenKey(title.replace(/\s*\(\d{4}\)\s*$/, ""));
+  // without a year on either side the name decides; two known years that differ are two films
+  return d[dKey(title, year)] ?? Object.values(d).find((e) => seenKey(e.title) === name && (!y || !e.year || e.year === y));
 }
 export function diarySet(title: string, year: string | undefined, patch: Partial<DiaryEntry>) {
   const clean = title.replace(/\s*\((\d{4})\)\s*$/, "").trim();
   const y = year ?? title.match(/\((\d{4})\)\s*$/)?.[1];
   const d = loadDiary();
-  const k = Object.keys(d).find((x) => x === dKey(clean, y)) ?? Object.keys(d).find((x) => seenKey(d[x].title) === seenKey(clean)) ?? dKey(clean, y);
+  const k = Object.keys(d).find((x) => x === dKey(clean, y)) ??
+    Object.keys(d).find((x) => seenKey(d[x].title) === seenKey(clean) && (!y || !d[x].year || d[x].year === y)) ?? dKey(clean, y);
   const cur = d[k] ?? { title: clean, year: y, at: Date.now() };
+  if (y && !cur.year) cur.year = y;
   const next = { ...cur, ...patch, at: Date.now() };
   for (const f of Object.keys(patch) as (keyof DiaryEntry)[]) if (patch[f] === undefined) delete next[f];
   d[k] = next;
@@ -124,7 +156,8 @@ const lbLine = (f: TaggedFilm) => `${f.title}${f.year ? ` (${f.year})` : ""}${f.
 /** Adds many recommendations at once without TMDB look-ups (posters are fetched lazily). */
 export function addRecommendationsBulk(films: TaggedFilm[], from: string, note = ""): number {
   const cur = loadRecs();
-  const byKey = new Map(cur.map((r) => [seenKey(r.title) + "|" + (r.year ?? ""), r]));
+  const who = seenKey(from);
+  const byKey = new Map(cur.filter((r) => seenKey(r.from) === who).map((r) => [seenKey(r.title) + "|" + (r.year ?? ""), r]));
   const add: Rec[] = [];
   for (const f of films) {
     const k = seenKey(f.title) + "|" + (f.year ?? "");
@@ -145,7 +178,7 @@ export function addRecommendationsBulk(films: TaggedFilm[], from: string, note =
 }
 
 /** Looks up missing posters (and TMDB ids / ratings) for the first `limit` entries, one by one. */
-export async function fillPosters<T extends { title: string; year?: string; poster?: string | null; tmdbId?: number; rating?: number; noPoster?: boolean }>(
+export async function fillPosters<T extends { title: string; year?: string; poster?: string | null; tmdbId?: number; rating?: number; noPoster?: boolean; kind?: "movie" | "tv" }>(
   list: T[], save: () => void, limit = 24) {
   if (!store.get("tmdbKey")) return;
   const todo = list.filter((it) => !((it.poster && it.rating != null) || it.noPoster)).slice(0, limit);
@@ -159,7 +192,10 @@ export async function fillPosters<T extends { title: string; year?: string; post
       if (it.title.includes(":")) tries.push([it.title.split(":")[0], "tv"], [it.title.split(":")[0], "movie"]);
       let h: SearchHit | undefined;
       for (const [q, k, yy] of tries) { h = good(await searchTmdb(q, k, yy)); if (h) break; }
-      if (h) { it.poster = it.poster ?? h.poster; it.tmdbId = it.tmdbId ?? h.id; it.rating = h.rating ?? 0; } else it.noPoster = true;
+      if (h) {
+        if (!it.tmdbId) { it.tmdbId = h.id; it.kind = h.kind; }
+        it.poster = it.poster ?? h.poster; it.rating = h.rating ?? 0;
+      } else it.noPoster = true;
     } catch { /* network / rate limit: try again next time instead of giving up on the poster */ }
     if (++n % 8 === 0) save();
   };
@@ -167,6 +203,14 @@ export async function fillPosters<T extends { title: string; year?: string; post
   const queue = [...todo];
   await Promise.all(Array.from({ length: 4 }, async () => { while (queue.length) await one(queue.shift()!); }));
   if (n) save();
+}
+
+/** Copies what fillPosters learned onto the latest saved copy of the same entry (edits made meanwhile stay) (6). */
+function posterInfo<T extends { poster?: string | null; tmdbId?: number; rating?: number; noPoster?: boolean; kind?: "movie" | "tv" }>(dst: T, src: T) {
+  if (src.poster && !dst.poster) dst.poster = src.poster;
+  if (src.tmdbId && !dst.tmdbId) { dst.tmdbId = src.tmdbId; if (src.kind) dst.kind = src.kind; }
+  if (src.rating != null) dst.rating = src.rating;
+  if (src.noPoster) dst.noPoster = true;
 }
 
 /** Reads any link for the assistant: Letterboxd is read film by film (with ratings), other pages as text. */
@@ -181,17 +225,73 @@ export async function readLink(url: string): Promise<string> {
   return (await invoke<string>("fetch_page_text", { url })).slice(0, 15000);
 }
 
-/** A friend's folder with lists linked to their Letterboxd: watchlist and the films they rated 4★+. */
-export async function followLetterboxd(person: string, url: string): Promise<string> {
-  const secs = await readLetterboxd(url, 80);
+/** Rows of a CSV text (quotes and line breaks inside quotes handled). */
+export function csvRows(csv: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [], cell = "", q = false;
+  for (let i = 0; i < csv.length; i++) {
+    const c = csv[i];
+    if (q) { if (c === '"' && csv[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') q = false; else cell += c; }
+    else if (c === '"') q = true;
+    else if (c === ",") { row.push(cell); cell = ""; }
+    else if (c === "\n" || c === "\r") { if (c === "\r" && csv[i + 1] === "\n") i++; row.push(cell); rows.push(row); row = []; cell = ""; }
+    else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+
+/** The films of one export CSV: the last header row with Name and Year starts the table
+ *  (list files have a small header table of their own above it, whose Name is the list's name). */
+function lbCsv(text: string): { films: LbFilm[]; listName?: string } {
+  const rows = csvRows(text.replace(/^\uFEFF/, ""));
+  const low = rows.map((r) => r.map((c) => c.trim().toLowerCase()));
+  let h = -1;
+  low.forEach((r, i) => { if (r.includes("name") && r.includes("year")) h = i; });
+  if (h < 0) return { films: [] };
+  const first = low.findIndex((r) => r.includes("name"));
+  const listName = first >= 0 && first < h ? rows[first + 1]?.[low[first].indexOf("name")]?.trim() : undefined;
+  const ni = low[h].indexOf("name"), yi = low[h].indexOf("year"), ri = low[h].indexOf("rating");
+  const films = rows.slice(h + 1).filter((r) => r[ni]?.trim()).map((r) => {
+    const stars = ri >= 0 ? parseFloat(r[ri]) : NaN;
+    return { title: r[ni].trim(), year: r[yi]?.trim() || undefined, stars: isNaN(stars) ? undefined : stars };
+  });
+  return { films, listName };
+}
+
+/** A Letterboxd data export (Settings → Data → Export) as sections: rated / watched, liked, watchlist and each list. */
+export async function readLetterboxdExport(paths: string[]): Promise<LbSection[]> {
+  const files = await invoke<[string, string][]>("read_export", { paths });
+  const watched = new Map<string, LbFilm>();
+  const secs: LbSection[] = [];
+  for (const [name, text] of files) {
+    const n = name.toLowerCase().replace(/\\/g, "/");
+    const base = n.split("/").pop()!;
+    const { films, listName } = lbCsv(text);
+    if (!films.length) continue;
+    if (base === "ratings.csv" || base === "watched.csv") {
+      for (const f of films) { const k = seenKey(f.title) + "|" + (f.year ?? ""); watched.set(k, { ...watched.get(k), ...f, stars: f.stars ?? watched.get(k)?.stars }); }
+    } else if (n.endsWith("likes/films.csv")) secs.push({ name: tt("Beğendikleri"), kind: "liked", url: "", films });
+    else if (base === "watchlist.csv") secs.push({ name: tt("İzleme listesi"), kind: "watchlist", url: "", films });
+    else if (n.includes("lists/")) secs.push({ name: listName || base.replace(/\.csv$/, "").replace(/-/g, " "), kind: "list", url: "", films });
+  }
+  if (watched.size) secs.unshift({ name: tt("İzledikleri"), kind: "watched", url: "", films: [...watched.values()] });
+  if (!secs.length) throw new Error(tt("Bu dosyada Letterboxd listesi bulunamadı. Letterboxd'da Ayarlar → Veri → Dışa aktar ile indirilen ZIP dosyasını seç."));
+  return secs;
+}
+
+/** A friend's folder with lists linked to their Letterboxd: watchlist and the films they rated 4★+.
+ *  From an export (`secs` given) the lists aren't linked: they are filled once, "Güncelle" skips them. */
+export async function followLetterboxd(person: string, url: string, given?: LbSection[]): Promise<string> {
+  const secs = given ?? await readLetterboxd(url, 80);
   const all = loadPlaylists();
   let folder = all.find((p) => !p.parent && seenKey(p.name) === seenKey(person));
   if (!folder) { folder = { id: Date.now().toString(36), name: person.trim(), items: [], at: Date.now() }; all.push(folder); }
   const made: string[] = [];
   const put = (name: string, src: { url: string; minStars?: number }, films: LbFilm[]) => {
     let pl = all.find((p) => p.parent === folder!.id && p.name === name);
-    if (!pl) { pl = { id: Date.now().toString(36) + made.length, name, items: [], at: Date.now(), parent: folder!.id, source: src }; all.push(pl); }
-    pl.source = src;
+    if (!pl) { pl = { id: Date.now().toString(36) + made.length, name, items: [], at: Date.now(), parent: folder!.id }; all.push(pl); }
+    pl.source = src.url ? src : undefined;
     pl.items = films.filter((f) => !src.minStars || (f.stars ?? 0) >= src.minStars).map((f) => ({ title: f.title, year: f.year, stars: f.stars }));
     made.push(`${name}: ${pl.items.length}`);
   };
@@ -226,9 +326,22 @@ export async function refreshLinkedPlaylists(progress?: (m: string) => void): Pr
 export const loadPlaylists = () => store.json<Playlist[]>("playlists", []);
 let plNames: { id: string; name: string }[] | null = null;
 /** Just the names, cached: used by every card's "+ Listeye" picker. */
-const playlistNames = () => (plNames ??= loadPlaylists().map((p) => ({ id: p.id, name: p.name })));
+const playlistNames = () => (plNames ??= ((all) => all.map((p) => ({ id: p.id, name: (p.parent ? `${all.find((x) => x.id === p.parent)?.name ?? "?"} › ` : "") + p.name })))(loadPlaylists()));
 export const savePlaylists = (l: Playlist[]) => { plNames = null; store.set("playlists", JSON.stringify(l)); listeners.forEach((f) => f()); };
-const findPl = (name: string) => loadPlaylists().find((p) => seenKey(p.name) === seenKey(name));
+/** A list by id, "Friend › List", or a name that only one list has (9). */
+function resolvePl(all: Playlist[], ref: string): Playlist | undefined {
+  const byId = all.find((p) => p.id === ref);
+  if (byId) return byId;
+  const full = (p: Playlist) => (p.parent ? `${all.find((x) => x.id === p.parent)?.name ?? "?"} › ` : "") + p.name;
+  const q = seenKey(ref.replace(/\s*[›>]\s*/g, " › "));
+  const exact = all.find((p) => seenKey(full(p)) === q);
+  if (exact) return exact;
+  const same = all.filter((p) => seenKey(p.name) === q);
+  return same.length === 1 ? same[0] : same.find((p) => !p.parent);
+}
+const ambiguous = (all: Playlist[], ref: string) =>
+  !all.some((p) => p.id === ref) && all.filter((p) => seenKey(p.name) === seenKey(ref)).length > 1 && !all.some((p) => !p.parent && seenKey(p.name) === seenKey(ref));
+const findPl = (name: string) => resolvePl(loadPlaylists(), name);
 export function createPlaylist(name: string): Playlist {
   const ex = findPl(name);
   if (ex) return ex;
@@ -237,24 +350,35 @@ export function createPlaylist(name: string): Playlist {
   return pl;
 }
 export async function addToPlaylist(name: string, items: { title: string; year?: string }[]): Promise<number> {
-  createPlaylist(name);
+  const target = createPlaylist(name);
   let added = 0;
   const all = loadPlaylists();
-  const pl = all.find((p) => seenKey(p.name) === seenKey(name))!;
+  const pl = all.find((p) => p.id === target.id)!;
   for (const it of items) {
     const t = it.title.replace(/\s*\((\d{4})\)\s*$/, "").trim();
     const y = it.year ?? it.title.match(/\((\d{4})\)\s*$/)?.[1];
-    if (!t || pl.items.some((x) => seenKey(x.title) === seenKey(t))) continue;
-    const rec = loadRecs().find((r) => seenKey(r.title) === seenKey(t));
+    // the same name from another year (a remake) is another film
+    if (!t || pl.items.some((x) => seenKey(x.title) === seenKey(t) && (!y || !x.year || x.year === y))) continue;
+    const rec = loadRecs().find((r) => seenKey(r.title) === seenKey(t) && (!y || !r.year || r.year === y));
     let hit: SearchHit | undefined;
     if (!rec?.poster && store.get("tmdbKey")) {
       const [m, tv] = await Promise.all([searchTmdb(t, "movie", y ? Number(y) : undefined).catch(() => []), searchTmdb(t, "tv", y ? Number(y) : undefined).catch(() => [])]);
       hit = m[0] ?? tv[0];
     }
-    pl.items.push({ title: hit?.title ?? rec?.title ?? t, year: hit?.year || rec?.year || y, poster: hit?.poster ?? rec?.poster, tmdbId: hit?.id ?? rec?.tmdbId, kind: hit?.kind ?? rec?.kind });
+    pl.items.push({ title: hit?.title ?? rec?.title ?? t, year: hit?.year || y || rec?.year, poster: hit?.poster ?? rec?.poster, tmdbId: hit?.id ?? rec?.tmdbId, kind: hit?.kind ?? rec?.kind });
     added++;
   }
-  savePlaylists(all);
+  const fresh = loadPlaylists();
+  const target2 = fresh.find((p) => p.id === target.id);
+  if (target2) {
+    for (const it of pl.items) {
+      if (!target2.items.some((x) => seenKey(x.title) === seenKey(it.title) && (x.year ?? "") === (it.year ?? ""))) target2.items.push(it);
+    }
+    savePlaylists(fresh);
+  } else {
+    fresh.push(pl);
+    savePlaylists(fresh);
+  }
   return added;
 }
 
@@ -323,17 +447,23 @@ export function TasteButtons({ it }: { it: Item }) {
   const d = diaryGet(title, year);
   // like / dislike asks for points out of 10, the same as on the recommendations
   const [ask, setAsk] = useState<Vote | null>(null);
+  const label = year ? `${title} (${year})` : title;
+  const later = has(loadLater(), label) || has(loadLater(), title) || !!e?.want;
+  const toggleLater = () => {
+    if (later) { laterOff(title, year); if (e?.want) setTaste(it, { want: false }); }
+    else markLater(label, true);
+  };
   const vote = (v: Vote) => {
     const nv = d?.vote === v ? undefined : v;
-    diarySet(title, year, { vote: nv, ...(it.meta?.genres?.length ? { genres: it.meta.genres } : {}) });
+    diarySet(title, year, { vote: nv, ...(nv && d?.vote && d.vote !== nv ? { rating: undefined } : {}), ...(it.meta?.genres?.length ? { genres: it.meta.genres } : {}) });
     setTaste(it, { vote: nv });
     setAsk(nv ?? null);
   };
   return (
     <>
-      <button className={"act" + (e?.want ? " on" : "")} data-tip={e?.want ? tt("İzleyeceklerimden çıkar") : tt("İzleyeceklerime ekle")}
-        aria-label={tt("İzleyeceklerime ekle")} onClick={() => setTaste(it, { want: !e?.want })}>
-        <Icon d={e?.want ? I.check : I.plus} size={20} />
+      <button className={"act" + (later ? " on" : "")} data-tip={later ? tt("Sonra izle listesinden çıkar") : tt("Sonra izle")}
+        aria-label={tt("Sonra izle")} onClick={toggleLater}>
+        <Icon d={later ? I.check : I.plus} size={20} />
       </button>
       <span className="vote-wrap">
         <button className={"act" + (d?.vote === "like" ? " on" : "")} aria-label={tt("Beğendim")} data-tip={d?.vote === "like" && d.rating ? tt("Beğendim · {0}/10", d.rating) : tt("Beğendim")} onClick={() => vote("like")}>
@@ -378,17 +508,7 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const parseCsv = (csv: string): { title: string; year?: string }[] | null => {
-    const rows: string[][] = [];
-    let row: string[] = [], cell = "", q = false;
-    for (let i = 0; i < csv.length; i++) {
-      const c = csv[i];
-      if (q) { if (c === '"' && csv[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') q = false; else cell += c; }
-      else if (c === '"') q = true;
-      else if (c === ",") { row.push(cell); cell = ""; }
-      else if (c === "\n" || c === "\r") { if (c === "\r" && csv[i + 1] === "\n") i++; row.push(cell); rows.push(row); row = []; cell = ""; }
-      else cell += c;
-    }
-    if (cell || row.length) { row.push(cell); rows.push(row); }
+    const rows = csvRows(csv);
     const head = (rows[0] ?? []).map((h) => h.trim().toLowerCase());
     const ti = head.findIndex((h) => h === "name" || h === "title" || h === "original title");
     if (ti < 0) return null;
@@ -651,10 +771,15 @@ function RateAsk({ title, year, vote, onDone }: { title: string; year?: string; 
   );
 }
 
-export type DetailTarget = { title: string; year?: string; kind?: "movie" | "tv"; tmdbId?: number; from?: string; note?: string; stars?: number };
+export type DetailTarget = {
+  title: string; year?: string; kind?: "movie" | "tv"; tmdbId?: number; from?: string; note?: string; stars?: number;
+  /** from a Stremio catalog: the IMDb id, or the addon's own id when it isn't one */
+  imdbId?: string; stremio?: { type: string; id: string };
+};
+export type SourceProps = { onSource?: (src: string, name?: string) => void; onDownload?: (src: string) => void };
 
 /** Details of a title that may not be in the library: TMDB info plus everything Luna knows about it. */
-function TitleDetail({ t, items, onClose, onPlay, onTorrent, onAsk }: { t: DetailTarget; items: Item[]; onClose: () => void; onPlay?: (path: string) => void; onTorrent?: () => void; onAsk?: (it: Item) => void }) {
+export function TitleDetail({ t, items, onClose, onPlay, onTorrent, onAsk, onSource, onDownload }: { t: DetailTarget; items: Item[]; onClose: () => void; onPlay?: (path: string) => void; onTorrent?: () => void; onAsk?: (it: Item) => void } & SourceProps) {
   useTaste();
   const [meta, setMeta] = useState<Meta | null | undefined>(undefined);
   const [note, setNote] = useState(diaryGet(t.title, t.year)?.note ?? "");
@@ -663,6 +788,10 @@ function TitleDetail({ t, items, onClose, onPlay, onTorrent, onAsk }: { t: Detai
     (async () => {
       if (!store.get("tmdbKey")) { setMeta(null); return; }
       let id = t.tmdbId, kind = t.kind ?? "movie";
+      if (!id && t.imdbId) {
+        const h = await fromImdb(t.imdbId);
+        if (h) { id = h.id; kind = h.kind; }
+      }
       if (!id) {
         const y = t.year ? Number(t.year) : undefined;
         const h = (await searchTmdb(t.title, "movie", y).catch(() => []))[0] ?? (await searchTmdb(t.title, "tv", y).catch(() => []))[0];
@@ -676,7 +805,8 @@ function TitleDetail({ t, items, onClose, onPlay, onTorrent, onAsk }: { t: Detai
   const d = diaryGet(t.title, t.year);
   const title = meta?.title ?? t.title;
   const year = meta?.year || t.year;
-  const lib = items.find((i) => (meta && i.meta?.id === meta.id) || seenKey(i.meta?.title ?? i.parsed.title) === seenKey(t.title));
+  const lib = libMatch(items, meta ? { title: meta.title, year: meta.year, tmdbId: meta.id, kind: meta.kind } : { title: t.title, year: t.year, tmdbId: t.tmdbId, kind: t.kind })
+    ?? (meta ? libMatch(items, { title: t.title, year: t.year }) : undefined);
   const set = (patch: Partial<DiaryEntry>) => diarySet(t.title, t.year, { ...(meta?.genres?.length ? { genres: meta.genres } : {}), ...patch });
   const later = has(loadLater(), year ? `${t.title} (${year})` : t.title) || has(loadLater(), t.title);
   const cwId = meta?.id ?? t.tmdbId, cwKind = meta ? meta.kind ?? t.kind : t.kind;
@@ -686,6 +816,32 @@ function TitleDetail({ t, items, onClose, onPlay, onTorrent, onAsk }: { t: Detai
   const [ask, setAsk] = useState<Vote | null>(null);
   const safe = isSafe(cwId, cwKind);
   const hide = !!warn?.length && !reveal && !safe;
+  // Sources from the user's Stremio addons (they look titles up by IMDb id)
+  const addons = useAddons();
+  const canStream = !!onSource && streamAddons(addons).length > 0;
+  const [srcOpen, setSrcOpen] = useState(false);
+  const [imdb, setImdb] = useState<string | null | undefined>(t.imdbId ?? (t.stremio?.id.startsWith("tt") ? t.stremio.id.split(":")[0] : undefined));
+  useEffect(() => {
+    if (!srcOpen || imdb !== undefined || meta === undefined) return;
+    if (!meta) { setImdb(null); return; }
+    let alive = true;
+    imdbOf(meta.kind, meta.id).then((x) => alive && setImdb(x));
+    return () => { alive = false; };
+  }, [srcOpen, meta]);
+  const srcKind = meta?.kind ?? t.kind ?? "movie";
+  const [season, setSeason] = useState(1);
+  const [ep, setEp] = useState(1);
+  const [eps, setEps] = useState<Episode[]>([]);
+  useEffect(() => {
+    if (!srcOpen || srcKind !== "tv" || !meta?.id) return;
+    let alive = true;
+    seasonEpisodes(meta.id, season).then((l) => alive && setEps(l));
+    return () => { alive = false; };
+  }, [srcOpen, season, meta?.id]);
+  const baseId = imdb ?? (t.stremio && !t.stremio.id.startsWith("tt") ? t.stremio.id : null);
+  const streamId = baseId ? (srcKind === "tv" ? `${baseId}:${season}:${ep}` : baseId) : null;
+  const srcRef = useRef<HTMLDivElement>(null);
+  const openSources = () => { setSrcOpen(true); setTimeout(() => srcRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 60); };
   return createPortal(
     <div className="modal-bg" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal wide td">
@@ -725,21 +881,22 @@ function TitleDetail({ t, items, onClose, onPlay, onTorrent, onAsk }: { t: Detai
           {meta?.overview && <TrText className="td-ov" text={meta.overview} />}
           <div className="td-actions">
             {lib && onPlay ? <button className="primary light" onClick={() => { onClose(); onPlay(lib.files[0].path); }}><Icon d={I.play} fill size={16} />  {tt("İzle")}</button>
+              : canStream ? <button className="primary light" data-tip={tt("Eklentilerindeki kaynakları göster")} onClick={openSources}><Icon d={I.play} fill size={16} />  {tt("İzle")}</button>
               : onTorrent && <button className="primary light" data-tip={tt("Kütüphanende yok · magnet ya da torrent gir")} onClick={() => { onClose(); onTorrent(); }}><Icon d={I.play} fill size={16} />  {tt("İzle")}</button>}
             <button className={"act" + (d?.watched ? " on good" : "")} data-tip={d?.watched ? tt("İzlemedim") : tt("İzledim")} aria-label={tt("İzledim")}
               onClick={() => markSeen(year ? `${t.title} (${year})` : t.title, !d?.watched)}><Icon d={I.check} size={20} /></button>
             <span className="vote-wrap">
               <button className={"act" + (d?.vote === "like" ? " on" : "")} data-tip={d?.rating && d.vote === "like" ? tt("Beğendim · {0}/10", d.rating) : tt("Beğendim")} aria-label={tt("Beğendim")}
-                onClick={() => { const on = d?.vote !== "like"; set({ vote: on ? "like" : undefined }); setAsk(on ? "like" : null); }}><Icon d={THUMB} size={20} />{d?.vote === "like" && d.rating ? <span className="vote-n">{d.rating}</span> : null}</button>
+                onClick={() => { const on = d?.vote !== "like"; set({ vote: on ? "like" : undefined, ...(on && d?.vote === "dislike" ? { rating: undefined } : {}) }); setAsk(on ? "like" : null); }}><Icon d={THUMB} size={20} />{d?.vote === "like" && d.rating ? <span className="vote-n">{d.rating}</span> : null}</button>
               {ask === "like" && <RateAsk title={t.title} year={t.year} vote="like" onDone={() => setAsk(null)} />}
             </span>
             <span className="vote-wrap">
               <button className={"act" + (d?.vote === "dislike" ? " on bad" : "")} data-tip={d?.rating && d.vote === "dislike" ? tt("Beğenmedim · {0}/10", d.rating) : tt("Beğenmedim")} aria-label={tt("Beğenmedim")}
-                onClick={() => { const on = d?.vote !== "dislike"; set({ vote: on ? "dislike" : undefined }); setAsk(on ? "dislike" : null); }}><Icon d={THUMB_DOWN} size={20} />{d?.vote === "dislike" && d.rating ? <span className="vote-n">{d.rating}</span> : null}</button>
+                onClick={() => { const on = d?.vote !== "dislike"; set({ vote: on ? "dislike" : undefined, ...(on && d?.vote === "like" ? { rating: undefined } : {}) }); setAsk(on ? "dislike" : null); }}><Icon d={THUMB_DOWN} size={20} />{d?.vote === "dislike" && d.rating ? <span className="vote-n">{d.rating}</span> : null}</button>
               {ask === "dislike" && <RateAsk title={t.title} year={t.year} vote="dislike" onDone={() => setAsk(null)} />}
             </span>
             <button className={"act" + (later ? " on" : "")} data-tip={later ? tt("Sonra izle listesinden çıkar") : tt("Sonra izle")} aria-label={tt("Sonra izle")}
-              onClick={() => markLater(year ? `${t.title} (${year})` : t.title, !later)}><Icon d={later ? I.check : I.plus} size={20} /></button>
+              onClick={() => (later ? laterOff(t.title, year) : markLater(year ? `${t.title} (${year})` : t.title, true))}><Icon d={later ? I.check : I.plus} size={20} /></button>
             {onAsk && (
               <button className="act ask" data-tip={tt("Asistana sor")} aria-label={tt("Asistana sor")} onClick={() => {
                 const kind = meta?.kind ?? t.kind ?? "movie";
@@ -753,10 +910,39 @@ function TitleDetail({ t, items, onClose, onPlay, onTorrent, onAsk }: { t: Detai
             {playlistNames().length > 0 && (
               <select className="pl-pick" value="" onChange={(e) => { if (e.target.value) addToPlaylist(e.target.value, [{ title: t.title, year }]); }}>
                 <option value="">{tt("+ Listeye")}</option>
-                {playlistNames().map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                {playlistNames().map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             )}
           </div>
+          {lib && canStream && !srcOpen && <button className="chip td-src-more" onClick={openSources}>{tt("Eklentilerdeki kaynaklar")}</button>}
+          {srcOpen && (
+            <div className="td-src" ref={srcRef}>
+              <div className="td-src-head">
+                <b>{tt("Kaynaklar")}</b>
+                {srcKind === "tv" && (
+                  <>
+                    <select value={season} onChange={(e) => { setSeason(Number(e.target.value)); setEp(1); setEps([]); }}>
+                      {Array.from({ length: Math.max(1, meta?.seasons ?? 1) }, (_, i) => <option key={i} value={i + 1}>{tt("{0}. sezon", i + 1)}</option>)}
+                    </select>
+                    <select value={ep} onChange={(e) => setEp(Number(e.target.value))}>
+                      {(eps.length ? eps : Array.from({ length: 30 }, (_, i) => ({ episode: i + 1, name: "" }))).map((x) => (
+                        <option key={x.episode} value={x.episode}>{tt("{0}. bölüm", x.episode)}{x.name ? " · " + x.name : ""}</option>
+                      ))}
+                    </select>
+                  </>
+                )}
+                <span className="grow" />
+                <span className="muted small">{tt("Kaynaklar eklentilerinden gelir; ne izlediğin senin sorumluluğunda.")}</span>
+              </div>
+              {streamId ? (
+                <StreamList type={srcKind === "tv" ? "series" : "movie"} id={streamId}
+                  onPlay={(src) => { onClose(); onSource!(src, srcKind === "tv" ? `${title} — S${String(season).padStart(2, "0")}${lang() === "tr" ? "B" : "E"}${String(ep).padStart(2, "0")}` : year ? `${title} (${year})` : title); }}
+                  onDownload={(src) => onDownload?.(src)} />
+              ) : (
+                <div className="muted small">{imdb === undefined ? tt("Hazırlanıyor…") : tt("Bu başlığın IMDb numarası bulunamadı; eklentiler başlıkları IMDb numarasıyla arar.")}</div>
+              )}
+            </div>
+          )}
           <label className="td-note">{tt("Notun")}
             <input value={note} onChange={(e) => setNote(e.target.value)} onBlur={() => set({ note: note.trim() || undefined })} placeholder={tt("ör. sonu zayıftı, müzikleri harika")} />
           </label>
@@ -793,7 +979,9 @@ function DiaryList({ onOpen, start, onClose }: { onOpen: (t: DetailTarget) => vo
     const d = loadDiary();
     for (const k of Object.keys(d)) if (d[k] === d[k] && seenKey(d[k].title) === seenKey(e.title) && d[k].year === e.year) delete d[k];
     store.set("diary", JSON.stringify(d));
-    markSeen(e.year ? `${e.title} (${e.year})` : e.title, false);
+    // off the "watched" ticks too, without markSeen (that would write the entry back)
+    toggleList("seenList", e.year ? `${e.title} (${e.year})` : e.title, false);
+    toggleList("seenList", e.title, false);
   };
   return createPortal(
     <div className="modal-bg" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -857,9 +1045,17 @@ function PlaylistView({ pl, owner, items, onPlay, onOpen, onClose }: {
   useEffect(() => {
     const all = loadPlaylists();
     const cur = all.find((p) => p.id === pl.id);
-    if (cur && cur.items.slice(0, shown).some((x) => (!x.poster || x.rating == null) && !x.noPoster)) fillPosters(cur.items.slice(0, shown), () => savePlaylists(all), shown);
+    if (!cur || !cur.items.slice(0, shown).some((x) => (!x.poster || x.rating == null) && !x.noPoster)) return;
+    const work = cur.items.slice(0, shown);
+    fillPosters(work, () => {
+      const fresh = loadPlaylists();
+      const p = fresh.find((x) => x.id === pl.id);
+      if (!p) return;
+      for (const x of p.items) { const w = work.find((y) => y.title === x.title && y.year === x.year); if (w) posterInfo(x, w); }
+      savePlaylists(fresh);
+    }, shown);
   }, [pl.id, shown]);
-  const inLib = (t: PlItem) => items.find((i) => (t.tmdbId && i.meta?.id === t.tmdbId) || seenKey(i.meta?.title ?? i.parsed.title) === seenKey(t.title));
+  const inLib = (t: PlItem) => libMatch(items, t);
   const edit = (f: (p: Playlist) => void) => { const all = loadPlaylists(); const p = all.find((x) => x.id === pl.id); if (p) { f(p); savePlaylists(all); } };
   const removeItem = (t: PlItem) => edit((p) => { p.items = p.items.filter((x) => !(x.title === t.title && x.year === t.year)); });
   const moveTo = (from: number, to: number) => { if (from !== to) edit((p) => { const [x] = p.items.splice(from, 1); p.items.splice(to, 0, x); }); };
@@ -1020,7 +1216,7 @@ function LaterList({ items, onOpen, onPlay }: { items: Item[]; onOpen: (t: Detai
           const m = meta[laterKey(t)];
           const title = t.replace(/\s*\((\d{4})\)\s*$/, "");
           const year = t.match(/\((\d{4})\)\s*$/)?.[1];
-          const lib = items.find((i) => (m?.tmdbId && i.meta?.id === m.tmdbId) || seenKey(i.meta?.title ?? i.parsed.title) === seenKey(title));
+          const lib = libMatch(items, { title, year, tmdbId: m?.tmdbId, kind: m?.kind });
           const open = () => onOpen({ title, year, kind: m?.kind, tmdbId: m?.tmdbId });
           return (
             <div key={t} className="plg-card">
@@ -1046,7 +1242,7 @@ function LaterList({ items, onOpen, onPlay }: { items: Item[]; onOpen: (t: Detai
   );
 }
 
-export function RecsPage({ items, onPlay, onTorrent, onAsk }: { items: Item[]; onPlay?: (path: string) => void; onTorrent?: () => void; onAsk?: (it: Item) => void }) {
+export function RecsPage({ items, onPlay, onTorrent, onAsk, onSource, onDownload }: { items: Item[]; onPlay?: (path: string) => void; onTorrent?: () => void; onAsk?: (it: Item) => void } & SourceProps) {
   const { recs } = useTaste();
   const [detail, setDetail] = useState<DetailTarget | null>(null);
   const [shown, setShown] = useState(48);
@@ -1093,7 +1289,7 @@ export function RecsPage({ items, onPlay, onTorrent, onAsk }: { items: Item[]; o
   };
   const patch = (id: string, p: Partial<Rec>) => saveRecs(loadRecs().map((r) => (r.id === id ? { ...r, ...p } : r)));
   const remove = (id: string) => saveRecs(loadRecs().filter((r) => r.id !== id));
-  const inLib = (r: Rec) => items.some((i) => (r.tmdbId && i.meta?.id === r.tmdbId) || (i.meta?.title ?? i.parsed.title).toLowerCase() === r.title.toLowerCase());
+  const inLib = (r: Rec) => !!libMatch(items, r);
   const mine = who && who !== "*" ? recs.filter((r) => seenKey(r.from) === seenKey(who)) : recs;
   const open = who ? mine.filter((r) => !r.status || r.id === askFor?.id) : [];
   const done = who ? mine.filter((r) => r.status && r.id !== askFor?.id) : [];
@@ -1102,15 +1298,18 @@ export function RecsPage({ items, onPlay, onTorrent, onAsk }: { items: Item[]; o
   const missing = open.slice(0, shown).filter((r) => !r.poster && !r.noPoster).length;
   useEffect(() => {
     if (!missing) return;
-    const all = loadRecs();
-    const byId = new Map(all.map((r) => [r.id, r]));
-    const work = open.slice(0, shown).map((r) => byId.get(r.id)!).filter(Boolean);
-    fillPosters(work, () => saveRecs(all), shown);
-  }, [shown, missing > 0]);
+    const work = open.slice(0, shown).map((r) => ({ ...r }));
+    fillPosters(work, () => {
+      const fresh = loadRecs();
+      for (const r of fresh) { const w = work.find((x) => x.id === r.id); if (w) posterInfo(r, w); }
+      saveRecs(fresh);
+    }, shown);
+  }, [shown, missing > 0, who]);
 
   const vote = (r: Rec, v: Vote) => {
     patch(r.id, { status: "watched", vote: v });
-    diarySet(r.title, r.year, { watched: Date.now(), vote: v });
+    const prev = diaryGet(r.title, r.year)?.vote;
+    diarySet(r.title, r.year, { watched: Date.now(), vote: v, ...(prev && prev !== v ? { rating: undefined } : {}) });
     setAskFor({ id: r.id, vote: v });
   };
   const card = (r: Rec) => {
@@ -1139,7 +1338,7 @@ export function RecsPage({ items, onPlay, onTorrent, onAsk }: { items: Item[]; o
               <span className="round pl-round" title={tt("Listeye ekle")}>+
                 <select value="" onChange={(e) => { if (e.target.value) addToPlaylist(e.target.value, [{ title: r.title, year: r.year }]); }}>
                   <option value="">{tt("Listeye ekle…")}</option>
-                  {playlistNames().map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                  {playlistNames().map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               </span>
             )}
@@ -1179,6 +1378,14 @@ export function RecsPage({ items, onPlay, onTorrent, onAsk }: { items: Item[]; o
   }, [who, tab, curList?.items.length, mine.length]);
   useEffect(() => () => setRecsView(null), []);
   const st = who && who !== "*" ? stats[who] : undefined;
+  const followExport = async () => {
+    if (!lbWho.trim()) return;
+    const f = await openDialog({ multiple: true, filters: [{ name: "Letterboxd", extensions: ["zip", "csv"] }] });
+    const paths = Array.isArray(f) ? f : f ? [f] : [];
+    if (!paths.length) return;
+    setBusyMsg(tt("Letterboxd dosyası okunuyor…"));
+    try { setBusyMsg(await followLetterboxd(lbWho, "", await readLetterboxdExport(paths))); setLbOpen(false); pick(lbWho.trim()); } catch (e) { setBusyMsg(String(e).replace(/^Error: /, "")); }
+  };
   const follow = async () => {
     if (!lb.trim() || !lbWho.trim()) return;
     setBusyMsg(tt("Letterboxd okunuyor… (beğenileri, izleme listesi ve kendi listeleri)"));
@@ -1243,10 +1450,13 @@ export function RecsPage({ items, onPlay, onTorrent, onAsk }: { items: Item[]; o
             <input value={lbWho} onChange={(e) => setLbWho(e.target.value)} placeholder={tt("Kimin? (ör. Ali)")} />
             <input value={lb} onChange={(e) => setLb(e.target.value)} onKeyDown={(e) => e.key === "Enter" && follow()} placeholder={tt("Letterboxd profil ya da liste bağlantısı")} />
             <button className="primary sm" onClick={follow} disabled={!lb.trim() || !lbWho.trim()}>{tt("Bağla")}</button>
+            <span className="muted small">{tt("ya da")}</span>
+            <button className="chip" onClick={followExport} disabled={!lbWho.trim()}
+              data-tip={tt("Letterboxd'da Ayarlar → Veri → Dışa aktar ile indirilen ZIP (ya da içindeki CSV'ler). Site okunamadığında da çalışır.")}>{tt("Dışa aktarma dosyası seç")}</button>
           </div>
         )}
         {busyMsg && <div className="small import-msg">{busyMsg}</div>}
-        {!people.length && <div className="muted empty-note">{tt("Arkadaşlarının önerdiği filmleri ekle ya da Letterboxd'larını bağla. Luna asistanı bunları da hesaba katar.")}</div>}
+        {!people.length && <div className="muted empty-note">{tt("Arkadaşlarının önerdiği filmleri ekle ya da Letterboxd'larını bağla. Luna Asistanı bunları da hesaba katar.")}</div>}
 
         {people.length > 0 && (
           <div className="ppl-shelf">
@@ -1326,7 +1536,7 @@ export function RecsPage({ items, onPlay, onTorrent, onAsk }: { items: Item[]; o
       </section>
       <Playlists items={items} onPlay={onPlay} onOpen={setDetail} />
       <LaterList items={items} onOpen={setDetail} onPlay={onPlay} />
-      {detail && <TitleDetail t={detail} items={items} onClose={() => setDetail(null)} onPlay={onPlay} onTorrent={onTorrent} onAsk={onAsk} />}
+      {detail && <TitleDetail t={detail} items={items} onClose={() => setDetail(null)} onPlay={onPlay} onTorrent={onTorrent} onAsk={onAsk} onSource={onSource} onDownload={onDownload} />}
     </div>
   );
 }
@@ -1340,10 +1550,14 @@ type FilmCard = { id: number; kind: "movie" | "tv"; title: string; original?: st
 type Face = { name: string; role?: string; photo?: string | null; url?: string };
 type Lnk = { kind: string; label: string; url: string };
 type SourceAsk = { title: string; year?: string; poster?: string | null };
+/** A song found outside the library: the user approves adding it. */
+type SongHit = { url: string; title: string; channel: string; duration?: number; thumb?: string };
+type SongAsk = { query: string; hits: SongHit[] };
 /** Films that share a name: the user picks the one they mean. */
 type Choice = { id: number; kind: "movie" | "tv"; title: string; year: string; poster: string | null; rating?: number };
-type Msg = { role: "user" | "model"; text: string; sources?: Source[]; note?: string; images?: Pic[]; people?: Face[]; links?: Lnk[]; film?: FilmCard; source?: SourceAsk; choices?: Choice[] };
-type Conv = { id: string; title: string; at: number; ctx: string; ctxKind: "general" | "film" | "recs"; msgs: Msg[] };
+type LinkAct = { kind: "spotify" | "youtube" | "torrent" | "book"; url: string; state?: "done" | "cancel"; info?: string; pl?: string };
+type Msg = { role: "user" | "model"; text: string; undo?: string; act?: LinkAct; hop?: Mode[]; sources?: Source[]; note?: string; images?: Pic[]; people?: Face[]; links?: Lnk[]; film?: FilmCard; source?: SourceAsk; song?: SongAsk; choices?: Choice[] };
+type Conv = { id: string; title: string; at: number; ctx: string; ctxKind: "general" | "film" | "recs" | "music" | "books"; msgs: Msg[] };
 const loadConvs = () => store.json<Conv[]>("chatHistory", []);
 function saveConv(c: Conv) {
   const all = loadConvs().filter((x) => x.id !== c.id);
@@ -1385,7 +1599,8 @@ export function TrText({ text, className }: { text: string; className?: string }
   useEffect(() => {
     setOrig(false);
     setBusy(false);
-    if (!foreign) { setTr(null); return; }
+    setTr(null);
+    if (!foreign) return;
     const c = store.get(trKey(text));
     if (c) { setTr(c); return; }
     let alive = true;
@@ -1450,7 +1665,7 @@ function profile(items: Item[], recent: Recent[]) {
   });
   const started = recent.filter((r) => pct(r) > 3 && pct(r) < 85).map((r) => `${r.title} (%${Math.round(pct(r))})`);
   const vals = Object.values(taste);
-  const lib = items.map((i) => {
+  const lib = items.slice(0, 400).map((i) => {
     const m = i.meta;
     return `${label(m?.title ?? i.parsed.title, m?.year)}${i.parsed.kind === "tv" ? " [dizi]" : ""}${m?.genres.length ? " — " + m.genres.slice(0, 3).join(", ") : ""}${m?.rating ? ` ★${m.rating}` : ""}`;
   });
@@ -1479,9 +1694,81 @@ function profile(items: Item[], recent: Recent[]) {
     sec("Arkadaşlarının önerileri (henüz bakılmamış)", recs.filter((r) => !r.status)
       .map((r) => `${label(r.title, r.year)} — ${r.from} önerdi${r.note ? `: "${r.note}"` : ""}`)),
     sec("Önerilip ilgilenmediği", recs.filter((r) => r.status === "dismissed").map((r) => `${r.title} (${r.from})`)),
-    sec("Kütüphanesindeki (diskte, hemen izlenebilir)", lib),
+    sec("Kütüphanesindeki (diskte, hemen izlenebilir; ilk 400)", lib),
   ].join("\n\n");
 }
+
+/** What the user has in the music part (the assistant's data when it's open there). */
+async function musicProfile(): Promise<string> {
+  const tracks = await loadMusicLibrary();
+  const albums = groupAlbums(tracks);
+  const artists = new Map<string, number>();
+  for (const x of albums) artists.set(x.artist, (artists.get(x.artist) ?? 0) + 1);
+  const recent = store.json<string[]>("musicRecentAlbums", []).map((k) => albums.find((x) => x.key === k)).filter(Boolean).map((x) => `${x!.artist} — ${x!.title}`);
+  const sec = (h: string, l: string[]) => `## ${h}\n${l.length ? l.map((x) => "- " + x).join("\n") : "(yok)"}`;
+  return [
+    sec("Kullanıcı hakkında notların (bunlara uy)", loadNotes()),
+    `Arşiv: ${tracks.length} şarkı, ${albums.length} albüm, ${artists.size} sanatçı.`,
+    (() => { const n = nowPlaying(); return n ? `## Şu an çalan ("bu şarkı", "çalan şarkı" bunu kasteder)\n${n.radio ? `Radyo: ${n.title}` : `${n.title} — ${n.artist ?? ""}${n.album ? ` (${n.album})` : ""}`}` : "## Şu an çalan\n(bir şey çalmıyor)"; })(),
+    sec("Luna'daki çalma listeleri (play_music ile adıyla çalınır, open_playlist ile sayfası açılır)", loadMusicPlaylists().map((p) =>
+      `${p.name} (${p.items.length} şarkı${p.from ? `, ${p.from}'dan` : ""}): ${p.items.slice(0, 25).map((t) => `${t.title} — ${t.artist ?? ""}`).join("; ")}${p.items.length > 25 ? " …" : ""}`)),
+    sec("En çok dinlediği şarkılar", mostPlayed(20).map((x) => `${x.q.title} — ${x.q.artist ?? ""} (${x.n} kez)`)),
+    sec("Son dinlenen albümler", recent.slice(0, 12)),
+    sec("Sanatçılar (albüm sayısı)", [...artists].sort((x, y) => y[1] - x[1]).slice(0, 120).map(([n, c]) => `${n} (${c})`)),
+    sec("Albümler", albums.slice(0, 200).map((x) => `${x.artist} — ${x.title}${x.year ? ` (${x.year})` : ""}`)),
+    sec("Favori radyolar", store.json<QItem[]>("musicRadioFav", []).map((r) => r.title)),
+    sec("Abone olduğu podcastler", store.json<{ title: string }[]>("podcasts", []).map((x) => x.title)),
+  ].join("\n\n");
+}
+/** What the user has in the books part. */
+async function booksProfile(): Promise<string> {
+  const books = await loadBookLibrary();
+  const recent = store.json<string[]>("bookRecent", []);
+  const abRecent = loadAbRecent();
+  const playing = nowPlaying();
+  const abPlaying = playing?.book ? playing : undefined;
+  const pctOf = (path: string) => Math.round((getPos(path)?.pct ?? 0) * 100);
+  const sec = (h: string, l: string[]) => `## ${h}\n${l.length ? l.map((x) => "- " + x).join("\n") : "(yok)"}`;
+  return [
+    sec("Kullanıcı hakkında notların (bunlara uy)", loadNotes()),
+    (() => { const b = books.find((x) => x.path === recent[0]); return b ? `## Şu an okuduğu ("bu kitap", "okuduğum kitap" bunu kasteder)\n${b.title}${b.author ? " — " + b.author : ""} (%${pctOf(b.path)})` : "## Şu an okuduğu\n(yok)"; })(),
+    ...(abPlaying ? [`## Şu an dinlenen sesli kitap (bölümler "Sıradakiler"de)\n${abPlaying.album ?? abPlaying.title} — ${abPlaying.artist ?? ""}\nBölüm: ${abPlaying.title}`] : []),
+    sec("Son dinlenen sesli kitaplar", abRecent.map((a) => `${abTitle(a.title)}${abAuthor(a) ? " — " + abAuthor(a) : ""}`)),
+    sec("Okumaya devam ettikleri", recent.map((p) => books.find((b) => b.path === p)).filter((b) => b && pctOf(b.path) < 99).slice(0, 8).map((b) => `${b!.title}${b!.author ? " — " + b!.author : ""} (%${pctOf(b!.path)})`)),
+    sec("Bitirdikleri", books.filter((b) => pctOf(b.path) >= 99).map((b) => `${b.title}${b.author ? " — " + b.author : ""}`)),
+    sec("Beğendiği kitaplar", Object.values(loadBookNotes()).filter((n) => n.vote === "like" || (n.rating ?? 0) >= 7).map((n) => `${n.title}${n.author ? " — " + n.author : ""}${n.rating ? ` (${n.rating}/10)` : ""}${n.note ? ` “${n.note}”` : ""}`)),
+    sec("Beğenmediği kitaplar", Object.values(loadBookNotes()).filter((n) => n.vote === "dislike").map((n) => `${n.title}${n.author ? " — " + n.author : ""}${n.note ? ` “${n.note}”` : ""}`)),
+    sec("Kitaplığı", books.slice(0, 250).map((b) => `${b.title}${b.author ? " — " + b.author : ""} [${b.kind}]`)),
+  ].join("\n\n");
+}
+const SYSTEM_PARTS = `
+# Luna'nın bölümleri
+Luna'nın üç bölümü var: Film, Müzik, Kitap. "X var mı / bizde var mı" sorulursa önce bulunduğun bölümde ara (search_books, search_music ya da search_film_library); araç sonucunda diğer bölümlerde bulunanlar da gelir, onları da söyle (ör. "Dune'un kitabı kitaplığında yok ama filmi film kütüphanende var"). Bir bölümdeyken diğer bölümlerden bir şey istenirse ilgili aracı kullan: film/dizi açmak için open_from_library, müzik/radyo/podcast için play_music, play_radio, play_podcast, kitap için open_book, find_free_books, get_free_book, play_audiobook. Araç bulamazsa uydurma; olduğunu söyle.`;
+const SYSTEM_MUSIC = `Sen Luna Player'ın müzik asistanısın. Kullanıcıyla Türkçe, samimi ve kısa konuş. Selamlama ve kapanış cümlesi kurma; doğrudan cevapla başla.
+Kullanıcının kendi müzik arşivi aşağıda. "Çal", "dinlet", "aç" denince play_music (arşivden), play_radio (canlı radyo) ya da play_podcast kullan; arşivde ne olduğunu görmek için search_music. Arşivde/listelerde olmayan bir şarkı istenirse play_song'u çağır; onay kartını kullanıcı tıklar, sen çaldığını söyleme. Çalma listesi istenirse make_music_playlist kullan: şarkıları YouTube'dan bulur ve listeyi gerçekten oluşturur. Film listesi aracı add_to_playlist'i müzik için kullanma.
+Öneri isteğinde önce arşivinden öner (albüm ve sanatçı adlarını **kalın** yaz), sonra arşivde olmayanları "arşivinde yok" diye belirt. Şarkı sözü yazma (telif).
+Her cevabın EN SONUNA ayrı bir satırda 3-4 kısa hazır yanıt yaz: >> Karışık çal | Sakin bir şey | Radyo aç
+KONU: müzik, radyo, podcast; ayrıca Luna'nın film ve kitap bölümleri. Başka konularda tek cümleyle "Ben müzik, film ve kitap konularında yardımcı olabiliyorum" de.`;
+const SYSTEM_BOOKS = `Sen Luna Player'ın kitap asistanısın. Kullanıcıyla Türkçe, samimi ve kısa konuş. Selamlama ve kapanış cümlesi kurma; doğrudan cevapla başla.
+Kullanıcının kitaplığı ve okuma durumu aşağıda. "Aç", "okumaya devam" denince open_book; kitaplığında olmayan klasikler için find_free_books, sonra kullanıcı isterse get_free_book (indirip açar); dinlemek isterse play_audiobook. Sesli kitaplar (LibriVox) ayrıdır: kitap dosyası değildir, dosya kitaplığında görünmez; bağlamdaki "şu an dinlenen sesli kitap" ve "son dinlenen sesli kitaplar" bölümlerini kullan. Dinlemek/sürdürmek için play_audiobook çağır.
+Kitap adlarını **kalın** yaz. Öneri isteğinde önce kitaplığından, sonra ücretsiz klasiklerden öner. Spoiler verme; kitaptan uzun alıntı yapma.
+Her cevabın EN SONUNA ayrı bir satırda 3-4 kısa hazır yanıt yaz: >> Ne okusam? | Kaldığım kitabı aç | Ücretsiz bir klasik öner
+KONU: kitaplar, yazarlar, okuma; ayrıca Luna'nın film ve müzik bölümleri. Başka konularda tek cümleyle "Ben kitap, film ve müzik konularında yardımcı olabiliyorum" de.`;
+const SYSTEM_EN_PART = `
+
+# LANGUAGE (overrides every language rule above)
+The user's app is in English. Always reply in natural English, never in Turkish, whatever language the notes, tool results or profile below are in.
+The quick-reply line at the very end must be in English too.`;
+const MODE_QUICK: Record<Exclude<Mode, "film">, () => string[]> = {
+  music: () => [
+    ...(nowPlaying() && !nowPlaying()!.radio ? [tt("Çalan şarkı hangi film ve dizilerde geçiyor?"), tt("Bu sanatçının belgeseli ya da filmi var mı?")] : []),
+    tt("Arşivimden karışık bir şey çal"), tt("Bu akşama göre bir albüm öner"), tt("Sakin bir radyo aç"), tt("Film müziği gibi bir şey çal"),
+  ],
+  books: () => [
+    ...(store.json<string[]>("bookRecent", []).length ? [tt("Okuduğum kitabın filmi ya da dizisi var mı?"), tt("Bu kitabı okurken ne dinlesem?")] : []),
+    tt("Ne okusam?"), tt("Kaldığım kitabı aç"), tt("Filmi yapılmış güzel bir kitap öner"), tt("Ücretsiz bir klasik öner"),
+  ],
+};
 
 /** Laid over the Turkish instructions when the app is in English. */
 const SYSTEM_EN = `
@@ -1495,7 +1782,7 @@ For off-topic requests say "I can only help with films and series."`;
 const SYSTEM = `Sen Luna Player'ın film asistanısın. Kullanıcıyla Türkçe, samimi ve kısa konuş.
 Birden fazla film/dizi sayıyorsan ASLA paragraf içinde arka arkaya yazma: her biri ayrı satırda madde olsun, şu biçimde: "- **Ad (Yıl)** — tek cümlelik sebep (kütüphanede var/yok, kim önerdi gibi notlar bu cümlede)". Listeden önce en fazla bir kısa giriş cümlesi yaz.
 Film/dizi adlarını her zaman ORİJİNAL adıyla (İngilizce/özgün dildeki adı, Latin harfli; Japonca vb. ise bilinen uluslararası adı) kalın ve yılıyla yaz: **Original Title (Yıl)**. Türkçe adı varsa kalın olmadan yanına parantezle ekle, ör. **The Conjuring (2013)** (Korku Seansı). Türkçe adı asla kalın yazma. Başlık ya da vurgu için kalın yazı kullanma. Kişi adlarını (yönetmen, oyuncu) kalın yazma ve yanlarına yıl koyma; yıl sadece film/dizi adının yanına gelir.
-Tek bir film/dizi hakkında bilgi, hikaye ya da kadro sorulursa show_film kullan (sohbette filmin sayfasını açar).
+Tek bir film/dizi hakkında bilgi, hikaye ya da kadro sorulursa show_film kullan (sohbette filmin sayfasını açar). Kullanıcı sadece zevkini ya da bir görüşünü söylüyorsa ("vampir sevmiyorum", "korku olmasın") ya da sayfası zaten açılmış bir filmden bahsediyorsa show_film kullanma; sadece cevap ver.
 Görsel, fotoğraf, afiş, sahne ya da oyuncu istenirse show_images / show_person; bağlantı ya da 'nerede izlerim' istenirse film_links kullan. Asla URL ya da görsel adresi uydurma.
 Kullanıcı çocuk istismarı/pedofili, ensest, nekrofili ve zoofili konularının adını bile okumak istemiyor: bunlardan hiçbir şekilde adıyla, tarifle ya da ima ederek bahsetme; gerekirse sadece "KOD:KZ#4" yaz (ör. "bu filmde KOD:KZ#4 var"). Film özetlerini aktarırken de bu kısımları KOD:KZ#4 ile değiştir.
 ÖNCE NİYETİ ANLA, sonra cevap ver:
@@ -1544,17 +1831,18 @@ const TA_PLAY = svg("M8 5l12 7-12 7z", true);
 const TA_SEEN = svg("M20 6 9 17l-5-5");
 const ICON_YT = '<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M8 5l12 7-12 7z"/></svg>';
 
-let knownTitles: { n: number; set: Set<string> } | null = null;
+let knownTitles: { n: string; set: Set<string> } | null = null;
 /** Titles Luna knows (library, recommendations, diary, lists): only these get the watched/like/later buttons in answers. */
 function isKnownTitle(t: string) {
   const recs = loadRecs();
-  if (!knownTitles || knownTitles.n !== recs.length + toolCtx.items.length) {
+  const sig = [recs.length, recs[0]?.title, recs[recs.length - 1]?.title, toolCtx.items.length, toolCtx.items[0]?.parsed.title, toolCtx.items[toolCtx.items.length - 1]?.parsed.title].join("|");
+  if (!knownTitles || knownTitles.n !== sig) {
     const set = new Set<string>();
     for (const r of recs) set.add(seenKey(r.title));
     for (const i of toolCtx.items) { set.add(seenKey(i.meta?.title ?? i.parsed.title)); set.add(seenKey(i.parsed.title)); }
     for (const e of Object.values(loadDiary())) set.add(seenKey(e.title));
     for (const p of loadPlaylists()) for (const x of p.items) set.add(seenKey(x.title));
-    knownTitles = { n: recs.length + toolCtx.items.length, set };
+    knownTitles = { n: sig, set };
   }
   return knownTitles.set.has(seenKey(t.replace(/\s*\(\d{4}\)\s*$/, "")));
 }
@@ -1660,7 +1948,7 @@ const TOOLS = [{
     },
     {
       name: "add_to_playlist",
-      description: "Bir listeye film/dizi ekler; liste yoksa oluşturur. 'Bana bir maraton listesi yap', 'şunu Ghibli listeme ekle' gibi durumlarda kullan. Filmleri izlenme sırasıyla ver.",
+      description: "Bir listeye film/dizi ekler; liste yoksa oluşturur. 'Bana bir maraton listesi yap', 'şunu Ghibli listeme ekle' gibi durumlarda kullan. Filmleri izlenme sırasıyla ver. Müzik listesi için bunu değil make_music_playlist'i kullan.",
       parameters: { type: "OBJECT", properties: {
         playlist: { type: "STRING", description: "Liste adı" },
         titles: { type: "ARRAY", items: { type: "STRING" }, description: "Eklenecekler, 'Ad (Yıl)' biçiminde" },
@@ -1742,11 +2030,217 @@ const TOOLS = [{
       description: "Bir filmi/diziyi 'sonra izle' listesinden çıkarır.",
       parameters: { type: "OBJECT", properties: { title: { type: "STRING" }, year: { type: "STRING" } }, required: ["title"] },
     },
+    // ---- Müzik ----
+    {
+      name: "search_film_library",
+      description: "Kullanıcının film/dizi kütüphanesinde (Luna'nın Film bölümü) arar. 'X var mı' sorularında ve başka bölümde bulunamayan bir ad için kullan.",
+      parameters: { type: "OBJECT", properties: { query: { type: "STRING" } }, required: ["query"] },
+    },
+    {
+      name: "search_music",
+      description: "Kullanıcının kendi müzik arşivinde (Luna'nın Müzik bölümü) albüm, sanatçı ya da şarkı arar; ne olduğunu listeler.",
+      parameters: { type: "OBJECT", properties: { query: { type: "STRING", description: "Albüm, sanatçı ya da şarkı adı; tüm arşiv için boş" } } },
+    },
+    {
+      name: "play_music",
+      description: "Kullanıcının müzik arşivinden çalar: bir albüm, bir sanatçının şarkıları, tek şarkı ya da her şey karışık. 'X'i çal / dinlet' denince kullan.",
+      parameters: { type: "OBJECT", properties: {
+        query: { type: "STRING", description: "Albüm, sanatçı ya da şarkı adı; karışık için boş" },
+        what: { type: "STRING", enum: ["album", "artist", "song", "shuffle"], description: "Ne çalınacağı; emin değilsen verme" },
+      } },
+    },
+    {
+      name: "play_song",
+      description: "Arşivde ya da Luna listelerinde olmayan bir şarkıyı YouTube'da bulur ve onay kartı gösterir. Kullanıcı arşivde olmayan bir şarkıyı çalmanı isterse kullan; kartı kullanıcı tıklamadan çaldığını söyleme.",
+      parameters: { type: "OBJECT", properties: {
+        title: { type: "STRING", description: "Şarkı adı" },
+        artist: { type: "STRING", description: "Sanatçı (biliniyorsa)" },
+      }, required: ["title"] },
+    },
+    {
+      name: "make_music_playlist",
+      description: "Bir sanatçının/temanın sevilen şarkılarından YouTube üzerinden GERÇEK bir Luna çalma listesi oluşturur. 'X'in en iyi 10 şarkısını getir, playlist yap' gibi isteklerde kullan. Bu araç listeyi gerçekten oluşturur; sadece liste yazma.",
+      parameters: { type: "OBJECT", properties: {
+        query: { type: "STRING", description: "Sanatçı, grup ya da tema" },
+        name: { type: "STRING", description: "Liste adı (boşsa '<sanatçı> En İyiler')" },
+        count: { type: "NUMBER", description: "Kaç şarkı (varsayılan 10)" },
+        titles: { type: "ARRAY", items: { type: "STRING" }, description: "Belirli şarkı adları (varsa; o zaman query boş olabilir)" },
+      }, required: ["query"] },
+    },
+    {
+      name: "play_radio",
+      description: "Canlı radyo istasyonu açar (adına ya da türe göre: 'jazz', 'Açık Radyo', 'haber').",
+      parameters: { type: "OBJECT", properties: { query: { type: "STRING" } }, required: ["query"] },
+    },
+    {
+      name: "play_podcast",
+      description: "Bir podcastin en yeni bölümünü çalar (podcast adı ya da konusu).",
+      parameters: { type: "OBJECT", properties: { query: { type: "STRING" } }, required: ["query"] },
+    },
+    // ---- Kitap ----
+    {
+      name: "search_books",
+      description: "Kullanıcının kendi kitaplığında (Luna'nın Kitap bölümü: EPUB, PDF, çizgi roman) kitap arar; okuma ilerlemesiyle listeler.",
+      parameters: { type: "OBJECT", properties: { query: { type: "STRING", description: "Kitap ya da yazar; tüm kitaplık için boş" } } },
+    },
+    {
+      name: "open_book",
+      description: "Kullanıcının kitaplığındaki bir kitabı okuyucuda açar (kaldığı yerden). 'X kitabını aç / okumaya devam et' denince kullan.",
+      parameters: { type: "OBJECT", properties: { title: { type: "STRING", description: "Kitap adı ya da yazar; son okunan için boş" } } },
+    },
+    {
+      name: "find_free_books",
+      description: "Project Gutenberg'de (telif süresi dolmuş, ücretsiz kitaplar; her dilde) kitap arar. Kullanıcının kitaplığında olmayan klasikler için.",
+      parameters: { type: "OBJECT", properties: { query: { type: "STRING", description: "Kitap adı ya da yazar" } }, required: ["query"] },
+    },
+    {
+      name: "get_free_book",
+      description: "find_free_books ile bulunan bir kitabı indirip okuyucuda açar.",
+      parameters: { type: "OBJECT", properties: { gutenberg_id: { type: "STRING" }, title: { type: "STRING" }, author: { type: "STRING" } }, required: ["gutenberg_id", "title"] },
+    },
+    {
+      name: "delete_from_library",
+      description: "Film kütüphanesindeki bir film/diziyi kaldırır. Kullanıcıya ne yapılacağı (dosyayı Geri Dönüşüm Kutusu'na silmek ya da sadece 'İzlemeye devam et'ten kaldırmak) onay kartında sorulur; sen sorma, aracı çağır.",
+      parameters: { type: "OBJECT", properties: { title: { type: "STRING" }, year: { type: "STRING" } }, required: ["title"] },
+    },
+    {
+      name: "open_playlist",
+      description: "Luna'daki bir çalma listesinin sayfasını açar (Spotify'dan aktarılanlar dahil). Listeyi çalmak için play_music kullan.",
+      parameters: { type: "OBJECT", properties: { query: { type: "STRING", description: "Listenin adı" } }, required: ["query"] },
+    },
+    {
+      name: "delete_music",
+      description: "Müzik arşivinden bir albümü ya da şarkıyı kaldırır. Ne yapılacağı (dosyaları silmek ya da sadece listelerden çıkarmak) onay kartında kullanıcıya sorulur; sen sorma, aracı çağır.",
+      parameters: { type: "OBJECT", properties: { query: { type: "STRING", description: "Albüm ya da şarkı adı (gerekirse sanatçıyla)" }, what: { type: "STRING", enum: ["album", "song"] } }, required: ["query"] },
+    },
+    {
+      name: "delete_book",
+      description: "Kitaplıktan bir kitabı kaldırır. Ne yapılacağı (sadece okuma kaydını silmek ya da dosyayı silmek) onay kartında kullanıcıya sorulur; sen sorma, aracı çağır.",
+      parameters: { type: "OBJECT", properties: { title: { type: "STRING" } }, required: ["title"] },
+    },
+    {
+      name: "play_audiobook",
+      description: "Ücretsiz bir sesli kitabı (LibriVox) çalar.",
+      parameters: { type: "OBJECT", properties: { query: { type: "STRING", description: "Kitap adı ya da yazar" } }, required: ["query"] },
+    },
   ],
 }];
 
+/** Which part of Luna each tool belongs to: one from another part shows that part's animation and colour. */
+const TOOL_MODE: Record<string, Mode> = {
+  search_film_library: "film", search_music: "music", play_music: "music", play_song: "music", make_music_playlist: "music", play_radio: "music", play_podcast: "music",
+  search_books: "books", open_book: "books", find_free_books: "books", get_free_book: "books", play_audiobook: "books",
+  open_from_library: "film", show_film: "film", show_images: "film", show_person: "film", film_links: "film", delete_from_library: "film",
+  delete_music: "music", delete_book: "books", open_playlist: "music",
+};
+
+/* ---------- the assistant asks before it changes or opens anything, and changes can be undone ---------- */
+/** Tools that change the user's records (asked every time, undoable). */
+const CHANGES = new Set(["add_recommendation", "mark_watched", "add_watch_later", "remove_watch_later", "rate_title", "remove_recommendations", "import_link",
+  "follow_letterboxd", "refresh_playlists", "add_to_playlist", "remove_from_playlist", "delete_playlist", "update_recommendation", "sort_recommendations",
+  "remember_note", "forget_note", "get_free_book"]);
+/** Tools that open or play something (asked unless the user said not to). */
+const OPENS = new Set(["open_playlist", "open_from_library", "play_music", "play_radio", "play_podcast", "open_book", "play_audiobook"]);
+const askOpens = () => store.get("assistAskOpen") !== "0";
+/** Everything those tools write: a snapshot of these is what "Undo" puts back. */
+const UNDO_KEYS = ["recs", "diary", "seenList", "laterList", "playlists", "userNotes", "taste", "musicPlaylists", "bookDiary"];
+type Undo = { id: string; label: string; snap: Record<string, string | null>; after: Record<string, string | null> };
+const undos: Undo[] = []; // this run's last changes
+const snapshot = () => Object.fromEntries(UNDO_KEYS.map((k) => [k, store.get(k)]));
+function restoreSnapshot(snap: Record<string, string | null>, after: Record<string, string | null>) {
+  for (const [k, v] of Object.entries(snap)) {
+    // only undo the tool's own change: a value the user changed again stays as it is
+    if (store.get(k) !== after[k]) continue;
+    if (v == null) { try { localStorage.removeItem(k); } catch {} } else store.set(k, v);
+  }
+  plNames = null;
+  changed();
+  saveMusicPlaylists(loadMusicPlaylists()); // tells the music pages
+}
+/** One plain sentence for what a tool call is about to do. */
+function describeTool(name: string, a: any): string {
+  const t = (x?: string, y?: string) => `“${String(x ?? "").trim()}”${y ? ` (${y})` : ""}`;
+  const list = (l?: string[]) => (l ?? []).slice(0, 6).join(", ") + ((l?.length ?? 0) > 6 ? tt(" ve {0} tane daha", l!.length - 6) : "");
+  switch (name) {
+    case "add_recommendation": return tt("{0} önerilere eklenecek{1}", t(a?.title, a?.year), a?.from ? tt(" ({0} önerdi)", a.from) : "");
+    case "mark_watched": return tt("{0} izlendi olarak işaretlenecek", t(a?.title, a?.year));
+    case "add_watch_later": return tt("{0} “Sonra izle”ye eklenecek", t(a?.title, a?.year));
+    case "remove_watch_later": return tt("{0} “Sonra izle”den çıkarılacak", t(a?.title, a?.year));
+    case "rate_title": return tt("{0} için zevk defterine yazılacak: {1}", t(a?.title, a?.year),
+      [a?.vote === "like" ? tt("beğendin") : a?.vote === "dislike" ? tt("beğenmedin") : a?.vote === "none" ? tt("beğeni kaldırılacak") : "", a?.rating ? `${a.rating}/10` : "", a?.note ? `“${a.note}”` : ""].filter(Boolean).join(" · "));
+    case "remove_recommendations": return tt("Önerilerden silinecek: {0}{1}", a?.which === "all" ? tt("hepsi") : a?.which === "disliked" ? tt("beğenmediklerin") : a?.which === "watched" ? tt("izlediklerin") : a?.which === "dismissed" ? tt("ilgilenmediklerin") : list(a?.titles), a?.from ? tt(" ({0} önerdikleri)", a.from) : "");
+    case "import_link": return tt("Bu bağlantıdaki filmler önerilere aktarılacak{0}: {1}", a?.from ? tt(" ({0} önerdi)", a.from) : "", a?.url ?? "");
+    case "follow_letterboxd": return tt("{0} için Letterboxd'dan dolan bir klasör ve listeler oluşturulacak", t(a?.person));
+    case "refresh_playlists": return tt("Letterboxd'a bağlı listeler güncellenecek (yeni filmler eklenir)");
+    case "add_to_playlist": return tt("{0} listesine eklenecek: {1}", t(a?.playlist), list(a?.titles));
+    case "remove_from_playlist": return tt("{0} listesinden çıkarılacak: {1}", t(a?.playlist), list(a?.titles));
+    case "delete_playlist": return a?.new_name ? tt("{0} listesinin adı {1} olacak", t(a?.playlist), t(a.new_name)) : tt("{0} listesi tamamen silinecek", t(a?.playlist));
+    case "update_recommendation": return tt("{0} önerisi düzenlenecek", t(a?.title, a?.year));
+    case "sort_recommendations": return tt("Öneriler sıralanacak: {0}", a?.by === "rating" ? tt("puana göre") : a?.by === "year" ? tt("yıla göre") : tt("zevkine göre"));
+    case "remember_note": return tt("Senin hakkında not alınacak: “{0}”", a?.note ?? "");
+    case "forget_note": return tt("Bu not silinecek: “{0}”", a?.note ?? "");
+    case "get_free_book": return tt("{0} indirilip okuyucuda açılacak", t(a?.title, a?.author));
+    case "open_from_library": return tt("{0} açılacak", t(a?.title, a?.year));
+    case "play_music": return a?.query ? tt("{0} çalınacak", t(a.query)) : tt("Arşivinden karışık çalınacak");
+    case "play_radio": return tt("{0} radyosu açılacak", t(a?.query));
+    case "play_podcast": return tt("{0} podcasti açılacak", t(a?.query));
+    case "open_book": return tt("{0} okuyucuda açılacak", t(a?.title));
+    case "play_audiobook": return tt("{0} sesli kitabı çalınacak", t(a?.query));
+    case "delete_from_library": return tt("{0} kütüphaneden kaldırılacak", t(a?.title, a?.year));
+    case "open_playlist": return tt("{0} listesinin sayfası açılacak", t(a?.query));
+    case "delete_music": return tt("{0} müzik arşivinden kaldırılacak", t(a?.query));
+    case "delete_book": return tt("{0} kitaplıktan kaldırılacak", t(a?.title));
+    default: return name;
+  }
+}
+type AskCard = { kind: "change" | "open" | "delete"; lines: string[]; files?: string[]; opts?: [string, string, boolean?][]; resolve: (v: string) => void };
+const DELETES = new Set(["delete_from_library", "delete_music", "delete_book"]);
+const fold = (x: string) => x.toLocaleLowerCase("tr").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+async function musicTargets(a: any) {
+  const q = fold(String(a?.query ?? ""));
+  if (!q) return [];
+  const tracks = await loadMusicLibrary();
+  const albumHit = tracks.filter((t) => fold(t.album) === q || fold(`${t.albumArtist || t.artist} ${t.album}`) === q || (q.length > 3 && fold(t.album).includes(q)));
+  const songHit = tracks.filter((t) => fold(t.title) === q || fold(`${t.artist} ${t.title}`) === q);
+  return a?.what === "song" ? songHit : a?.what === "album" ? albumHit : albumHit.length ? albumHit : songHit;
+}
+async function bookTarget(a: any) {
+  const q = fold(String(a?.title ?? ""));
+  const books = await loadBookLibrary();
+  return books.find((b) => fold(b.title) === q) ?? (q.length > 3 ? books.find((b) => fold(b.title).includes(q)) : undefined);
+}
+/** The files a delete would touch and the ways it can go. */
+async function deletePlan(name: string, a: any): Promise<{ files: string[]; opts: [string, string, boolean?][] }> {
+  if (name === "delete_music") {
+    const l = await musicTargets(a);
+    return { files: l.map((t) => t.path), opts: l.length ? [["lists", tt("Sadece listelerimden çıkar")], ["file", tt("Dosyaları sil (Geri Dönüşüm Kutusu'na)"), true]] : [] };
+  }
+  if (name === "delete_book") {
+    const b = await bookTarget(a);
+    return { files: b ? [b.path] : [], opts: b ? [["record", tt("Sadece okuma kaydını sil (ilerleme, beğeni, not)")], ["file", tt("Dosyayı sil (Geri Dönüşüm Kutusu'na)"), true]] : [] };
+  }
+  const it = libMatch(toolCtx.items, { title: String(a?.title ?? ""), year: a?.year });
+  return { files: it?.files.map((f) => f.path) ?? [], opts: it ? [["recent", tt("Sadece “İzlemeye devam et”ten kaldır")], ["file", tt("Dosyayı sil (Geri Dönüşüm Kutusu'na)"), true]] : [] };
+}
+async function trashFiles(paths: string[]): Promise<{ n: number; failed: string[] }> {
+  let n = 0;
+  const failed: string[] = [];
+  for (const p of paths) {
+    try { n += await invoke<number>("delete_file", { path: p }); } catch { failed.push(p); }
+  }
+  return { n, failed };
+}
+const HOP_TEXT: Record<Mode, string> = { film: tt("Filmlerine bakıyorum"), music: tt("Müziklerine bakıyorum"), books: tt("Kitaplığına bakıyorum") };
+const MODE_NAME: Record<Mode, string> = { film: tt("Film"), music: tt("Müzik"), books: tt("Kitap") };
+
+let pendingAsk: string | null = null;
+/** Opens the assistant and asks it this (only on the user's click: nothing runs on its own). */
+export function askAssistant(text: string) { pendingAsk = text; window.dispatchEvent(new Event("luna-ask")); }
+/** Opens the assistant without a question (the header/playlist buttons). */
+export function openAssistant() { pendingAsk = null; window.dispatchEvent(new Event("luna-ask")); }
+
 /** What the tools can reach in the app (set by the chat panel). */
-const toolCtx: { items: Item[]; play?: (path: string) => void; media: { images: Pic[]; people: Face[]; links: Lnk[]; film?: FilmCard; source?: SourceAsk; choices?: Choice[] }; pickFilm?: (c: Choice) => void; openSource?: (src: string) => void } = { items: [], media: { images: [], people: [], links: [] } };
+const toolCtx: { mode: Mode; setMode?: (m: Mode) => void; items: Item[]; play?: (path: string) => void; remove?: (paths: string[], how: "file" | "recent") => Promise<string>; media: { images: Pic[]; people: Face[]; links: Lnk[]; film?: FilmCard; source?: SourceAsk; song?: SongAsk; choices?: Choice[] }; pickFilm?: (c: Choice) => void; openSource?: (src: string) => void; closeChat?: () => void; musicPreview?: (name: string, items: QItem[], missing: string[], subs: string[]) => Promise<QItem[] | null> } = { mode: "film", items: [], media: { images: [], people: [], links: [] } };
 /** "This film isn't in your library": a box for a magnet link or a .torrent file, right in the answer. */
 function SourceBox({ s: src }: { s: SourceAsk }) {
   const [v, setV] = useState("");
@@ -1782,7 +2276,7 @@ function SourceBox({ s: src }: { s: SourceAsk }) {
 
 function FilmPage({ f, onPlay }: { f: FilmCard; onPlay?: (path: string) => void }) {
   useTaste();
-  const lib = toolCtx.items.find((i) => i.meta?.id === f.id || seenKey(i.meta?.title ?? i.parsed.title) === seenKey(f.title));
+  const lib = libMatch(toolCtx.items, { title: f.title, year: f.year, tmdbId: f.id, kind: f.kind });
   const label = f.year ? `${f.title} (${f.year})` : f.title;
   const later = has(loadLater(), label) || has(loadLater(), f.title);
   const d = diaryGet(f.title, f.year);
@@ -1813,7 +2307,7 @@ function FilmPage({ f, onPlay }: { f: FilmCard; onPlay?: (path: string) => void 
         <div className="fp-acts">
           {lib && onPlay && <button className="fp-btn primary" onClick={() => onPlay(lib.files[0].path)}><Icon d={I.play} fill size={15} />  {tt("Oynat")}</button>}
           <button className="fp-btn" onClick={() => openUrl(youtubeTrailer(label))}><Icon d={I.play} fill size={13} />  {tt("Fragman")}</button>
-          <button className={"fp-btn" + (later ? " on blue" : "")} onClick={() => markLater(label, !later)}>{later ? "✓ Listede" : tt("+ Sonra izle")}</button>
+          <button className={"fp-btn" + (later ? " on blue" : "")} onClick={() => (later ? laterOff(f.title, f.year || undefined) : markLater(label, true))}>{later ? "✓ Listede" : tt("+ Sonra izle")}</button>
           <button className={"fp-btn" + (d?.vote === "like" ? " on" : "")} onClick={() => vote("like")}><Icon d={THUMB} size={15} />  {tt("Beğendim")}</button>
           <button className={"fp-btn" + (d?.vote === "dislike" ? " on red" : "")} onClick={() => vote("dislike")}><Icon d={THUMB_DOWN} size={15} />  {tt("Beğenmedim")}</button>
           {lib && <span className="fp-lib">{tt("● Kütüphanende var")}</span>}
@@ -1883,7 +2377,250 @@ async function findTitle(a: any): Promise<SearchHit | undefined> {
 const norm = (t: string) => t.toLocaleLowerCase("tr").replace(/[^a-z0-9çğıöşü]+/g, " ").trim();
 
 /** Runs one tool call from the assistant; returns what happened (for the model and for the user). */
+const hit = (q: string, ...xs: (string | undefined)[]) => { const n = norm(q); return !n || xs.some((x) => x && norm(x).includes(n)); };
+/** YouTube's search chokes on punctuation: letters and digits only. */
+const ytQuery = (s: string) => s.replace(/[^\p{L}\p{N}]+/gu, " ").replace(/\s+/g, " ").trim();
+/** A real Luna music playlist from YouTube (the film playlist tool is not used for songs). */
+async function makeMusicPlaylist(a: any): Promise<string> {
+  const who = String(a?.query ?? a?.artist ?? "").trim();
+  const count = Math.min(30, Math.max(3, Number(a?.count) || 10));
+  const titles: string[] = Array.isArray(a?.titles) ? a.titles.map((x: unknown) => String(x).trim()).filter(Boolean).slice(0, count) : [];
+  const name = String(a?.name ?? a?.playlist ?? "").trim() || (who ? `${who} En İyiler` : "Luna Listesi");
+  const items: QItem[] = [];
+  const missing: string[] = [];
+  const notFound: string[] = [];
+  const used = new Set<string>();
+  const add = (h?: SongHit) => {
+    if (!h?.url || used.has(h.url) || items.some((i) => i.src === h.url)) return;
+    used.add(h.url);
+    items.push({ src: h.url, title: h.title, artist: h.channel, cover: h.thumb, duration: h.duration, yt: true });
+  };
+  const stop = new Set(["the", "of", "and", "a", "an", "to", "in", "on", "for", "with", "feat", "ft", "official", "video", "audio", "music", "topic", "remastered", "version", "live", "full", "album"]);
+  const words = (s: string) => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2 && !stop.has(w));
+  const good = (h: SongHit, want: string[]) => {
+    if (!want.length) return true;
+    const hay = new Set(words(h.title + " " + h.channel));
+    return want.filter((w) => hay.has(w)).length / want.length >= 0.75;
+  };
+  // "1. Song — Artist - Topic" -> song "Song", artist "Artist"
+  const parts = (t: string) => {
+    const plain = t.replace(/^\s*\d+[.)]\s*/, "").trim();
+    const seg = plain.split(/\s+[—–]\s+|\s+-\s+/);
+    const song = ytQuery(seg[0] ?? plain) || plain;
+    const artist = ytQuery((seg[1] ?? "").replace(/\btopic\b/gi, "")) || "";
+    return { song, artist };
+  };
+  const artistHint = titles.length ? parts(titles[0]).artist : "";
+  const nameHint = (ytQuery(name).split(" ")[0] ?? "").toLowerCase();
+  const whoQ = ytQuery(who) || artistHint || (titles.length && nameHint !== "luna" ? nameHint : "");
+  if (titles.length) {
+    const claimed = new Set<string>();
+    const found = await Promise.all(titles.map(async (t) => {
+      const { song, artist } = parts(t);
+      const want = words(song);
+      const qs = [...new Set([whoQ && `${song} ${whoQ}`, artist && `${song} ${artist}`, song, t].filter(Boolean) as string[])];
+      for (const q of qs) {
+        const hits = await invoke<SongHit[]>("yt_search", { query: q, n: 8 }).catch(() => [] as SongHit[]);
+        for (const h of hits) {
+          if (used.has(h.url) || claimed.has(h.url) || !good(h, want)) continue;
+          claimed.add(h.url);
+          return { t, h };
+        }
+      }
+      return { t, h: undefined };
+    }));
+    found.forEach(({ t, h }) => { if (h) add(h); else { missing.push(t); notFound.push(t); } });
+  } else if (who) {
+    const hits = await invoke<SongHit[]>("yt_search", { query: `${whoQ} top songs`, n: Math.max(count * 2, 20) }).catch(() => [] as SongHit[]);
+    hits.slice(0, count).forEach(add);
+    if (items.length < count) {
+      const more = await invoke<SongHit[]>("yt_search", { query: `${whoQ} songs`, n: Math.max(count * 2, 20) }).catch(() => [] as SongHit[]);
+      more.forEach(add);
+    }
+  }
+  // the requested song isn't on YouTube: fill up with the artist's other real tracks
+  if (titles.length && whoQ && items.length < count) {
+    let filled = 0;
+    const key = (whoQ.split(" ")[0] ?? "").toLowerCase();
+    const hits = await invoke<SongHit[]>("yt_search", { query: whoQ, n: 30 }).catch(() => [] as SongHit[]);
+    for (const h of hits) {
+      if (items.length >= count) break;
+      if (!h.url || used.has(h.url)) continue;
+      if (h.duration && h.duration > 900) continue;
+      if (/\b(full album|live|concert|mix|interview|podcast)\b/i.test(h.title)) continue;
+      if (key && !(h.title + " " + h.channel).toLowerCase().includes(key)) continue;
+      add(h); filled += 1;
+    }
+    if (filled) missing.splice(0, Math.min(filled, missing.length));
+  }
+  if (!items.length) return `“${name}” için şarkı bulunamadı (${who || titles.slice(0, 3).join(", ")}).`;
+  let chosen = items;
+  if (toolCtx.musicPreview) {
+    const picked = await toolCtx.musicPreview(name, items, missing, notFound);
+    if (!picked?.length) return "Kullanıcı vazgeçti; liste oluşturulmadı.";
+    chosen = picked;
+  }
+  const list = { id: "luna-" + Date.now().toString(36), name, from: "Luna", at: Date.now(), items: chosen };
+  saveMusicPlaylists([list, ...loadMusicPlaylists()]);
+  toolCtx.setMode?.("music");
+  showPlaylist(list.id);
+  toolCtx.closeChat?.();
+  return `“${name}” çalma listesi oluşturuldu (${chosen.length}${titles.length ? "/" + titles.length : ""} şarkı): ${chosen.map((i) => i.title).join("; ")}.${notFound.length ? ` Bulunamayan: ${notFound.join(", ")}.` : ""} Müzik › Listeler'de.`;
+}
+async function runMediaTool(name: string, a: any): Promise<string | null> {
+  const q = String(a?.query ?? a?.title ?? "").trim();
+  if (name === "make_music_playlist" || (name === "add_to_playlist" && toolCtx.mode === "music")) return makeMusicPlaylist(a);
+  if (name === "search_film_library") {
+    const l = toolCtx.items.filter((i) => hit(q, i.meta?.title, i.parsed.title, i.meta?.title?.replace(/[:\-–].*$/, "")));
+    return l.length ? "Film kütüphanesinde: " + l.slice(0, 12).map((i) => `${i.meta?.title ?? i.parsed.title}${i.meta?.year ? ` (${i.meta.year})` : ""} [${i.parsed.kind === "tv" ? "dizi" : "film"}]`).join("; ")
+      : `Film kütüphanesinde bulunamadı: ${q}`;
+  }
+  if (name === "open_playlist") {
+    const pl = loadMusicPlaylists().find((p) => norm(p.name) === norm(q)) ?? loadMusicPlaylists().find((p) => hit(q, p.name));
+    if (!pl) return `Böyle bir liste yok: ${q}`;
+    goPlaylist(pl.id);
+    return `“${pl.name}” listesinin sayfası açıldı (${pl.items.length} şarkı)`;
+  }
+  if (name === "play_song") {
+    const title = String(a?.title ?? a?.query ?? "").trim();
+    const artist = String(a?.artist ?? "").trim();
+    if (!title) return "Şarkı adı yok";
+    const tracks = await loadMusicLibrary();
+    const local = tracks.find((t) => hit(title, t.title) && (!artist || hit(artist, t.artist, t.albumArtist)));
+    if (local) { playQueue([trackItem(local)]); return `Çalıyor: ${local.title} — ${local.artist}`; }
+    const plItem = loadMusicPlaylists().flatMap((p) => p.items).find((t) => hit(title, t.title, t.artist) && (!artist || hit(artist, t.artist)));
+    if (plItem) { playQueue([plItem]); return `Çalıyor: ${plItem.title} — ${plItem.artist ?? ""}`; }
+    const query = `${artist} ${title}`.trim();
+    const hits = await invoke<SongHit[]>("yt_search", { query, n: 6 }).catch(() => [] as SongHit[]);
+    if (!hits.length) return `“${title}” arşivde, listelerde ve YouTube'da bulunamadı.`;
+    toolCtx.media.song = { query, hits: hits.slice(0, 3) };
+    return `Arşivde/listelerde yok. YouTube'da ${hits.length} sonuç buldum; onay kartı gösterildi (“${hits[0].title}”). Kullanıcı karta tıklamadan çaldığını söyleme; kısaca “buldum, onayla” de.`;
+  }  if (name === "search_music" || name === "play_music") {
+    const tracks = await loadMusicLibrary();
+    const lists = loadMusicPlaylists();
+    // Luna's playlists (Spotify moves…) count as music too, with or without a music folder
+    const plHit = q ? lists.find((p) => norm(p.name) === norm(q)) ?? lists.find((p) => hit(q, p.name)) : undefined;
+    const inLists = q ? lists.flatMap((p) => p.items.map((t, i) => ({ p, t, i }))).filter(({ t }) => hit(q, t.title, t.artist)) : [];
+    if (name === "play_music" && plHit && a?.what !== "song" && a?.what !== "artist") { playQueue(plHit.items); return `Çalıyor: “${plHit.name}” listesi (${plHit.items.length} şarkı)`; }
+    if (!tracks.length && !lists.length) return loadMusicFolders().length ? "Müzik arşivi boş" : "Kullanıcı henüz müzik klasörü eklememiş ve listesi yok (Müzik › Kütüphanem › Klasör, ya da bağlantıdan bir Spotify listesi)";
+    const albums = groupAlbums(tracks);
+    if (name === "search_music") {
+      const al = albums.filter((x) => hit(q, x.title, x.artist));
+      const so = tracks.filter((t) => hit(q, t.title)).slice(0, 15);
+      const pls = q ? lists.filter((p) => hit(q, p.name)) : lists;
+      if (q && !al.length && !so.length && !pls.length && !inLists.length) return `Müzik arşivinde bulunamadı: ${q}`;
+      return [`Arşiv: ${tracks.length} şarkı, ${albums.length} albüm. Luna'daki listeler: ${lists.length}.`,
+        al.length ? "Albümler: " + al.slice(0, 40).map((x) => `${x.artist} — ${x.title}${x.year ? ` (${x.year})` : ""}`).join("; ") : "",
+        q && so.length ? "Şarkılar: " + so.map((t) => `${t.title} (${t.artist})`).join("; ") : "",
+        pls.length ? "Listeler: " + pls.slice(0, 30).map((p) => `${p.name} (${p.items.length} şarkı)`).join("; ") : "",
+        inLists.length ? "Listelerdeki şarkılar: " + inLists.slice(0, 15).map(({ p, t }) => `${t.title} (${t.artist ?? ""}) — “${p.name}” listesinde`).join("; ") : ""].filter(Boolean).join("\n");
+    }
+    const what = a?.what as string | undefined;
+    if (!tracks.length || (q && !tracks.some((t) => hit(q, t.title, t.artist, t.album, t.albumArtist)))) {
+      if (inLists.length) { const { p, i } = inLists[0]; playQueue(p.items, i); return `Çalıyor: ${p.items[i].title} — ${p.items[i].artist ?? ""} (“${p.name}” listesinden)`; }
+      if (!tracks.length) return q ? `Listelerde bulunamadı: ${q}` : "Arşiv boş; bir liste adı söyle";
+    }
+    if (!q || what === "shuffle") { playQueue(tracks.map(trackItem), 0, true); return `Arşivin karışık çalıyor (${tracks.length} şarkı)`; }
+    const album = what !== "song" && what !== "artist" ? albums.find((x) => norm(x.title) === norm(q)) ?? albums.find((x) => hit(q, x.title)) : undefined;
+    if (album) { playQueue(album.tracks.map(trackItem)); return `Çalıyor: ${album.artist} — ${album.title}`; }
+    const byArtist = what !== "song" ? tracks.filter((t) => hit(q, t.artist, t.albumArtist)) : [];
+    if (byArtist.length) { playQueue(byArtist.map(trackItem), 0, true); return `Çalıyor: ${byArtist[0].albumArtist || byArtist[0].artist} (${byArtist.length} şarkı, karışık)`; }
+    const song = tracks.findIndex((t) => hit(q, t.title));
+    if (song >= 0) { const al2 = albums.find((x) => x.tracks.includes(tracks[song]))!; playQueue(al2.tracks.map(trackItem), al2.tracks.indexOf(tracks[song])); return `Çalıyor: ${tracks[song].title} — ${tracks[song].artist}`; }
+    return `Arşivde bulunamadı: ${q}`;
+  }
+  if (name === "play_radio") {
+    const l = await findStations(q).catch(() => [] as QItem[]);
+    if (!l.length) return `Radyo bulunamadı: ${q}`;
+    playQueue([l[0]]);
+    return `Canlı radyo açıldı: ${l[0].title}${l[0].artist ? ` (${l[0].artist})` : ""}`;
+  }
+  if (name === "play_podcast") {
+    const p = await findPodcast(q).catch(() => null);
+    if (!p?.items.length) return `Podcast bulunamadı: ${q}`;
+    playQueue(p.items);
+    return `Çalıyor: ${p.show.title} — ${p.items[0].title}`;
+  }
+  if (name === "search_books" || name === "open_book") {
+    const books = await loadBookLibrary();
+    const recent = store.json<string[]>("bookRecent", []);
+    const pctOf = (path: string) => Math.round((getPos(path)?.pct ?? 0) * 100);
+    const abHits = loadAbRecent().filter((a) => !q || hit(q, abTitle(a.title), abAuthor(a)));
+    if (name === "search_books") {
+      const l = books.filter((b) => hit(q, b.title, b.author));
+      const out = [
+        ...l.slice(0, 60).map((b) => `${b.title}${b.author ? " — " + b.author : ""} [${b.kind}, %${pctOf(b.path)}]`),
+        ...abHits.slice(0, 12).map((a) => `${abTitle(a.title)}${abAuthor(a) ? " — " + abAuthor(a) : ""} [sesli kitap]`),
+      ];
+      return out.length ? out.join("\n") : (books.length || loadAbRecent().length ? `Kitaplıkta bulunamadı: ${q}` : "Kullanıcının kitaplığı boş (Kitap › Kitaplığım › Klasör ekle ya da Keşfet'ten ücretsiz kitap)");
+    }
+    const b = q ? books.find((x) => norm(x.title) === norm(q)) ?? books.find((x) => hit(q, x.title, x.author)) : books.find((x) => x.path === recent[0]);
+    if (!b) {
+      if (abHits[0]) return `“${abTitle(abHits[0].title)}” bir sesli kitap (LibriVox); dinlemek için play_audiobook kullan.`;
+      return `Kitaplıkta bulunamadı: ${q}. Ücretsiz bir baskısı için find_free_books dene.`;
+    }
+    toolCtx.setMode?.("books");
+    setTimeout(() => requestOpenBook(b), 60);
+    return `Açılıyor: ${b.title}${b.author ? " — " + b.author : ""} (%${pctOf(b.path)})`;
+  }
+    if (name === "find_free_books") {
+    const l = gutenbergBooks(await fetchFeed(gutenbergSearch(q))).slice(0, 12);
+    return l.length ? l.map((e) => `${e.title}${e.author ? " — " + e.author : ""} [gutenberg_id ${e.id.match(/(\d+)/)?.[1]}]`).join("\n") : `Gutenberg'de bulunamadı: ${q}`;
+  }
+  if (name === "get_free_book") {
+    const id = String(a?.gutenberg_id ?? "").replace(/\D/g, "");
+    if (!id) return "Kitap numarası yok";
+    toolCtx.setMode?.("books");
+    await fetchAndOpenBook(`https://www.gutenberg.org/ebooks/${id}.epub3.images`, String(a?.title ?? "Book"), String(a?.author ?? ""), "epub");
+    return `İndirildi ve açılıyor: ${a?.title}`;
+  }
+  if (name === "play_audiobook") {
+    const l = await librivox(q);
+    if (!l.length) return `Sesli kitap bulunamadı: ${q}`;
+    const ch = await abChapters(l[0]);
+    if (!ch.length) return "Bu sesli kitabın dosyaları alınamadı";
+    rememberAb(l[0]);
+    playQueue(ch, Math.min(Number(store.get("abPos:" + l[0].identifier) ?? 0), ch.length - 1));
+    return `Çalıyor: ${abTitle(l[0].title)} — ${abAuthor(l[0])} (${ch.length} bölüm)`;
+  }
+  return null;
+}
+
 async function runTool(name: string, a: any): Promise<string> {
+  const media = await runMediaTool(name, a);
+  if (media != null) return media;
+  if (name === "delete_music") {
+    const l = await musicTargets(a);
+    if (!l.length) return "Müzik arşivinde bulunamadı";
+    const paths = l.map((t) => t.path);
+    if (a?._how === "file") {
+      const r = await trashFiles(paths);
+      forgetTracks(paths.filter((p) => !r.failed.includes(p)));
+      return r.failed.length ? `${r.n}/${paths.length} dosya silindi; ${r.failed.length} dosya silinemedi.` : `Silindi: ${r.n} dosya Geri Dönüşüm Kutusu'na taşındı (oradan geri alınabilir).`;    }
+    const gone = new Set(paths);
+    saveMusicPlaylists(loadMusicPlaylists().map((p) => ({ ...p, items: p.items.filter((t) => !gone.has(t.src)) })));
+    return "Listelerinden çıkarıldı; dosyalar yerinde duruyor.";
+  }
+  if (name === "delete_book") {
+    const b = await bookTarget(a);
+    if (!b) return "Kitaplıkta bulunamadı";
+    if (a?._how === "file") {
+      const r = await trashFiles([b.path]);
+      if (r.failed.length) return "Silinemedi: " + b.path;
+      clearBookRecord(b);
+      forgetBooks();
+      return `Silindi: “${b.title}” Geri Dönüşüm Kutusu'na taşındı (oradan geri alınabilir).`;
+    }
+    clearBookRecord(b);
+    return `“${b.title}” için okuma kaydı silindi; dosya yerinde duruyor.`;
+  }
+  if (name === "delete_from_library") {
+    const it = libMatch(toolCtx.items, { title: String(a?.title ?? ""), year: a?.year });
+    if (!it) return "Kütüphanede bulunamadı";
+    if (!toolCtx.remove) return "Bu işlem burada yapılamıyor";
+    if (a?._how === "ok") return "Silinecek bir şey bulunamadı";
+    return await toolCtx.remove(it.files.map((f) => f.path), a?._how === "file" ? "file" : "recent");
+  }
   if (name === "rate_title") {
     const t = String(a?.title ?? "").trim();
     if (!t) return "Başlık yok";
@@ -1896,8 +2633,8 @@ async function runTool(name: string, a: any): Promise<string> {
   }
   if (name === "remove_recommendations") {
     const who = String(a?.from ?? "").trim().toLocaleLowerCase("tr");
-    const titles = new Set((a?.titles ?? []).map((x: string) => seenKey(x)));
-    const before = loadRecs();
+    const cleanTitle = (x: string) => seenKey(x.replace(/\s*\(\d{4}\)\s*$/, ""));
+    const titles = new Set((a?.titles ?? []).map((x: string) => cleanTitle(x)));    const before = loadRecs();
     const keep = before.filter((r) => {
       if (who && r.from.toLocaleLowerCase("tr") !== who) return true;
       const d = diaryGet(r.title, r.year);
@@ -1906,7 +2643,7 @@ async function runTool(name: string, a: any): Promise<string> {
         case "disliked": return !(r.vote === "dislike" || d?.vote === "dislike" || (d?.rating && d.rating <= 4));
         case "watched": return !(r.status === "watched" || d?.watched);
         case "dismissed": return r.status !== "dismissed";
-        case "titles": return !titles.has(seenKey(r.title));
+        case "titles": return !titles.has(cleanTitle(r.title));
         default: return true;
       }
     });
@@ -1961,26 +2698,40 @@ async function runTool(name: string, a: any): Promise<string> {
   if (name === "add_to_playlist") {
     const pl = String(a?.playlist ?? "").trim();
     if (!pl) return "Liste adı yok";
+    if (ambiguous(loadPlaylists(), pl)) return `Bu adda birden çok liste var; “Arkadaş › ${pl}” biçiminde söyle`;
     const n = await addToPlaylist(pl, (a?.titles ?? []).map((t: string) => ({ title: t })));
     return `“${pl}” listesine ${n} film eklendi`;
   }
   if (name === "remove_from_playlist") {
     const all = loadPlaylists();
-    const pl = all.find((p) => seenKey(p.name) === seenKey(String(a?.playlist ?? "")));
+    if (ambiguous(all, String(a?.playlist ?? ""))) return "Bu adda birden çok liste var; “Arkadaş › Liste” biçiminde söyle";
+    const pl = resolvePl(all, String(a?.playlist ?? ""));
     if (!pl) return "Liste bulunamadı";
-    const rm = (a?.titles ?? []).map((t: string) => seenKey(t.replace(/\s*\(\d{4}\)\s*$/, "")));
+    const wanted: { key: string; year?: string }[] = (a?.titles ?? []).map((raw: string) => {
+      const m = String(raw).match(/^(.*?)\s*\((\d{4})\)\s*$/);
+      return { key: seenKey(m ? m[1] : String(raw)), year: m ? m[2] : undefined };
+    });
     const before = pl.items.length;
-    pl.items = pl.items.filter((x) => !rm.includes(seenKey(x.title)));
+    const done = new Set<string>();
+    pl.items = pl.items.filter((x) => {
+      const k = seenKey(x.title);
+      const want = wanted.find((w) => w.key === k && (!w.year || String(x.year ?? "") === w.year));
+      if (!want) return true;
+      if (!want.year) { if (done.has(k)) return true; done.add(k); }
+      return false;
+    });
     savePlaylists(all);
     return `“${pl.name}” listesinden ${before - pl.items.length} film çıkarıldı`;
   }
-  if (name === "delete_playlist") {
+    if (name === "delete_playlist") {
     const all = loadPlaylists();
-    const pl = all.find((p) => seenKey(p.name) === seenKey(String(a?.playlist ?? "")));
+    if (ambiguous(all, String(a?.playlist ?? ""))) return "Bu adda birden çok liste var; “Arkadaş › Liste” biçiminde söyle";
+    const pl = resolvePl(all, String(a?.playlist ?? ""));
     if (!pl) return "Liste bulunamadı";
     if (a?.new_name) { pl.name = String(a.new_name); savePlaylists(all); return `Liste adı değişti: ${pl.name}`; }
-    savePlaylists(all.filter((p) => p !== pl));
-    return `“${pl.name}” listesi silindi`;
+    const kids = all.filter((p) => p.parent === pl.id);
+    savePlaylists(all.filter((p) => p !== pl && p.parent !== pl.id));
+    return `“${pl.name}” listesi silindi${kids.length ? ` (içindeki ${kids.length} liste de)` : ""}`;
   }
   if (name === "list_recommendations") {
     const who = String(a?.from ?? "").trim().toLocaleLowerCase("tr");
@@ -1998,13 +2749,16 @@ async function runTool(name: string, a: any): Promise<string> {
     const changes: string[] = [];
     if (a?.new_title) { r.title = String(a.new_title); changes.push("ad"); }
     if (a?.new_year) { r.year = String(a.new_year); changes.push("yıl"); }
+    if (a?.new_title || a?.new_year) { delete r.tmdbId; delete r.poster; delete r.rating; delete r.noPoster; }
     if (a?.from) { r.from = String(a.from); changes.push("öneren"); }
     if (a?.note != null) { r.note = String(a.note); changes.push("not"); }
     if (a?.status) { r.status = a.status === "open" ? undefined : a.status; changes.push("durum"); }
     if (a?.vote) { r.vote = a.vote === "none" ? undefined : a.vote; changes.push("beğeni"); }
     if ((a?.new_title || a?.new_year) && store.get("tmdbKey")) {
       const h = (await searchTmdb(r.title, r.kind, r.year ? Number(r.year) : undefined).catch(() => []))[0];
-      if (h) { r.tmdbId = h.id; r.poster = h.poster; r.rating = h.rating; r.year = r.year || h.year; }
+      const tv = h ? undefined : (await searchTmdb(r.title, "tv", r.year ? Number(r.year) : undefined).catch(() => []))[0];
+      const m = h ?? tv;
+      if (m) { r.tmdbId = m.id; r.kind = m.kind; r.poster = m.poster; r.rating = m.rating; r.year = r.year || m.year; }
     }
     saveRecs(all);
     if (a?.vote || a?.status === "watched") diarySet(r.title, r.year, { ...(a?.vote ? { vote: a.vote === "none" ? undefined : a.vote } : {}), ...(a?.status === "watched" ? { watched: Date.now() } : {}) });
@@ -2039,9 +2793,15 @@ async function runTool(name: string, a: any): Promise<string> {
     return `Not alındı: ${n}`;
   }
   if (name === "forget_note") {
-    const n = seenKey(String(a?.note ?? ""));
+    const raw = String(a?.note ?? "").trim();
+    const n = seenKey(raw);
+    if (!n) return "Not boş; silinecek bir not yok.";
     const cur = loadNotes();
-    const keep = cur.filter((x) => !seenKey(x).includes(n) && !n.includes(seenKey(x)));
+    // short notes only match exactly: one letter must never wipe every note that contains it
+    const keep = n.length < 3
+      ? cur.filter((x) => seenKey(x) !== n)
+      : cur.filter((x) => !seenKey(x).includes(n) && !n.includes(seenKey(x)));
+    if (keep.length === cur.length) return "Bu not bulunamadı.";
     saveNotes(keep);
     return `${cur.length - keep.length} not silindi`;
   }
@@ -2146,20 +2906,38 @@ async function runTool(name: string, a: any): Promise<string> {
   if (!t) return "Başlık yok";
   if (name === "add_recommendation") {
     if (!String(a?.from ?? "").trim()) return `EKLENMEDİ: ${label} için kimin önerdiği bilinmiyor. Kullanıcıya “Bunu kim önerdi?” diye sor, cevaba göre tekrar ekle.`;
-    const ok = await addRecommendation(t, a?.year, a?.from, a?.note);
-    return ok ? `Önerilere eklendi: ${label}${a?.from ? " · " + a.from : ""}` : `Zaten önerilerde: ${label}`;
+    const m = t.match(/^(.*?)\s*\((\d{4})\)\s*$/);
+    const ok = await addRecommendation((m ? m[1] : t).trim(), a?.year ?? m?.[2], a?.from, a?.note);    return ok ? `Önerilere eklendi: ${label}${a?.from ? " · " + a.from : ""}` : `Zaten önerilerde: ${label}`;
   }
   if (name === "mark_watched") { markSeen(label, true); return `İzlediklerine eklendi: ${label}`; }
   if (name === "add_watch_later") { markLater(label, true); return `Sonra izle listesine eklendi: ${label}`; }
-  if (name === "remove_watch_later") { markLater(label, false); markLater(t, false); return `Sonra izle listesinden çıkarıldı: ${label}`; }
+  if (name === "remove_watch_later") { laterOff(t, a?.year ? String(a.year) : undefined); return `Sonra izle listesinden çıkarıldı: ${label}`; }
   return "Bilinmeyen işlem";
 }
 
 const URL_RE = /https?:\/\/\S+/i;
+/** A link Luna can act on by itself: a Spotify list, a YouTube video, a torrent, a book file. */
+function linkAct(text: string): LinkAct | null {
+  const mag = text.match(/magnet:\?\S+/i)?.[0];
+  if (mag) return { kind: "torrent", url: mag };
+  const u = text.match(URL_RE)?.[0]?.replace(/[)\].,;!?]+$/, "");
+  if (!u) return null;
+  if (isSpotifyList(u)) return { kind: "spotify", url: u };
+  if (/^https?:\/\/((www|m|music)\.)?(youtube\.com\/(watch|playlist|shorts)|youtu\.be\/)/i.test(u)) return { kind: "youtube", url: u };
+  if (/\.torrent(\?|$)/i.test(u)) return { kind: "torrent", url: u };
+  if (/\.(epub|pdf|cbz)(\?|$)/i.test(u)) return { kind: "book", url: u };
+  return null;
+}
+const ACT_TEXT: Record<LinkAct["kind"], string> = {
+  spotify: tt("Bu bir Spotify listesi. Şarkıların YouTube karşılıklarını buluyorum; kontrol edip “Devam” dersen aynı sırayla bir liste olarak kaydederim."),
+  youtube: tt("Bu bir YouTube bağlantısı. Müzik olarak çalayım mı? (Hiçbir şey indirilmez.)"),
+  torrent: tt("Bu bir torrent. Film olarak açayım mı? İnerken izleyebilirsin."),
+  book: tt("Bu bir kitap dosyası. İndirip kitaplığına ekleyeyim ve açayım mı?"),
+};
 
-const TRIVIA = /trivia|fun facts?|behind the scenes|making of|did you know|ilginç|bilgi(ler)? ver|kamera arkası|çekim|perde arkası|gizli detay|easter egg|bilinmeyen/i;
+const TRIVIA = /trivia|fun facts?|behind the scenes|making of|did you know|ilginç|bilgi(ler)? ver|kamera arkası|çekim|perde arkası|gizli detay|easter egg|bilinmeyen|hangi şarkı|şarkılar(ı)? (çalıyor|var)|film müziği (ne|kim|hangi)|soundtrack|which songs|kitabı var mı|kitabı mı var|book (is it )?based|based on a book|is there a book|filmi (ya da dizisi )?var mı|dizisi var mı|is there a (film|movie|series)|hangi film(ler)?(de| ve dizilerde) geçiyor|which (films|movies|shows)|belgesel(i)? (ya da filmi )?var mı|documentar/i;
 
-const QUICK = [tt("Bu akşam ne izlesem?"), tt("Kütüphanemde olmayan ama sevebileceğim filmler öner"), tt("Arkadaşlarımın önerilerinden hangisiyle başlayayım?"), tt("Kütüphanemde izlemediğim en iyi film hangisi?"), tt("Hafif, güldüren bir şey öner")];
+const QUICK = [tt("Bu akşam ne izlesem?"), tt("Kütüphanemde olmayan ama sevebileceğim filmler öner"), tt("Arkadaşlarımın önerilerinden hangisiyle başlayayım?"), tt("Kitabından uyarlanmış güzel bir film öner"), tt("Müzikleri çok iyi olan bir film öner"), tt("Hafif, güldüren bir şey öner")];
 
 /** What the Öneriler page shows right now (a friend's recommendations or one of their lists). */
 type RecsView = { who: string; list: string; films: { title: string; year?: string; rating?: number; stars?: number; tmdbId?: number; kind?: "movie" | "tv" }[] };
@@ -2203,10 +2981,13 @@ ${m?.overview ? "Özet: " + m.overview.slice(0, 500) : ""}
 "Bu film", "bu dizi", "bunun gibi", "bu bana uygun mu" gibi ifadeler bu ${kind}i kasteder; böyle sorularda bu ${kind}e odaklan.
 Ama kullanıcı genel bir şey isterse (ör. "bana film öner", başka bir film ya da konu) bu sayfayla sınırlı kalma, normal şekilde cevap ver.`;
 }
-const PAGE_QUICK = (kind: string) => [tt("İlginç bilgiler (trivia)"), (kind === "tv" ? tt("Buna benzer diziler") : tt("Buna benzer filmler")), tt("Bu bana uygun mu?"), tt("Spoiler'sız ne bilmeliyim?"), tt("Oyuncu ve yönetmen hakkında")];
+const PAGE_QUICK = (kind: string) => [
+  kind === "tv" ? tt("Bu dizinin kitabı var mı?") : tt("Bu filmin kitabı var mı?"),
+  kind === "tv" ? tt("Bu dizide hangi şarkılar çalıyor?") : tt("Bu filmde hangi şarkılar çalıyor?"),
+  tt("İlginç bilgiler (trivia)"), (kind === "tv" ? tt("Buna benzer diziler") : tt("Buna benzer filmler")), tt("Bu bana uygun mu?"), tt("Oyuncu ve yönetmen hakkında")];
 
 /* ---------- what the assistant is doing, step by step, each with its own little animation ---------- */
-type StepKind = "think" | "search" | "page" | "list" | "taste" | "write" | "lib";
+type StepKind = "think" | "search" | "page" | "list" | "taste" | "write" | "lib" | "hop-film" | "hop-music" | "hop-books";
 type Step = { kind: StepKind; text: string; done?: boolean };
 const TOOL_STEP: Record<string, [StepKind, string]> = {
   read_link: ["page", tt("Sayfaya bakıyorum")],
@@ -2220,6 +3001,7 @@ const TOOL_STEP: Record<string, [StepKind, string]> = {
   remove_recommendations: ["write", tt("Önerileri temizliyorum")],
   sort_recommendations: ["list", tt("Önerileri sıralıyorum")],
   add_to_playlist: ["write", tt("Listeye ekliyorum")],
+  make_music_playlist: ["hop-music", tt("Şarkıları getiriyorum")],
   remove_from_playlist: ["write", tt("Listeden çıkarıyorum")],
   delete_playlist: ["write", tt("Listeyi siliyorum")],
   mark_watched: ["taste", tt("Zevk defterine yazıyorum")],
@@ -2244,21 +3026,184 @@ function StepIcon({ kind }: { kind: StepKind }) {
       {kind === "taste" && <svg viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" /></svg>}
       {kind === "write" && <><svg viewBox="0 0 24 24"><path d="M4 20l4-1 11-11-3-3L5 16z" /></svg><b /></>}
       {kind === "lib" && <><i /><i /><i /><i /></>}
+      {kind === "hop-film" && <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="7.5" r="1.6" /><circle cx="12" cy="16.5" r="1.6" /><circle cx="7.5" cy="12" r="1.6" /><circle cx="16.5" cy="12" r="1.6" /></svg>}
+      {kind === "hop-music" && <><i /><i /><i /><i /></>}
+      {kind === "hop-books" && <><i /><i /></>}
     </span>
   );
 }
 
 const RECS_QUICK = [tt("Buradan ne izlesem?"), tt("Zevkime en uygun 5 film"), tt("Bu listeden hafif bir şey"), tt("Bu listeden en iyi bilinen klasikler"), tt("Bu listede sevmeyeceğim neler var?")];
 
-export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSource }: { items: Item[]; recent: Recent[]; onClose: () => void; viewing?: Item; onPlay?: (path: string) => void; onOpenSource?: (src: string) => void }) {
+/** What a link in the chat turns into: the move for a Spotify list, buttons for the rest. */
+const goPlaylist = (id: string) => { showPlaylist(id); toolCtx.setMode?.("music"); };
+const ADDED_PLAYLIST = "luna-added";
+/** A song found on YouTube is kept in one playlist so it can be played again. */
+function addToMusicLibrary(item: QItem) {
+  const lists = loadMusicPlaylists();
+  const pl = lists.find((p) => p.id === ADDED_PLAYLIST);
+  if (pl) {
+    if (!pl.items.some((t) => t.src === item.src)) saveMusicPlaylists(lists.map((p) => (p.id === pl.id ? { ...p, items: [...p.items, item] } : p)));
+  } else {
+    saveMusicPlaylists([{ id: ADDED_PLAYLIST, name: tt("Luna'ya eklenenler"), from: "Luna", at: Date.now(), items: [item] }, ...lists]);
+  }
+}
+/** "Not in the library": the YouTube result, with an add-and-play button. */
+function SongBox({ s }: { s: SongAsk }) {
+  const [added, setAdded] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
+  const h = s.hits[0];
+  if (cancelled) return <div className="srcbox songbox"><div className="srcbox-main"><div className="srcbox-t muted">{tt("Vazgeçildi")}</div></div></div>;
+  if (!h) return null;
+  return (
+    <div className="srcbox songbox">
+      {h.thumb ? <img src={h.thumb} alt="" /> : <div className="srcbox-ph"><Icon d={I.play} size={22} /></div>}
+      <div className="srcbox-main">
+        <div className="srcbox-t">
+          <b className="ellipsis">{h.title}</b>
+          <div className="muted small ellipsis">{h.channel}</div>
+          <div className="muted small ellipsis">{h.url}</div>
+        </div>
+        {added ? <div className="srcbox-ok">{tt("✓ Kütüphaneye eklendi ve çalınıyor")}</div> : (
+          <div className="srcbox-row">
+            <button className="fp-btn primary" onClick={() => {
+              const item: QItem = { src: h.url, title: h.title, artist: h.channel, cover: h.thumb, duration: h.duration, yt: true };
+              addToMusicLibrary(item); playQueue([item]); setAdded(true);
+            }}><Icon d={I.play} fill size={14} />  {tt("Kütüphaneye ekle ve çal")}</button>
+            <button className="fp-btn" onClick={() => openUrl(h.url)}>{tt("YouTube'da aç")}</button>
+            <button className="fp-btn" onClick={() => setCancelled(true)}>{tt("Vazgeç")}</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+function LinkActCard({ act, onState }: { act: LinkAct; onState: (s: "done" | "cancel", info?: string, pl?: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  if (act.state) return (
+    <div className="msg-note act-done">{act.state === "done" ? "✓ " + (act.info ?? tt("Yapıldı")) : "✕ " + tt("İptal edildi")}
+      {act.pl && loadMusicPlaylists().some((p) => p.id === act.pl) && <button className="chip" onClick={() => goPlaylist(act.pl!)}>{tt("Listeye git")} →</button>}
+    </div>
+  );
+  if (act.kind === "spotify") return <SpotifyMove url={act.url} onDone={(name, id) => onState("done", tt("“{0}” listesi müziklerine eklendi", name), id)} />;
+  const go = async () => {
+    setBusy(true); setErr("");
+    try {
+      if (act.kind === "torrent") {
+        if (!toolCtx.openSource) throw new Error(tt("Bu işlem burada yapılamıyor"));
+        toolCtx.openSource(act.url);
+        onState("done", tt("Torrent açıldı"));
+      } else if (act.kind === "youtube") {
+        const l = await invoke<{ url: string; title: string; channel: string; duration?: number; thumb?: string }[]>("yt_info", { url: act.url });
+        if (!l.length) throw new Error(tt("Bu bağlantıda çalınacak bir şey yok"));
+        playQueue(l.map((h) => ({ src: h.url, title: h.title, artist: h.channel, cover: h.thumb, duration: h.duration, yt: true })));
+        onState("done", l.length > 1 ? tt("{0} video çalıyor", l.length) : tt("Çalıyor: {0}", l[0].title));
+      } else {
+        const b = await fetchAndOpenBook(act.url, "", "");
+        onState("done", tt("“{0}” kitaplığına eklendi ve açıldı", b.title));
+      }
+    } catch (e) { setErr(String(e).replace(/^Error: /, "")); } finally { setBusy(false); }
+  };
+  return (
+    <div className="ask-card act-card">
+      <div className="muted small ellipsis" title={act.url}>{act.url}</div>
+      {err && <div className="plugin-msg small err">{err}</div>}
+      <div className="ask-btns">
+        <button className="primary sm" disabled={busy} onClick={go}>{busy ? tt("Çalışıyorum…") : act.kind === "youtube" ? tt("Çal") : act.kind === "book" ? tt("İndir ve aç") : tt("Aç")}</button>
+        <button className="chip" disabled={busy} onClick={() => onState("cancel")}>{tt("İptal")}</button>
+      </div>
+    </div>
+  );
+}
+
+type MusicPrev = { name: string; items: QItem[]; missing: string[]; subs: string[]; resolve: (picked: QItem[] | null) => void };
+/** The tracks that are about to be added, like the Spotify import screen. */
+function MusicAddPreview({ name, items, missing, subs, onDone }: { name: string; items: QItem[]; missing: string[]; subs: string[]; onDone: (picked: QItem[] | null) => void }) {
+  const [rows, setRows] = useState(() => items.map((it) => ({ it, on: true })));
+  const chosen = rows.filter((r) => r.on).map((r) => r.it);
+  const all = chosen.length === rows.length;
+  const listRef = useRef<HTMLDivElement>(null);
+  const goMissing = () => listRef.current?.querySelector('[data-miss="1"]')?.scrollIntoView({ behavior: "smooth", block: "center" });
+  return (
+    <div className="sp-in-chat music-add" ref={listRef}>
+      <div className="mu-sp-head">
+        <span className="mu-song-t"><b className="ellipsis">{name}</b><span className="muted small">{tt("{0}/{1} şarkı bulundu", items.length, items.length + missing.length)}</span></span>
+        <label className="sp-all"><input type="checkbox" checked={all} onChange={() => setRows((r) => r.map((x) => ({ ...x, on: !all })))} /> {tt("Hepsi")}</label>
+      </div>
+      {subs.length > 0 && <div className="plugin-msg small">{tt("YouTube'da bulunamadı: {0}. Yerine sanatçının diğer parçaları eklendi.", subs.join(", "))}</div>}
+      <div className="sp-list">
+        {rows.map((r, i) => (
+          <div key={r.it.src} className={"sp-item" + (r.on ? "" : " off")}>
+            <div className="sp-row">
+              <input type="checkbox" checked={r.on} onChange={() => setRows((rs) => rs.map((x, j) => (j === i ? { ...x, on: !x.on } : x)))} aria-label={r.it.title} />
+              {r.it.cover ? <img src={r.it.cover} alt="" /> : <span className="mu-yt-ph" />}
+              <span className="mu-song-t"><b className="ellipsis">{r.it.title}</b><span className="muted small ellipsis">{r.it.artist ?? ""}</span></span>
+            </div>
+          </div>
+        ))}
+      </div>
+      {missing.length > 0 && (
+        <div className="sp-miss-list">
+          {missing.map((t) => (
+            <div key={"m-" + t} className="sp-item missing" data-miss="1">
+              <div className="sp-row">
+                <input type="checkbox" disabled aria-label={t} />
+                <span className="mu-song-t"><b className="ellipsis">{t}</b><span className="muted small">{tt("Bulunamadı")}</span></span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="muted small">{tt("Hiçbir şey indirilmez: liste YouTube bağlantılarından oluşur.")}</div>
+      <div className="modal-actions">
+{missing.length > 0 && <button className="chip" onClick={goMissing}>{tt("Bulunamayan şarkıya git ({0})", missing.length)}</button>}
+        <button className="chip" onClick={() => onDone(null)}>{tt("Vazgeç")}</button>
+        <button className="primary" disabled={!chosen.length} onClick={() => onDone(chosen)}>{tt("Devam · {0} şarkıyla listeyi oluştur", chosen.length)}</button>
+      </div>
+    </div>
+  );
+}
+export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSource, mode = "film", onMode, onRemove }: {
+  items: Item[]; recent: Recent[]; onClose: () => void; viewing?: Item; onPlay?: (path: string) => void; onOpenSource?: (src: string) => void;
+  /** deletes a film's files (to the Recycle Bin) or only takes it off "Continue watching" */
+  onRemove?: (paths: string[], how: "file" | "recent") => Promise<string>;
+  /** the part of Luna that's open: its data goes with every question, the others are a tool away */
+  mode?: Mode; onMode?: (m: Mode) => void;
+}) {
   toolCtx.openSource = onOpenSource;
+  toolCtx.closeChat = onClose;
+  toolCtx.mode = mode;
+  toolCtx.setMode = onMode;
   useTaste();
-  const rv = viewing ? null : getRecsView();
+  useMusic(); // the header follows the song that is playing
+  const rv = viewing || mode !== "film" ? null : getRecsView();
   toolCtx.items = items;
   toolCtx.play = onPlay;
-  // One conversation per page: the general one, and one for each film / series details page.
-  // A conversation continues only within the same app run and if it was used in the last 20 minutes.
-  const thread = viewing ? "chat:" + viewing.key : "chat";
+  toolCtx.remove = onRemove;
+  const [ask, setAsk] = useState<AskCard | null>(null);
+  const askRef = useRef<AskCard | null>(null);
+  askRef.current = ask;
+  useEffect(() => () => { askRef.current?.resolve("cancelled"); }, []);
+  const [musicPrev, setMusicPrev] = useState<MusicPrev | null>(null);
+  const prevRef = useRef<MusicPrev | null>(null);
+  toolCtx.musicPreview = (name, list, miss, subs) => new Promise((resolve) => {
+    const p = { name, items: list, missing: miss, subs, resolve };
+    prevRef.current = p;
+    setMusicPrev(p);
+  });
+  // closing the assistant while the preview is open cancels it instead of leaving the answer waiting
+  useEffect(() => () => { prevRef.current?.resolve(null); }, []);
+  const [, bumpUndo] = useState(0);
+  const confirmCalls = (kind: AskCard["kind"], lines: string[], files?: string[], opts?: AskCard["opts"]) =>
+    new Promise<string>((res) => setAsk({ kind, lines, files, opts, resolve: (v) => { setAsk(null); res(v); } }));
+  // One conversation per context: each song, book, film page and the general part has its own.
+  // A different topic starts a new chat instead of piling every question into one conversation.
+  const lastBook = mode === "books" ? store.json<string[]>("bookRecent", [])[0] : undefined;
+  const thread = viewing ? "chat:" + viewing.key
+    : mode === "music" ? "chat:music:" + (nowPlaying()?.src ?? "general")
+      : mode === "books" ? "chat:books:" + (lastBook ?? "general")
+        : "chat:film";
   const [msgs, setMsgs] = useState<Msg[]>(() => {
     let sameRun = false;
     try { sameRun = sessionStorage.getItem("chatRun") === "1"; sessionStorage.setItem("chatRun", "1"); } catch {}
@@ -2277,8 +3222,16 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
   const [zoom, setZoom] = useState<Pic | null>(null);
   const [tipSeen] = useState(() => Number(store.get("chatBigTip") ?? 0));
   useEffect(() => { if (tipSeen < 3) store.set("chatBigTip", String(tipSeen + 1)); }, []);
-  const ctxKind: Conv["ctxKind"] = viewing ? "film" : rv ? "recs" : "general";
-  const ctxLabel = viewing ? viewing.meta?.title ?? viewing.parsed.title : rv ? tt("{0} › {1}", rv.who === "*" ? tt("Tüm öneriler") : rv.who, rv.list) : tt("Genel");
+  const ctxKind: Conv["ctxKind"] = viewing ? "film" : rv ? "recs" : mode === "film" ? "general" : mode;
+  // in the music part the header names what is playing, like a film page's title
+  const nowSong = mode === "music" ? nowPlaying() : undefined;
+  const nowAb = mode === "books" && nowPlaying()?.book ? nowPlaying()! : undefined;
+  const ctxLabel = viewing ? viewing.meta?.title ?? viewing.parsed.title
+    : rv ? tt("{0} › {1}", rv.who === "*" ? tt("Tüm öneriler") : rv.who, rv.list)
+      : mode === "film" ? tt("Genel")
+        : mode === "music" && nowSong ? nowSong.title
+          : mode === "books" && nowAb ? (nowAb.album ?? nowAb.title)
+            : MODE_NAME[mode];
   // every conversation goes to the history as it grows
   useEffect(() => {
     if (!msgs.length) return;
@@ -2370,10 +3323,18 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
   // a new step finishes the one before it
   const step = (kind: StepKind, text: string) => setSteps((l) => (l[l.length - 1]?.text === text ? l : [...l.map((x) => ({ ...x, done: true })), { kind, text }]));
   const [err, setErr] = useState("");
-  const endRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const stick = useRef(true);
   const key = store.get("geminiKey") ?? "";
 
-  useEffect(() => { saveThread(msgs); endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, busy]);
+  // the answer follows as it is written; if the user scrolled up, leave them there
+  useEffect(() => {
+    saveThread(msgs);
+    const el = bodyRef.current;
+    if (!el || !stick.current) return;
+    const id = requestAnimationFrame(() => el.scrollTo({ top: el.scrollHeight, behavior: "smooth" }));
+    return () => cancelAnimationFrame(id);
+  }, [msgs, busy, musicPrev]);
 
   const send = async (text: string, base?: Msg[]) => {
     if (!text.trim() || busy) return;
@@ -2381,6 +3342,14 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
     const myConv = convId;
     setMsgs(next); setInput(""); setErr(""); setBusy(true); setSteps([]);
     toolCtx.media = { images: [], people: [], links: [] };
+    // a link Luna handles itself: a card with its own buttons, no need to ask the model
+    const act = linkAct(text);
+    if (act) {
+      const hop: Mode = act.kind === "torrent" ? "film" : act.kind === "book" ? "books" : "music";
+      const done: Msg[] = [...next, { role: "model", text: ACT_TEXT[act.kind], act, ...(hop !== mode ? { hop: [hop] } : {}) }];
+      setMsgs(done); saveThread(done); setBusy(false);
+      return;
+    }
     try {
       // Trivia / behind-the-scenes questions are answered from a live Google search, with sources.
       const ground = TRIVIA.test(text);
@@ -2393,13 +3362,16 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
       const body: any = {
         // a link in the message: Gemini opens the page itself (URL context); trivia: Google search; otherwise Luna's tools
         tools: ground ? [{ google_search: {} }] : TOOLS,
-        systemInstruction: { parts: [{ text: SYSTEM + (lang() === "en" ? SYSTEM_EN : "") + "\n\n# Kullanıcı profili\n" + profile(items, recent) + (viewing ? viewingNote(viewing) : recsViewNote(getRecsView())) }] },
+        systemInstruction: { parts: [{ text: mode === "film"
+          ? SYSTEM + SYSTEM_PARTS + (lang() === "en" ? SYSTEM_EN : "") + "\n\n# Kullanıcı profili\n" + profile(items, recent) + (viewing ? viewingNote(viewing) : recsViewNote(getRecsView()))
+          : (mode === "music" ? SYSTEM_MUSIC : SYSTEM_BOOKS) + SYSTEM_PARTS + (lang() === "en" ? SYSTEM_EN_PART : "") + "\n\n# Kullanıcı profili\n" + (mode === "music" ? await musicProfile() : await booksProfile()) }] },
         // what the chat showed counts too: a film page opened by a click, the same-name choices
         contents: next.slice(-20).map((m) => ({ role: m.role, parts: [{ text: [
           m.text,
           m.film ? `[Sohbette şu filmin sayfası açıldı ve kullanıcı ona bakıyor: ${m.film.title}${m.film.original && m.film.original !== m.film.title ? ` / ${m.film.original}` : ""} (${m.film.year}), TMDB ${m.film.kind} ${m.film.id}${m.film.director ? `, yönetmen ${m.film.director}` : ""}. "Bu film", "bu" gibi ifadeler bunu kasteder.]` : "",
           m.choices ? `[Aynı adlı seçenekler gösterildi: ${m.choices.map((c) => `${c.title} (${c.year})`).join(", ")}]` : "",
           m.source ? `[Kütüphanede yok, kaynak kutusu gösterildi: ${m.source.title}]` : "",
+          m.song ? `[Şarkı arşivde yok, YouTube'da bulundu; onay kartı gösterildi: ${m.song.query}]` : "",
         ].filter(Boolean).join(" ") || "…" }] })),
       };
       // A link in the message: Luna downloads the page itself and hands its text to the assistant.
@@ -2410,15 +3382,22 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
       // Questions that need pictures or links: the model is made to call the right tool (it tends to just answer from memory)
       const tn = trAscii(text);
       const force: [RegExp, string[], string][] = [
-        [/\b(ac|oynat|baslat)\b|\bacar misin|\bacabilir|\b(open|play|start)\b/, ["open_from_library"], "open_from_library aracını çağır (tam o filmi; yılı biliyorsan ver)."],
+        [/\b(ac|oynat|baslat|cal|dinlet|oku)\b|\bacar misin|\bacabilir|\bcalar misin|\b(open|play|start|read|listen)\b/, ["open_from_library", "play_music", "play_radio", "play_podcast", "open_book", "get_free_book", "find_free_books", "play_audiobook"],
+          mode === "film" ? "İstenen şeyi açan aracı çağır: film/dizi için open_from_library (tam o filmi; yılı biliyorsan ver), müzik için play_music/play_radio/play_podcast, kitap için open_book/play_audiobook."
+            : mode === "music" ? "İstenen şeyi açan aracı çağır: müzik için play_music, radyo için play_radio, podcast için play_podcast; film ya da kitap isteniyorsa open_from_library / open_book."
+            : "İstenen şeyi açan aracı çağır: kitap için open_book (kitaplıkta yoksa find_free_books), sesli kitap için play_audiobook; film ya da müzik isteniyorsa open_from_library / play_music."],
         [/\bkim(ler)?\b.{0,30}(oyn|rol|yonet|cek|yapt|yapm|cizd|yazd)|(yapt|yapm|cekt|cekm|yonett)\w* (kim|kimdir)|oyuncu|kadro|basrol|yonetmen|senarist|\bcast\b|\bwho (stars|starred|acted|directed|plays|played|is in|was in|made|wrote)\b|\bactors?\b|\bdirector\b|\bstarring\b/, ["show_film"], "show_film aracını çağır (filmin sayfası: fotoğraflı kadro, yönetmen, hikaye)."],
-        [/hakkinda|anlat|konusu|hikaye|nasil bir (film|dizi)|ne anlatiyor|neyi anlatiyor|bilgi|incele|nedir\b|nasil bir sey|tell me about|what'?s .{0,40}\babout\b|\bplot\b|synopsis|storyline/, ["show_film"], "show_film aracını çağır (filmin sayfası), sonra sorulanı cevapla."],
+        [/hakkinda|anlat|\bkonusu\b|\bhikayesi\b|nasil bir (film|dizi)|ne anlatiyor|neyi anlatiyor|\bbilgi|incele|\bnedir\b|nasil bir sey|tell me about|what'?s .{0,40}\babout\b|\bplot\b|synopsis|storyline/, ["show_film"], "show_film aracını çağır (filmin sayfası), sonra sorulanı cevapla."],
         [/nere(de|den)?\s*(izle|bul|seyret)|nerden izle|hangi platform|izleyebilir|\blink|baglanti|imdb|letterboxd|vikipedi|wikipedia|where (can i |to |do i )?(watch|stream|find)|streaming|which platform|\blinks?\b/, ["film_links"], "film_links aracını çağır; bilmediğin platformu uydurma."],
         [/gorsel|fotograf|foto\b|resim|afis|poster|sahne|kare(ler)?|pictures?|photos?|images?|stills?|scenes?|screenshots?/, ["show_images", "show_person"], "show_images (kişi için show_person) aracını çağır."],
       ];
       // "zevkimi anlat", "listeyi anlat", "5 film öner" are not about one film
+      // "vampir konusunu sevmiyorum", "korku olmasın": a taste, not a question about one film (no film page for it)
+      const opinion = /\b(sev(m|di|iyor|erim|mem)|hoslan|begen|nefret|ilgimi cek|istemiyorum|olmasin|sikici|bayil|bana gore degil|tarzim degil)|\b(i (don'?t |do not )?(like|love|hate|enjoy)|not into|don'?t want|boring)\b/.test(tn);
       const notOneFilm = /zevk|liste|oneri|oner\b|kutuphan|\bbeni\b|\bbenim\b|arkadas|filmler|taste|\blists?\b|recommend|suggest|library|\bme\b|\bmy\b|friend|films|movies|shows/.test(tn);
-      const want = ground ? undefined : force.find(([re, tools]) => re.test(tn) && !(tools[0] === "show_film" && notOneFilm && !/oyn|kadro|yonetmen|\bwho\b|\bcast\b|director/.test(tn)));
+      force.unshift([/\bvar mi\b|\bbizde\b|kutuphanemde|arsivimde|kitapligimda|do i (have|own)|is there .* in my|in my library/, ["search_books", "search_music", "search_film_library"],
+        mode === "books" ? "Önce search_books ile kitaplıkta ara." : mode === "music" ? "Önce search_music ile arşivde ara." : "Önce search_film_library ile film kütüphanesinde ara."]);
+      const want = ground ? undefined : force.find(([re, tools]) => re.test(tn) && (mode === "film" || tools.includes("open_book") || tools.includes("search_books")) && !(tools[0] === "show_film" && opinion) && !(tools[0] === "show_film" && notOneFilm && !/oyn|kadro|yonetmen|\bwho\b|\bcast\b|director/.test(tn)));
       if (want) {
         body.contents[body.contents.length - 1].parts[0].text += `
 
@@ -2428,15 +3407,55 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
       let { r, model: used } = await geminiWithFallback(key, body);
       // Tool calls: run them here, hand the results back, let the model answer (a few rounds at most).
       const done_: string[] = [];
+      const hops: Mode[] = [];
+      const undoIds: string[] = [];
       for (let round = 0; round < 5; round++) {
         const parts: any[] = r?.candidates?.[0]?.content?.parts ?? [];
         const calls = parts.filter((p) => p.functionCall);
         if (!calls.length) break;
         const results = [];
+        // what needs a yes from the user: changes always, opening unless they turned it off, deleting with its choices
+        const asking = calls.filter((c) => CHANGES.has(c.functionCall.name) || DELETES.has(c.functionCall.name) || (OPENS.has(c.functionCall.name) && askOpens()));
+        const refused = new Set<any>();
+        if (asking.length) {
+          step("think", tt("Onayını bekliyorum"));
+          const del = asking.find((c) => DELETES.has(c.functionCall.name));
+          const plan = del ? await deletePlan(del.functionCall.name, del.functionCall.args) : undefined;
+          // nothing found to delete: no card, the tool says so
+          const kind = del && plan?.files.length ? "delete" : asking.some((c) => CHANGES.has(c.functionCall.name)) ? "change" : "open";
+          const v = del && !plan?.files.length ? "ok" : await confirmCalls(kind, asking.map((c) => describeTool(c.functionCall.name, c.functionCall.args)), plan?.files.map((f) => f.split(/[\\/]/).pop()!), plan?.opts);
+          if (v === "cancel") asking.forEach((c) => refused.add(c));
+          else if (del) del.functionCall.args = { ...del.functionCall.args, _how: v };
+        }
+        const willChange = calls.some((c) => CHANGES.has(c.functionCall.name) && !refused.has(c));
+        const before = willChange ? snapshot() : null;
         for (const c of calls) {
-          const [k, t] = TOOL_STEP[c.functionCall.name] ?? ["think", tt("Çalışıyorum")];
-          step(k, t);
-          const res = await runTool(c.functionCall.name, c.functionCall.args);
+          if (refused.has(c)) {
+            done_.push("✕ " + tt("İptal edildi: {0}", describeTool(c.functionCall.name, c.functionCall.args)));
+            results.push({ functionResponse: { name: c.functionCall.name, response: { result: "Kullanıcı bu işlemi İPTAL ETTİ; yapılmadı. Bunu kısaca söyle, tekrar deneme." } } });
+            continue;
+          }
+          const home = TOOL_MODE[c.functionCall.name];
+          if (home && home !== mode) { step(("hop-" + home) as StepKind, HOP_TEXT[home]); if (!hops.includes(home)) hops.push(home); }
+          else { const [k, t] = TOOL_STEP[c.functionCall.name] ?? (home === "music" ? ["hop-music", tt("Müziğe bakıyorum")] : home === "books" ? ["hop-books", tt("Kitaplara bakıyorum")] : ["think", tt("Çalışıyorum")]); step(k as StepKind, t); }
+          // a request about songs never goes through the film list tool: it becomes a real music playlist
+          const musicAsk = /şarkı|müzik|song|music|çalma listesi/i.test(text);
+          let res = c.functionCall.name === "add_to_playlist" && musicAsk
+            ? await makeMusicPlaylist(c.functionCall.args)
+            : await runTool(c.functionCall.name, c.functionCall.args);
+          const SEARCH: Record<string, Mode> = { search_film_library: "film", search_music: "music", search_books: "books", open_book: "books", play_music: "music", open_from_library: "film" };
+          const where = SEARCH[c.functionCall.name];
+          const q = String(c.functionCall.args?.query ?? c.functionCall.args?.title ?? "").trim();
+          if (where && q && /bulunamad|bulamad|yok\b|not found/i.test(res)) {
+            const others: [Mode, string][] = ([["film", "search_film_library"], ["books", "search_books"], ["music", "search_music"]] as [Mode, string][]).filter(([m]) => m !== where);
+            const extra: string[] = [];
+            for (const [m, tool] of others) {
+              step(("hop-" + m) as StepKind, HOP_TEXT[m]);
+              const r2 = await runTool(tool, { query: q }).catch(() => "");
+              if (r2 && !/bulunamad|boş|eklememiş/i.test(r2)) { extra.push(`${MODE_NAME[m]}: ${r2}`); if (m !== mode && !hops.includes(m)) hops.push(m); }
+            }
+            res += extra.length ? `\n[Diğer bölümlerde bulunanlar — kullanıcıya söyle] ${extra.join(" | ")}` : "\n[Diğer bölümlerde de yok]";
+          }
           const SHORT: Record<string, string> = { show_film: tt("Film sayfası açıldı"), show_images: tt("Görseller getirildi"), show_person: tt("Fotoğraflar getirildi"), film_links: tt("Bağlantılar bulundu") };
           // the note under the answer stays one short line: what the tool returned is for the model, not for reading
           const READ: Record<string, string> = { open_from_library: /^Açılıyor/.test(res) ? res : tt("Kütüphanede yok · kaynak istendi"), list_playlists: tt("Listelere bakıldı"), list_recommendations: tt("Önerilere bakıldı"), read_link: tt("Bağlantı okundu") };
@@ -2444,6 +3463,12 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
             : READ[c.functionCall.name] ?? (res.length > 120 ? res.slice(0, 110).replace(/\s+\S*$/, "") + "…" : res);
           done_.push(short);
           results.push({ functionResponse: { name: c.functionCall.name, response: { result: res } } });
+        }
+        if (before) {
+          const id = Date.now().toString(36) + round;
+          undos.unshift({ id, label: calls.filter((c) => CHANGES.has(c.functionCall.name) && !refused.has(c)).map((c) => describeTool(c.functionCall.name, c.functionCall.args)).join(" · "), snap: before, after: snapshot() });
+          undos.splice(10);
+          undoIds.push(id);
         }
         body.contents = [...body.contents, { role: "model", parts }, { role: "user", parts: results }];
         delete body.toolConfig; // only the first round is forced
@@ -2454,7 +3479,12 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
       const outText = (r?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? "").join("").trim();
       // "bir film öner" answered with one film: that film's page too
       const askedForOne = /oner|izlesem|recommend|suggest|what should i watch/.test(tn);
-      if (!toolCtx.media.film && !toolCtx.media.choices && !toolCtx.media.source && !ground && (!notOneFilm || askedForOne)) {
+      // a film page the model opened on its own for a taste remark, or one already shown in this chat, is left out
+      const shownBefore = new Set(next.filter((m) => m.film).map((m) => m.film!.id));
+      const askedAbout = /hakkinda|anlat|\bkonusu\b|oyuncu|kadro|yonetmen|\bkim\b|tell me about|\bplot\b|\bcast\b|director/.test(tn);
+      if (toolCtx.media.film && (opinion || (shownBefore.has(toolCtx.media.film.id) && !askedAbout))) toolCtx.media.film = undefined;
+      // only for "bir film öner" answered with exactly one film
+      if (!toolCtx.media.film && !toolCtx.media.choices && !toolCtx.media.source && !ground && askedForOne && !opinion) {
         const titles = [...new Set([...outText.matchAll(/\*\*([^*]+?\((?:19|20)\d{2}\))\*\*/g)].map((x) => x[1].trim()))];
         if (titles.length === 1) {
           const t = titles[0];
@@ -2464,7 +3494,7 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
           // only when TMDB has a film by exactly that name (a bolded director or actor must not turn into a page)
           const h = await findTitle({ title: name, year: y }).catch(() => undefined);
           const k = norm(name).replace(/^(the|a|an) /, "");
-          if (h && norm(h.title).replace(/^(the|a|an) /, "") === k) await runTool("show_film", { tmdb_id: h.id, kind: h.kind, title: h.title, year: h.year }).catch(() => "");
+          if (h && !shownBefore.has(h.id) && norm(h.title).replace(/^(the|a|an) /, "") === k) await runTool("show_film", { tmdb_id: h.id, kind: h.kind, title: h.title, year: h.year }).catch(() => "");
         }
       }
       const out = outText || (done_.length ? done_.join("\n") : "");
@@ -2472,8 +3502,8 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
       const sources: Source[] = chunks.map((c) => c.web).filter(Boolean).map((w: any) => ({ title: w.title || w.uri, uri: w.uri }))
         .filter((x, i, a) => a.findIndex((y) => y.title === x.title) === i).slice(0, 6);
       const md_ = toolCtx.media;
-      const media = { ...(md_.choices && !md_.film ? { choices: md_.choices } : {}), ...(md_.source ? { source: md_.source } : {}), ...(md_.film ? { film: md_.film } : {}), ...(md_.images.length ? { images: md_.images } : {}), ...(md_.people.length ? { people: md_.people } : {}), ...(md_.links.length ? { links: md_.links } : {}) };
-      const done: Msg[] = [...next, { role: "model", text: out || tt("(boş yanıt)"), ...media, ...(sources.length ? { sources } : {}), ...((used.note || done_.length) ? { note: [...done_.map((d) => "✓ " + d), used.note].filter(Boolean).join(" · ") } : {}) }];
+      const media = { ...(md_.choices && !md_.film ? { choices: md_.choices } : {}), ...(md_.source ? { source: md_.source } : {}), ...(md_.song ? { song: md_.song } : {}), ...(md_.film ? { film: md_.film } : {}), ...(md_.images.length ? { images: md_.images } : {}), ...(md_.people.length ? { people: md_.people } : {}), ...(md_.links.length ? { links: md_.links } : {}) };
+      const done: Msg[] = [...next, { role: "model", text: out || tt("(boş yanıt)"), ...media, ...(hops.length ? { hop: hops } : {}), ...(sources.length ? { sources } : {}), ...((used.note || done_.length) ? { note: [...done_.map((d) => (d.startsWith("✕") ? d : "✓ " + d)), used.note].filter(Boolean).join(" · ") } : {}), ...(undoIds.length ? { undo: undoIds.join(",") } : {}) }];
       if (convRef.current !== myConv) {
         // another chat is open now: the answer is kept in its own conversation
         const c = loadConvs().find((x) => x.id === myConv);
@@ -2490,10 +3520,18 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
     }
   };
 
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  useEffect(() => {
+    const take = () => { const t = pendingAsk; if (!t) return; pendingAsk = null; setTimeout(() => sendRef.current(t), 60); };
+    take();
+    window.addEventListener("luna-ask", take);
+    return () => window.removeEventListener("luna-ask", take);
+  }, []);
   const LINK_ICON: Record<string, [string, string]> = { imdb: ["IMDb", "#f5c518"], lb: ["LB", "#00c030"], tmdb: ["TM", "#01b4e4"], wiki: ["W", "#ffffff"], yt: ["▶", "#ff3b3b"], jw: ["JW", "#ffd23f"] };
   const head = (
     <div className="chat-head">
-      {!big && <><span className="chat-dot" /> <b>{tt("Luna asistan")}</b></>}
+      {!big && <><span className="chat-dot" /> <b>{tt("Luna Asistan")}</b></>}
       {big && <h2 className="ws-title ellipsis">{msgs.find((m) => m.role === "user")?.text.slice(0, 60) ?? tt("Yeni sohbet")}</h2>}
       <span className={"chat-ctx ellipsis" + (viewing || rv ? " page" : "")} title={viewing ? tt("Bu sohbet bu sayfaya ait") : rv ? tt("Asistan şu an açık olan öneri listesine bakıyor") : tt("Genel sohbet")}>{msgs.length ? loadConvs().find((c) => c.id === convId)?.ctx ?? ctxLabel : ctxLabel}</span>
       <span className="grow" />
@@ -2506,13 +3544,13 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
     </div>
   );
   const body = (
-    <div className="chat-body">
+    <div className="chat-body" ref={bodyRef} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 90; }}>
       <div className="chat-col">
         {!key && <div className="chat-note">{tt("Asistan için Ayarlar'a")} <b>{tt("Gemini API anahtarı")}</b>  {tt("gir (aistudio.google.com › Get API key, ücretsiz).")}</div>}
         {!msgs.length && key && (
           <div className="chat-empty">
             <div className="muted">{tt("Ne izlemek istediğini söyle; beğenilerine, geçmişine ve arkadaşlarının önerilerine bakıp önereyim. Görsel ve bağlantı da getirebilirim.")}</div>
-            <div className="chat-quick">{(viewing ? PAGE_QUICK(viewing.parsed.kind) : rv ? RECS_QUICK : QUICK).map((x) => <button key={x} className="chip" onClick={() => send(x)}>{x}</button>)}</div>
+            <div className="chat-quick">{(viewing ? PAGE_QUICK(viewing.parsed.kind) : rv ? RECS_QUICK : mode !== "film" ? MODE_QUICK[mode]() : QUICK).map((x) => <button key={x} className="chip" onClick={() => send(x)}>{x}</button>)}</div>
           </div>
         )}
         {msgs.map((m, i) => {
@@ -2522,6 +3560,7 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
             <div key={i} className={"msg-wrap " + m.role}>
               {m.film && <FilmPage f={m.film} onPlay={toolCtx.play} />}
               {m.source && <SourceBox s={m.source} />}
+              {m.song && <SongBox s={m.song} />}
               {m.choices && (
                 <div className="choices">
                   {m.choices.map((c) => (
@@ -2562,7 +3601,28 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
                   ))}
                 </div>
               )}
+              {m.hop && <div className="msg-hops">{m.hop.map((h) => <span key={h} className={"hop-chip " + h}>→ {MODE_NAME[h]}</span>)}</div>}
+              {m.act && <LinkActCard act={m.act} onState={(st, info, pl) => {
+                const next = msgs.map((x) => (x === m ? { ...x, act: { ...x.act!, state: st, info, pl } } : x));
+                setMsgs(next); saveThread(next);
+              }} />}
               {m.note && <div className="msg-note">{m.note}</div>}
+              {m.undo && (() => {
+                const mine = m.undo.split(",").map((id) => undos.find((u) => u.id === id)).filter(Boolean) as Undo[];
+                if (!mine.length) return null;
+                return (
+                  <div className="msg-undo">
+                    <button className="chip" title={mine.map((u) => u.label).join("\n")} onClick={() => {
+                      // the oldest snapshot of this answer is the state before it
+                      restoreSnapshot(mine[mine.length - 1].snap, mine[mine.length - 1].after);
+                      for (const u of mine) undos.splice(undos.indexOf(u), 1);
+                      const next = msgs.map((x) => (x === m ? { ...x, undo: undefined, note: [x.note, tt("↶ Geri alındı")].filter(Boolean).join(" · ") } : x));
+                      setMsgs(next); saveThread(next); bumpUndo((n) => n + 1);
+                    }}>↶ {tt("Geri al")}</button>
+                    <span className="muted small">{tt("Bu cevaptaki değişiklikleri geri alır")}</span>
+                  </div>
+                );
+              })()}
               {m.sources && (
                 <div className="msg-sources">
                   <span>{tt("Kaynaklar:")}</span>
@@ -2583,10 +3643,30 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
             </div>
           );
         })}
+        {ask && (
+          <div className={"msg model ask-card " + ask.kind}>
+            <b>{ask.kind === "delete" ? tt("Bunu nasıl kaldırayım?") : ask.kind === "open" ? tt("Bunu açayım mı?") : tt("Şunları yapayım mı?")}</b>
+            <ul>{ask.lines.map((l, i) => <li key={i}>{l}</li>)}</ul>
+            {ask.files?.length ? <div className="muted small ask-files">{ask.files.slice(0, 4).join(" · ")}{ask.files.length > 4 ? tt(" ve {0} dosya daha", ask.files.length - 4) : ""}</div> : null}
+            {ask.kind === "delete" ? (
+              <div className="ask-btns">
+                {(ask.opts ?? []).map(([v, l, danger]) => <button key={v} className={"chip" + (danger ? " danger" : "")} onClick={() => ask.resolve(v)}>{l}</button>)}
+                <button className="chip" onClick={() => ask.resolve("cancel")}>{tt("İptal")}</button>
+              </div>
+            ) : (
+              <div className="ask-btns">
+                <button className="primary sm" onClick={() => ask.resolve("ok")}>{tt("Tamam")}</button>
+                <button className="chip" onClick={() => ask.resolve("cancel")}>{tt("İptal")}</button>
+                {ask.kind === "open" && <button className="chip ghost-chip" onClick={() => { store.set("assistAskOpen", "0"); ask.resolve("ok"); }}>{tt("Tamam, açarken bir daha sorma")}</button>}
+              </div>
+            )}
+            {ask.kind === "change" && <div className="muted small">{tt("Yaptıktan sonra cevabın altında “Geri al” olur.")}</div>}
+          </div>
+        )}
         {busy && (
           <div className="msg model working">
             {steps.map((x, i) => (
-              <div key={i + x.text} className={"wstep" + (x.done ? " done" : "")}>
+              <div key={i + x.text} className={"wstep w-" + x.kind + (x.done ? " done" : "")}>
                 {x.done ? <span className="step-ok">✓</span> : <StepIcon kind={x.kind} />}
                 <span className="step-t">{x.text}{!x.done && <span className="step-dots"><i>.</i><i>.</i><i>.</i></span>}</span>
               </div>
@@ -2594,7 +3674,8 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
           </div>
         )}
         {err && <div className="chat-note err">{err}</div>}
-        <div ref={endRef} />
+                {musicPrev && <MusicAddPreview name={musicPrev.name} items={musicPrev.items} missing={musicPrev.missing} subs={musicPrev.subs} onDone={(picked) => { prevRef.current = null; musicPrev.resolve(picked); setMusicPrev(null); }} />}
+        <div />
       </div>
     </div>
   );
@@ -2640,7 +3721,7 @@ export function ChatPanel({ items, recent, onClose, viewing, onPlay, onOpenSourc
       <div className="chat-ws glass">
         <aside className="ws-side">
           <div className="ws-side-head">
-            <div className="ws-brand"><span className="chat-dot" />  {tt("Luna asistan")}</div>
+            <div className="ws-brand"><span className="chat-dot" />  {tt("Luna Asistan")}</div>
             <button className="ws-new" onClick={newChat}>{tt("＋ Yeni sohbet")}</button>
             <div className="ws-find"><Icon d={I.search} size={14} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tt("Sohbetlerde ara")} /></div>
           </div>

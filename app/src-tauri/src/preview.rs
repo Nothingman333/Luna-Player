@@ -128,12 +128,11 @@ pub fn frame(mpv_exe: &Path, file: &str, secs: u32) -> Result<Vec<u8>, String> {
 /// Closes the open video so it can be deleted or renamed.
 pub fn release() {
     if let Some(w) = WORKER.lock().unwrap().as_mut() {
-        if w.file.take().is_some() {
-            let _ = w.send(json!(["stop"]));
-        }
+        // stop unconditionally: a timed-out load may have opened the file without setting w.file
+        w.file = None;
+        let _ = w.send(json!(["stop"]));
     }
 }
-
 pub fn shutdown() {
     if let Some(mut w) = WORKER.lock().unwrap().take() {
         let _ = w.child.kill();
