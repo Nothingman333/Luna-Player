@@ -1,4 +1,30 @@
-﻿## 1.4.5CC — 2026-10-21 (beta, not built yet: tried with Luna Dev.cmd)
+﻿## 1.4.6CC — 2026-10-21 (beta, not built yet: tried with Luna Dev.cmd)
+
+- **"Worth watching?" workspace** in film/series details (library and the assistant's film card):
+  - paste or import reviews (TXT/JSON);
+  - a local keyword scan by topic: story, pace, acting, visuals, characters, music. The community score and your own signal stay apart.
+  - film and series preferences, mood weights and warnings;
+  - like/dislike with reasons, a history of 8 scans, and a review draft from your notes;
+  - JSON export.
+- **Music:**
+  - pausing while a YouTube link resolves keeps it paused;
+  - stale retries and skips can no longer start another song;
+  - a bad start index is clamped.
+- **Read aloud:**
+  - volume and mute in the bar;
+  - the assistant's volume and mute commands reach the reading voice;
+  - bad speed or voice settings are cleaned;
+  - a voice error stops reading instead of skipping text;
+  - no restart after Stop.
+- **Books:**
+  - notes are kept per file, so two editions don't share notes. Old notes are kept and can be copied on request.
+  - a failed save keeps the editor open and shows an error;
+  - broken notes can't crash the reader;
+  - a stale book search doesn't show old results.
+- **Dependency:** @xmldom/xmldom 0.8.15 for epubjs (npm audit: 0).
+- **Checks:** 32 more regression tests (`npm run test:next`), also in CI.
+
+## 1.4.5CC — 2026-10-21 (beta, not built yet: tried with Luna Dev.cmd)
 
 - **Fixes package (B01–B36):**
   - Backup and restore: a wrong-shaped backup, a full storage or a failed save no longer wipes or half-restores data.

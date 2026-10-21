@@ -5,8 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { tt } from "./i18n";
 import { store } from "./library";
-import { setProp } from "./mpv";
-import { musicPlaying } from "./Music";
+import { musicPlaying, pauseMusic } from "./Music";
 
 /** One section (chapter file) of the book as shown in the reader. */
 export type TtsDoc = { doc: Document; index: number; range: (cfi: string) => Range | null; cfi: (r: Range) => string };
@@ -28,10 +27,12 @@ export type Sleep = 0 | 15 | 30 | 60 | "chapter";
 
 type TState = {
   active: boolean; playing: boolean; loading: boolean; rate: number; voice: string; lang: string;
-  sleep: Sleep; sleepAt: number; note: string; win: boolean;
+  sleep: Sleep; sleepAt: number; note: string; win: boolean; volume: number; muted: boolean;
 };
-const saved = store.json<{ rate?: number }>("ttsSet", {});
-const T: TState = { active: false, playing: false, loading: false, rate: saved.rate ?? 1, voice: "", lang: "", sleep: 0, sleepAt: 0, note: "", win: false };
+const saved = store.json<{ rate?: number; volume?: number; muted?: boolean } | null>("ttsSet", {}) ?? {};
+const safeRate = (r: unknown) => typeof r === "number" && Number.isFinite(r) ? Math.max(0.5, Math.min(2, r)) : 1;
+const safeVolume = (v: unknown) => typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 100;
+const T: TState = { active: false, playing: false, loading: false, rate: safeRate(saved.rate), voice: "", lang: "", sleep: 0, sleepAt: 0, note: "", win: false, volume: safeVolume(saved.volume), muted: saved.muted === true };
 const subs = new Set<() => void>();
 const set = (p: Partial<TState>) => { Object.assign(T, p); subs.forEach((f) => f()); };
 export function useTts() {
@@ -128,10 +129,12 @@ const DEFAULT_VOICE: Record<string, string> = {
 let voiceList: Promise<Voice[]> | null = null;
 /** Edge's voices (kept for a week). */
 export function loadVoices(): Promise<Voice[]> {
-  const c = store.json<{ at: number; l: Voice[] } | null>("ttsVoices2", null);
+  const raw = store.json<{ at?: number; l?: unknown } | null>("ttsVoices2", null);
+  const usableVoice = (v: unknown): v is Voice => !!v && typeof v === "object" && ["name", "locale", "gender", "label"].every(k => typeof (v as Record<string, unknown>)[k] === "string") && ((v as Voice).kinds === undefined || (Array.isArray((v as Voice).kinds) && (v as Voice).kinds!.every(k => typeof k === "string")));
+  const c = raw && typeof raw.at === "number" && Array.isArray(raw.l) ? { at: raw.at, l: raw.l.filter(usableVoice) } : null;
   if (c && Date.now() - c.at < 7 * 864e5 && c.l.length) return Promise.resolve(c.l);
   return (voiceList ??= invoke<Voice[]>("tts_voices")
-    .then((l) => { store.set("ttsVoices2", JSON.stringify({ at: Date.now(), l })); store.remove("ttsVoices"); return l; })
+    .then((list) => { const l = Array.isArray(list) ? list.filter(usableVoice) : []; store.set("ttsVoices2", JSON.stringify({ at: Date.now(), l })); store.remove("ttsVoices"); return l; })
     .catch(() => { voiceList = null; return c?.l ?? []; }));
 }
 /** How good a voice is for reading a book, best first (from Microsoft's own kinds and the voice's generation):
@@ -164,9 +167,20 @@ export function setVoice(name: string) {
   set({ voice: name });
   if (T.active) { cancel(); dropCache(); restart(); } // the prepared pieces were in the old voice
 }
+function saveTtsSettings() { store.set("ttsSet", JSON.stringify({ rate: T.rate, volume: T.volume, muted: T.muted })); }
+export const ttsVolume = () => T.volume;
+export function setTtsVolume(volume: number, muted = T.muted) {
+  set({ volume: safeVolume(volume), muted });
+  saveTtsSettings();
+  if (E.audio) { E.audio.volume = T.volume / 100; E.audio.muted = T.muted; }
+  // Windows captures volume when speaking starts; restart this chunk with the same pause intent.
+  if (T.active && E.mode === "win") restart();
+}
+export function setTtsMuted(muted: boolean) { setTtsVolume(T.volume, muted); }
 export function setRate(r: number) {
+  r = safeRate(r);
   set({ rate: r });
-  store.set("ttsSet", JSON.stringify({ rate: r }));
+  saveTtsSettings();
   if (E.audio) E.audio.playbackRate = r;
   if (E.mode === "win" && T.active) restart(); // Windows' voice takes the speed for the next sentence only
 }
@@ -273,7 +287,7 @@ export async function ttsStart(fromCfi?: string) {
   const lang = guessLang();
   const first = !T.active;
   set({ active: true, playing: true, lang, voice: store.get("ttsVoice:" + lang) || voiceFor(lang), note: first && !store.get("ttsNoted") ? "privacy" : T.note === "privacy" ? "privacy" : "" });
-  if (musicPlaying()) setProp("pause", true);
+  if (musicPlaying()) pauseMusic(true);
   media(true);
   loop(E.gen);
 }
@@ -287,7 +301,7 @@ export function ttsPause() {
 export function ttsResume() {
   if (!T.active) { ttsStart(); return; }
   if (T.playing) return;
-  if (musicPlaying()) setProp("pause", true);
+  if (musicPlaying()) pauseMusic(true);
   set({ playing: true, note: T.note === "privacy" ? T.note : "" });
   if (E.waitingChapter) { E.waitingChapter = false; loop(E.gen); return; }
   if (E.mode === "win") { E.winTick = E.done ? performance.now() : 0; try { speechSynthesis.resume(); } catch {} }
@@ -410,7 +424,11 @@ async function say(c: Chunk, g: number) {
 
 function mark(c: Chunk, s: number, e: number) {
   // the chapter on screen was changed under the voice (contents, search, the slider): read on from the new page
-  if (!c.p.nodes[0].n.ownerDocument.defaultView) { if (T.active && T.playing) setTimeout(() => ttsStart(), 0); return; }
+  if (!c.p.nodes[0].n.ownerDocument.defaultView) {
+    const generation = E.gen;
+    if (T.active && T.playing) setTimeout(() => { if (T.active && T.playing && E.gen === generation) ttsStart(); }, 0);
+    return;
+  }
   const sent = sentences(c.p).find(([a, b]) => s >= a && s < b) ?? [c.a, c.b];
   const doc = c.p.nodes[0].n.ownerDocument;
   let word: Range | null = null;
@@ -456,7 +474,7 @@ function playEdge(c: Chunk, s: Synth, done: () => void) {
   const a = (E.audio ??= new Audio());
   const end = () => { if (E.done === done) { E.done = null; done(); } };
   a.onended = end;
-  a.onerror = end;
+  a.onerror = () => { if (E.done === done) audioFailure(); };
   a.onplay = () => tick();
   a.ontimeupdate = sync;
   a.onpause = sync;
@@ -465,6 +483,8 @@ function playEdge(c: Chunk, s: Synth, done: () => void) {
   lastWord = -2;
   a.src = s.url;
   a.playbackRate = T.rate;
+  a.volume = T.volume / 100;
+  a.muted = T.muted;
   (a as any).preservesPitch = true;
   if (!s.words.length) mark(c, c.a, c.a);
   const gen = E.gen;
@@ -481,6 +501,7 @@ function playWin(c: Chunk, done: () => void) {
   if (v) u.voice = v;
   u.lang = v?.lang ?? T.lang;
   u.rate = T.rate;
+  u.volume = T.muted ? 0 : T.volume / 100;
   u.onstart = () => { if (E.done !== done) return; E.winTick = T.playing ? performance.now() : 0; mark(c, c.a, c.a); };
   u.onboundary = (e) => {
     if (E.done !== done || (e.name && e.name !== "word")) return;
@@ -491,7 +512,7 @@ function playWin(c: Chunk, done: () => void) {
   };
   const fin = () => { if (E.done === done) { accountWin(); E.winTick = 0; E.done = null; done(); } };
   u.onend = fin;
-  u.onerror = fin;
+  u.onerror = () => { if (E.done === done) audioFailure(); };
   if (T.playing) speechSynthesis.resume();
   speechSynthesis.speak(u);
   if (!T.playing) speechSynthesis.pause();

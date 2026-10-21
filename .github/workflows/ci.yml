@@ -37,6 +37,9 @@ jobs:
       - name: Storage, playback and catalog regressions
         working-directory: app
         run: npm run test:regression
+      - name: Film workspace and additional playback regressions
+        working-directory: app
+        run: npm run test:next
 
   rust:
     name: Rust (build, tests)

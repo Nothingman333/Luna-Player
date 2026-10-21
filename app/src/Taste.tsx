@@ -1,4 +1,5 @@
 // Taste data (likes, dislikes, watchlist), recommendations from friends and the Gemini chat.
+import { FilmDecisionPanel } from "./FilmDecision";
 import { lang, locale, tt, DEC, pctText } from "./i18n";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -9,11 +10,11 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { details, Episode, renameVideo, fromImdb, IMG, imdbOf, isFinished, Item, Meta, Recent, SearchHit, searchTmdb, seasonEpisodes, store, tmdbGet, tmdbKeywords } from "./library";
 import { StreamList, streamAddons, useAddons } from "./Addons";
 import { I, Icon, Mode, pct } from "./Screens";
-import { findPodcast, findStations, forgetTracks, groupAlbums, isSpotifyList, loadMusicFolders, loadMusicLibrary, loadMusicPlaylists, loadHistory, loadLikes, mostPlayed, useMusic, nowPlaying, nextTrack, playQueue, prevTrack, setShuffle, stopMusic, QItem, saveMusicPlaylists, showPlaylist, SpotifyMove, trackItem } from "./Music";
+import { findPodcast, findStations, forgetTracks, groupAlbums, isSpotifyList, loadMusicFolders, loadMusicLibrary, loadMusicPlaylists, loadHistory, loadLikes, mostPlayed, useMusic, nowPlaying, pauseMusic, nextTrack, playQueue, prevTrack, setShuffle, stopMusic, QItem, saveMusicPlaylists, showPlaylist, SpotifyMove, trackItem } from "./Music";
 import { abAuthor, abChapters, abTitle, bookOnScreen, fetchAndOpenBook, fetchBook, Book, wikisourceBooks, getPos, librivox, loadAbRecent, loadBookLibrary, loadBookNotes, loadReadHistory, rememberAb, requestOpenBook, clearBookRecord, forgetBooks } from "./Books";
 import { fetchFeed, gutenbergBooks, gutenbergSearch, kindOf, loadSources, OEntry, searchUrl } from "./Opds";
 import { mpv, setProp } from "./mpv";
-import { ttsActive, ttsPause, ttsReady, ttsResume, ttsStart, ttsStop } from "./ReadAloud";
+import { setTtsVolume, setTtsMuted, ttsVolume, ttsActive, ttsPause, ttsReady, ttsResume, ttsStart, ttsStop } from "./ReadAloud";
 import { aiKey, aiName, aiProvider, otherAi } from "./ai";
 import { addToCollection, CItem, Collection, collectionId, collectionsChanged, goPlace, loadCollections, mineContext } from "./Mine";
 
@@ -2620,6 +2621,7 @@ function FilmPage({ f, onPlay }: { f: FilmCard; onPlay?: (path: string) => void 
           <button className={"fp-btn" + (d?.vote === "dislike" ? " on red" : "")} onClick={() => vote("dislike")}><Icon d={THUMB_DOWN} size={15} />  {tt("Beğenmedim")}</button>
           {lib && <span className="fp-lib">{tt("● Kütüphanende var")}</span>}
         </div>
+        <FilmDecisionPanel key={f.kind + ":" + f.id + ":" + f.title + ":" + f.year} film={f} />
       </div>
     </div>
   );
@@ -2640,20 +2642,29 @@ function playerControl(act: PlayerAct, value?: number): string {
     if (act === "resume") { ttsResume(); return tt("Sesli okuma devam ediyor"); }
     ttsStop(); return tt("Sesli okuma kapatıldı");
   }
+  if (ttsActive()) {
+    switch (act) {
+      case "mute": setTtsMuted(true); return tt("Sesli okumanın sesi kapatıldı");
+      case "unmute": setTtsMuted(false); return tt("Sesli okumanın sesi açıldı");
+      case "volume_up": setTtsVolume(ttsVolume() + 10, false); return tt("Sesli okumanın sesi açıldı");
+      case "volume_down": setTtsVolume(ttsVolume() - 10); return tt("Sesli okumanın sesi kısıldı");
+      case "volume_set": setTtsVolume(Number.isFinite(value) ? value! : 70, false); return tt("Sesli okuma: %{0}", ttsVolume());
+    }
+  }
   switch (act) {
     case "read_aloud":
       if (!ttsReady()) return tt("Önce okuyucuda bir EPUB kitap aç; sesli okuma orada çalışır.");
       if (ttsActive()) { ttsResume(); return tt("Sesli okuma devam ediyor"); }
       ttsStart(); return tt("Kitap sesli okunuyor (sayfanın başından)");
     case "stop_reading": if (!ttsActive()) return tt("Şu an sesli okuma yok"); ttsStop(); return tt("Sesli okuma kapatıldı");
-    case "pause": setProp("pause", true); return tt("Durduruldu");
-    case "resume": setProp("pause", false); return what ? tt("Devam ediyor: {0}", what) : tt("Devam ediyor");
+    case "pause": if (c) pauseMusic(true); else setProp("pause", true); return tt("Durduruldu");
+    case "resume": if (c) pauseMusic(false); else setProp("pause", false); return what ? tt("Devam ediyor: {0}", what) : tt("Devam ediyor");
     case "stop": mpv("stop"); stopMusic(); return tt("Kapatıldı");
     case "next": if (!c) return tt("Şu an çalan bir liste yok"); nextTrack(); return tt("Sonraki şarkı");
     case "previous": if (!c) return tt("Şu an çalan bir liste yok"); prevTrack(0); return tt("Önceki şarkı");
     case "volume_up": mpv("add", "volume", 10); setProp("mute", false); return tt("Ses açıldı");
     case "volume_down": mpv("add", "volume", -10); return tt("Ses kısıldı");
-    case "volume_set": { const v = Math.max(0, Math.min(130, Math.round(value ?? 70))); setProp("volume", v); setProp("mute", false); return tt("Ses: %{0}", v); }
+    case "volume_set": { const v = Math.max(0, Math.min(130, Math.round(Number.isFinite(value) ? value! : 70))); setProp("volume", v); setProp("mute", false); return tt("Ses: %{0}", v); }
     case "mute": setProp("mute", true); return tt("Ses kapatıldı");
     case "unmute": setProp("mute", false); return tt("Ses açıldı");
     case "shuffle_on": if (!c) return tt("Şu an çalan bir liste yok"); setShuffle(true); return tt("Karışık çalma açık");

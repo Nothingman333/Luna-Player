@@ -133,6 +133,15 @@ const P = {
 };
 const subs = new Set<() => void>();
 const changed = () => subs.forEach((f) => f());
+let loadGeneration = 0;
+let wantsPlayback = true;
+export function pauseMusic(paused: boolean) {
+  wantsPlayback = !paused;
+  P.paused = paused;
+  setProp("pause", paused);
+  changed();
+}
+export function toggleMusicPause() { pauseMusic(!P.paused); }
 
 export function useMusic() {
   const [, bump] = useState(0);
@@ -220,9 +229,10 @@ function skipFailed() {
   if (!c) return;
   const last = P.index + 1 >= P.queue.length && P.repeat !== "all";
   if (c.radio || last || ++failedInRow >= Math.min(3, P.queue.length)) { failedInRow = 0; setProp("pause", true); return; }
+  const generation = loadGeneration;
   // a moment, so the "couldn't open" warning is seen before the next one starts
   setTimeout(() => {
-    if (P.queue[P.index] !== c) return;
+    if (generation !== loadGeneration || !wantsPlayback || P.queue[P.index] !== c) return;
     P.index = (P.index + 1) % P.queue.length;
     loadCurrent();
   }, 1200);
@@ -235,12 +245,14 @@ listen<any>("mpv", ({ payload }) => {
   if (payload.event !== "end-file" || payload.reason !== "error") return;
   if (!directFor) { if (failedToStart) skipFailed(); return; }
   const failed = directFor;
+  const generation = loadGeneration;
   direct.delete(failed);
   findFailed.add(failed); // try the original page once, never resolve the same broken direct URL forever
   // after the other listeners have seen musicRetrying()
   setTimeout(() => {
+    if (generation !== loadGeneration) return;
     directFor = null;
-    if (P.queue[P.index]?.src === failed) loadCurrent();
+    if (P.queue[P.index]?.src === failed) loadCurrent(true);
   });
 });
 
@@ -249,7 +261,9 @@ const musicPaths = new Set<string>();
 /** Music, never a film: also in the moment between two songs (or while a film takes over) when the queue is empty. */
 export const isMusicPath = (p: string | null) => !!p && (musicPaths.has(p) || p.startsWith("ytdl://") || /^https?:\/\/[^/]*googlevideo\.com\//i.test(p));
 
-function loadCurrent() {
+function loadCurrent(preserveIntent = false) {
+  const generation = ++loadGeneration;
+  if (!preserveIntent) { wantsPlayback = true; P.paused = false; }
   const c = P.queue[P.index];
   if (!c) return;
   musicPaths.add(c.src);
@@ -270,7 +284,7 @@ function loadCurrent() {
     if (finding) {
       finding.then(() => {
         if (!direct.has(c.src)) findFailed.add(c.src);
-        if (P.queue[P.index] === c) loadCurrent();
+        if (generation === loadGeneration && P.queue[P.index] === c) loadCurrent(true);
       });
       return;
     }
@@ -282,14 +296,14 @@ function loadCurrent() {
     setProp("vid", "no");
   }
   // (speed and file loop set for a film don't carry over to music: these hold for this file only)
-  const opts = ["vid=no", "speed=1", "loop-file=no", ...(c.yt && !ready ? ["ytdl-format=bestaudio/best"] : []),
+  const opts = ["vid=no", "speed=1", "loop-file=no", `pause=${wantsPlayback ? "no" : "yes"}`, ...(c.yt && !ready ? ["ytdl-format=bestaudio/best"] : []),
     ...(ready && d!.ua ? [`user-agent=%${new TextEncoder().encode(d!.ua).length}%${d!.ua}`] : []),
     ...(resume > 30 ? [`start=+${Math.floor(resume - 5)}`] : [])];
   if (ready) musicPaths.add(d!.url);
   mpv("loadfile", ready ? d!.url : c.src, "replace", "-1", opts.join(","));
   // a few seconds in, so finding the next one doesn't slow this one's start
   setTimeout(() => { if (P.queue[P.index] === c) prefetch(nextUp()); }, 4000);
-  setProp("pause", false);
+  setProp("pause", !wantsPlayback);
   if (c.book) store.set("abPos:" + c.book, String(P.index));
   if (!c.radio && !c.book) addHistory(c);
   if (c.book) { /* above */ }
@@ -320,7 +334,7 @@ export function playQueue(items: QItem[], start = 0, shuffle = false, from = "")
     P.original = [];
   }
   P.queue = q;
-  P.index = Math.min(start, q.length - 1);
+  P.index = Number.isFinite(start) ? Math.max(0, Math.min(Math.trunc(start), q.length - 1)) : 0;
   P.shuffle = shuffle;
   loadCurrent();
 }
@@ -391,11 +405,14 @@ export function resumeSuspendedMusic() {
     ...(ready && d!.ua ? [`user-agent=%${new TextEncoder().encode(d!.ua).length}%${d!.ua}`] : []),
     ...(s.time > 3 && !c.radio ? [`start=${Math.floor(s.time)}`] : [])];
   mpv("loadfile", ready ? d!.url : c.src, "replace", "-1", opts.join(","));
+  wantsPlayback = false;
   setProp("pause", true);
   P.paused = true;
   changed();
 }
 export function stopMusic() {
+  loadGeneration++;
+  wantsPlayback = false;
   if (P.index < 0) return;
   directFor = null;
   P.loading = false;
@@ -655,10 +672,10 @@ function PlaylistPage({ id, onClose }: { id: string; onClose: () => void }) {
   const needle = q.trim().toLocaleLowerCase();
   const shown = p.items.map((t, i) => ({ t, i })).filter(({ t }) => !needle || `${t.title} ${t.artist ?? ""}`.toLocaleLowerCase().includes(needle));
   const playAt = (i: number) => {
-    if (ours && m.now?.src === p.items[i].src) { mpv("cycle", "pause"); return; }
+    if (ours && m.now?.src === p.items[i].src) { toggleMusicPause(); return; }
     playQueue(p.items, i, false, p.id);
   };
-  const bigPlay = () => (ours ? mpv("cycle", "pause") : playQueue(p.items, 0, false, p.id));
+  const bigPlay = () => (ours ? toggleMusicPause() : playQueue(p.items, 0, false, p.id));
   const move = (from: number, to: number) => {
     if (from === to) return;
     const items = [...p.items];
@@ -1693,7 +1710,7 @@ export function MiniMusic() {
           <span className="mini-t"><b className="ellipsis">{c.title}</b><span className="muted small ellipsis">{m.loading ? tt("Yükleniyor…") : c.radio ? tt("Canlı radyo") : c.artist}</span></span>
           {!c.radio && <LikeBtn q={c} />}
           {!c.radio && <button className="mu-ib" aria-label={tt("Önceki")} onClick={() => prevTrack(0)}><Icon d={PREV} size={16} /></button>}
-          <button className="mu-ib mini-pp" aria-label={m.paused ? tt("Çal") : tt("Duraklat")} onClick={() => mpv("cycle", "pause")}>
+          <button className="mu-ib mini-pp" aria-label={m.paused ? tt("Çal") : tt("Duraklat")} onClick={() => toggleMusicPause()}>
             <Icon d={m.paused ? I.play : I.pause} fill size={16} /></button>
           {!c.radio && <button className="mu-ib" aria-label={tt("Sonraki")} onClick={() => nextTrack()}><Icon d={NEXT} size={16} /></button>}
         </div>
@@ -2096,7 +2113,7 @@ export function MusicDock({ mp }: { mp: MP }) {
   const m = useMusic();
   const c = m.now;
   // the end of a song: the next one (or the same, on repeat one)
-  useEffect(() => { if (P.paused !== mp.paused) { P.paused = mp.paused; changed(); } }, [mp.paused]);
+  useEffect(() => { if (!P.loading && P.paused !== mp.paused) { P.paused = mp.paused; changed(); } }, [mp.paused, m.loading]);
   useEffect(() => { if (c && !c.radio) musicTime = mp.time; }, [Math.floor(mp.time)]);
   const endedFor = useRef<string | null>(null);
   // mpv may report a YouTube song by the media address yt-dlp resolved, not the page link
@@ -2118,7 +2135,7 @@ export function MusicDock({ mp }: { mp: MP }) {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
       if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable) return;
-      if (e.key === " ") { e.preventDefault(); if (!e.repeat) mpv("cycle", "pause"); } // held down: once
+      if (e.key === " ") { e.preventDefault(); if (!e.repeat) toggleMusicPause(); } // held down: once
       else if (e.ctrlKey && e.key === "ArrowRight") { e.preventDefault(); nextTrack(); }
       else if (e.ctrlKey && e.key === "ArrowLeft") { e.preventDefault(); prevTrack(mp.time); }
       else if (e.key === "Escape" && m.view) setView(false);
@@ -2135,7 +2152,7 @@ export function MusicDock({ mp }: { mp: MP }) {
         {/* the song and its heart share the first column (a heart of its own pushed the volume out of the bar) */}
         <div className="mu-dock-left">
         <button className="mu-dock-now" onClick={() => setView(true)} title={tt("Şimdi çalıyor")}
-          onContextMenu={(e) => { if (!c.radio) openMenu(e, songActions(c, () => mpv("set_property", "pause", false))); }}>
+          onContextMenu={(e) => { if (!c.radio) openMenu(e, songActions(c, () => pauseMusic(false))); }}>
           <Cover src={c.radio ? c.favicon : c.cover} name={c.album ?? c.title} size={48} radius={8} icon={c.radio ? RADIO_ICON : NOTE} />
           <span className="mu-dock-txt"><b className="ellipsis">{onAir ?? c.title}</b><span className="muted small ellipsis">{m.loading ? <span className="mu-loading-t">{tt("Yükleniyor…")}</span> : c.radio ? (onAir ? c.title : c.artist) : [c.artist, c.album].filter(Boolean).join(" · ")}</span></span>
         </button>
@@ -2146,7 +2163,7 @@ export function MusicDock({ mp }: { mp: MP }) {
             {!c.radio && <button className={"mu-ib" + (m.shuffle ? " on" : "")} aria-label={tt("Karışık")} title={tt("Karışık")}
               onClick={() => setShuffle(!m.shuffle)}><Icon d={SHUFFLE} size={16} /></button>}
             {!c.radio && <button className="mu-ib" aria-label={tt("Önceki")} onClick={() => prevTrack(mp.time)}><Icon d={PREV} fill size={18} /></button>}
-            <button className={"mu-play" + (m.loading ? " loading" : "")} aria-label={m.loading ? tt("Yükleniyor…") : mp.paused ? tt("Oynat") : tt("Duraklat")} onClick={() => mpv("cycle", "pause")}>
+            <button className={"mu-play" + (m.loading ? " loading" : "")} aria-label={m.loading ? tt("Yükleniyor…") : mp.paused ? tt("Oynat") : tt("Duraklat")} onClick={() => toggleMusicPause()}>
               {m.loading ? <span className="mu-spin" aria-hidden="true" /> : <Icon d={mp.paused ? I.play : I.pause} fill size={18} />}</button>
             {!c.radio && <button className="mu-ib" aria-label={tt("Sonraki")} onClick={() => nextTrack()}><Icon d={NEXT} fill size={18} /></button>}
             {!c.radio && <button className={"mu-ib" + (m.repeat !== "off" ? " on" : "")} aria-label={tt("Tekrarla")}
@@ -2279,7 +2296,7 @@ function NowPlaying({ mp, onAir }: { mp: MP; onAir: string | null }) {
         {!c.radio && <Seek mp={mp} big />}
         <div className="mu-ctl big">
           {!c.radio && <button className="mu-ib" aria-label={tt("Önceki")} onClick={() => prevTrack(mp.time)}><Icon d={PREV} fill size={22} /></button>}
-          <button className="mu-play big" aria-label={mp.paused ? tt("Oynat") : tt("Duraklat")} onClick={() => mpv("cycle", "pause")}><Icon d={mp.paused ? I.play : I.pause} fill size={24} /></button>
+          <button className="mu-play big" aria-label={mp.paused ? tt("Oynat") : tt("Duraklat")} onClick={() => toggleMusicPause()}><Icon d={mp.paused ? I.play : I.pause} fill size={24} /></button>
           {!c.radio && <button className="mu-ib" aria-label={tt("Sonraki")} onClick={() => nextTrack()}><Icon d={NEXT} fill size={22} /></button>}
         </div>
       </div>

@@ -11,7 +11,7 @@ import { I, Icon, MenuEntry, openMenu } from "./Screens";
 import { askAssistant, openAssistant, TrText } from "./Taste";
 import { MiniMusic, playQueue, QItem, useMusic } from "./Music";
 import { collectEntry } from "./Mine";
-import { attachTts, loadVoices, voiceChoices, setRate, setSleep, setVoice, Sleep, takeHeard, TTS_CSS, ttsNoted, ttsPause, ttsSkip, ttsStart, ttsStop, ttsToggle, useTts, Voice } from "./ReadAloud";
+import { attachTts, loadVoices, voiceChoices, setRate, setSleep, setVoice, setTtsVolume, setTtsMuted, Sleep, takeHeard, TTS_CSS, ttsNoted, ttsPause, ttsSkip, ttsStart, ttsStop, ttsToggle, useTts, Voice } from "./ReadAloud";
 import { addSource, SourceHelp, fetchFeed, gutenbergBooks, gutenbergPopular, gutenbergSearch, kindOf, loadSources, OEntry, OFeed, saveSources, searchUrl, Source } from "./Opds";
 import literata400 from "@fontsource/literata/files/literata-latin-400-normal.woff2?url";
 import literata400x from "@fontsource/literata/files/literata-latin-ext-400-normal.woff2?url";
@@ -1047,8 +1047,18 @@ type Hl = { id: string; cfi: string; text: string; color: HlColor; note?: string
 type Mark = { id: string; loc?: string; pct: number; label: string; chapter?: string; at: number };
 type PageNote = { id: string; text: string; loc?: string; pct: number; chapter?: string; at: number };
 type Ann = { hl: Hl[]; marks: Mark[]; notes: PageNote[] };
-const annKey = (b: { title: string; author: string }) => "bkAnn:" + bkKey(b);
-const loadAnn = (b: { title: string; author: string }): Ann => ({ hl: [], marks: [], notes: [], ...store.json<Partial<Ann>>(annKey(b), {}) });
+const annKey = (b: { path: string }) => "bkAnnPath:" + b.path;
+function cleanAnn(value: unknown): Ann {
+  const x = value && typeof value === "object" ? value as Partial<Ann> : {};
+  const basic = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && typeof (v as any).id === "string" && typeof (v as any).at === "number" && Number.isFinite((v as any).at) && ((v as any).chapter === undefined || typeof (v as any).chapter === "string");
+  const position = (v: unknown) => basic(v) && typeof v.pct === "number" && Number.isFinite(v.pct) && v.pct >= 0 && v.pct <= 1 && (v.loc === undefined || typeof v.loc === "string");
+  return {
+    hl: Array.isArray(x.hl) ? x.hl.filter(v => basic(v) && typeof v.cfi === "string" && typeof v.text === "string" && ["yellow", "green", "blue", "pink", "line"].includes(v.color) && (v.note === undefined || typeof v.note === "string")) : [],
+    marks: Array.isArray(x.marks) ? x.marks.filter(v => position(v) && typeof v.label === "string") : [],
+    notes: Array.isArray(x.notes) ? x.notes.filter(v => position(v) && typeof v.text === "string") : [],
+  };
+}
+const loadAnn = (b: { path: string }): Ann => cleanAnn(store.json(annKey(b), {}));
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 type Here = { pct: number; label: string; chapter?: string; loc?: string; left?: number };
 type Found = { cfi: string; excerpt: string; chapter?: string };
@@ -1076,7 +1086,13 @@ function Reader({ b, onClose }: { b: Book; onClose: () => void }) {
   const [err, setErr] = useState("");
   const [toc, setToc] = useState<Toc[]>([]);
   const [ann, setAnnState] = useState<Ann>(() => loadAnn(b));
-  const setAnn = (f: (a: Ann) => Ann) => setAnnState((a) => { const n = f(a); store.set(annKey(b), JSON.stringify(n)); return n; });
+  const [annError, setAnnError] = useState("");
+  const [legacyAnn, setLegacyAnn] = useState(() => !store.get(annKey(b)) && !!store.get("bkAnn:" + bkKey(b)));
+  const setAnn = (f: (a: Ann) => Ann) => {
+    const n = f(ann);
+    if (!store.set(annKey(b), JSON.stringify(n))) { setAnnError(tt("Not kaydedilemedi. Depolama alanını kontrol et.")); return false; }
+    setAnnError(""); setAnnState(n); return true;
+  };
   const [sel, setSel] = useState<Sel | null>(null);
   const [noteFor, setNoteFor] = useState<{ id?: string; hlId?: string; text: string } | null>(null);
   const nav = useRef<Nav>({ next: () => {}, prev: () => {} });
@@ -1127,10 +1143,11 @@ function Reader({ b, onClose }: { b: Book; onClose: () => void }) {
   const saveNote = () => {
     if (!noteFor) return;
     const text = noteFor.text.trim();
-    if (noteFor.hlId) setAnn((a) => ({ ...a, hl: a.hl.map((h) => (h.id === noteFor.hlId ? { ...h, note: text || undefined } : h)) }));
-    else if (noteFor.id) setAnn((a) => ({ ...a, notes: text ? a.notes.map((n) => (n.id === noteFor.id ? { ...n, text } : n)) : a.notes.filter((n) => n.id !== noteFor.id) }));
-    else if (text) setAnn((a) => ({ ...a, notes: [{ id: newId(), text, loc: here.loc, pct: here.pct, chapter: here.chapter, at: Date.now() }, ...a.notes] }));
-    setNoteFor(null);
+    let saved = true;
+    if (noteFor.hlId) saved = setAnn((a) => ({ ...a, hl: a.hl.map((h) => (h.id === noteFor.hlId ? { ...h, note: text || undefined } : h)) }));
+    else if (noteFor.id) saved = setAnn((a) => ({ ...a, notes: text ? a.notes.map((n) => (n.id === noteFor.id ? { ...n, text } : n)) : a.notes.filter((n) => n.id !== noteFor.id) }));
+    else if (text) saved = setAnn((a) => ({ ...a, notes: [{ id: newId(), text, loc: here.loc, pct: here.pct, chapter: here.chapter, at: Date.now() }, ...a.notes] }));
+    if (saved) setNoteFor(null);
   };
   const openSide = (s: Side) => { setSide(s); setPanel("side"); setSel(null); };
   const curHl = sel?.id ? ann.hl.find((h) => h.id === sel.id) : undefined;
@@ -1181,6 +1198,13 @@ function Reader({ b, onClose }: { b: Book; onClose: () => void }) {
           onChange={(e) => nav.current.seek?.(Number(e.target.value) / 1000)} disabled={!nav.current.seek} />
         <span>{pctText(here.pct)}</span>
       </div>
+
+      {annError && <div className="bk-ann-error" role="alert">{annError}<button onClick={() => setAnnError("")}>{tt("Kapat")}</button></div>}
+      {legacyAnn && <div className="bk-legacy-ann" role="status"><span>{tt("Bu başlığa ait eski notlar var. Yalnız bu baskıyla eşleşiyorsa içe aktar.")}</span><button onClick={() => {
+        if (!confirm(tt("Eski notları bu dosyaya kopyalamak istiyor musun? Başka baskıların konumları uymayabilir. Eski kayıt korunur."))) return;
+        const old = cleanAnn(store.json("bkAnn:" + bkKey(b), {}));
+        if (setAnn(a => ({ hl: [...a.hl, ...old.hl.filter(v => !a.hl.some(n => n.id === v.id))], marks: [...a.marks, ...old.marks.filter(v => !a.marks.some(n => n.id === v.id))], notes: [...a.notes, ...old.notes.filter(v => !a.notes.some(n => n.id === v.id))] }))) setLegacyAnn(false);
+      }}>{tt("Eski notları kopyala")}</button><button onClick={() => setLegacyAnn(false)}>{tt("Şimdilik kapat")}</button></div>}
 
       {/* also after the reading ended by itself, to say why (end of the book, Edge's voice down…) */}
       {(tts.active || (!!tts.note && tts.note !== "privacy")) && <ReadAloudBar />}
@@ -1351,6 +1375,8 @@ function ReadAloudBar() {
         <button className="mu-ib" aria-label={tt("Sonraki paragraf")} title={tt("Sonraki paragraf")} onClick={() => ttsSkip(1)}><Icon d="M18 5v14M5 5l10 7-10 7z" size={16} /></button>
         <span className="bk-tts-sep" />
         <button className="chip" title={tt("Okuma hızı")} onClick={(e) => openMenu(e, RATES.map((r) => ({ label: (r === t.rate ? ok : "") + r.toLocaleString() + "×", act: () => setRate(r) })))}>{t.rate.toLocaleString()}×</button>
+        <button className="chip" aria-label={t.muted ? tt("Sesli okumanın sesini aç") : tt("Sesli okumayı sessize al")} aria-pressed={t.muted} onClick={() => setTtsMuted(!t.muted)}><Icon d={t.muted ? I.mute : I.vol} size={14}/></button>
+        <input className="bk-tts-volume" type="range" min="0" max="100" step="10" value={t.volume} aria-label={tt("Sesli okuma ses seviyesi")} aria-valuetext={String(t.volume) + "%"} onChange={e => setTtsVolume(Number(e.target.value), false)}/>
         <button className="chip" title={tt("Ses")} onClick={(e) => { at.current = { ...at.current, clientX: e.clientX, clientY: e.clientY }; voiceMenu(e); }}>{t.win && t.voice !== "win" ? tt("Windows sesi") : vLabel(t.voice)}</button>
         <button className={"chip" + (t.sleep ? " on" : "")} title={tt("Uyku zamanlayıcısı")} onClick={(e) => openMenu(e, ([0, 15, 30, 60, "chapter"] as Sleep[]).map((x) => ({
           label: (t.sleep === x ? ok : "") + (x === 0 ? tt("Kapalı") : x === "chapter" ? tt("Bölüm sonunda dur") : tt("{0} dakika sonra dur", x)), act: () => setSleep(x) })))}>
@@ -1367,6 +1393,8 @@ function BookFind({ nav, onGo }: { nav: React.MutableRefObject<Nav>; onGo: () =>
   const [res, setRes] = useState<Found[] | null>(null);
   const [busy, setBusy] = useState(false);
   const run = useRef(0);
+  const changeQuery = (next: string) => { run.current++; setQ(next); setRes(null); setBusy(false); };
+  useEffect(() => () => { run.current++; }, []);
   const go = async () => {
     if (!q.trim() || !nav.current.find) return;
     const my = ++run.current;
@@ -1377,7 +1405,7 @@ function BookFind({ nav, onGo }: { nav: React.MutableRefObject<Nav>; onGo: () =>
   return (
     <>
       <form className="bk-find" onSubmit={(e) => { e.preventDefault(); go(); }}>
-        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={tt("Kitapta ara")} aria-label={tt("Kitapta ara")} />
+        <input autoFocus value={q} onChange={(e) => changeQuery(e.target.value)} placeholder={tt("Kitapta ara")} aria-label={tt("Kitapta ara")} />
         <button className="primary sm" disabled={!q.trim() || busy}>{tt("Ara")}</button>
       </form>
       {busy && <div className="muted small pulse">{tt("Kitap taranıyor…")}</div>}

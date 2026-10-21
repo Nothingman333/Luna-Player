@@ -15,3 +15,9 @@
 .plg-card:focus-visible { outline:2px solid var(--accent-soft); outline-offset:4px; border-radius:12px; }
 @media(max-width:760px) { .library-tools { padding:12px; } .library-filters { width:100%; } .library-filters select { flex:1 1 140px; min-width:0; } .plv-tools { gap:8px; } .mine-search { flex-wrap:wrap; } }
 @media(prefers-reduced-motion:reduce) { :is(.plg,.mine-layer,.library-tools,.grid) *, :is(.plg,.mine-layer,.library-tools,.grid) *::before, :is(.plg,.mine-layer,.library-tools,.grid) *::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }
+
+.bk-legacy-ann{position:absolute;z-index:12;bottom:82px;left:20px;right:20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);padding:14px 18px;border-radius:10px;font-size:12px}.bk-legacy-ann span{flex:1;min-width:160px}.bk-legacy-ann button{color:var(--accent-soft);padding:6px}
+
+.bk-tts-volume{width:70px;max-width:16vw;accent-color:var(--accent)}
+
+.bk-ann-error{position:absolute;z-index:32;left:20px;right:20px;bottom:24px;background:var(--panel);border:1px solid var(--accent);border-radius:10px;padding:14px;font-size:12px}.bk-ann-error button{float:right;color:var(--accent-soft)}

@@ -6,6 +6,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { FilmDecisionPanel } from "./FilmDecision";
 import { askAssistant, TasteButtons, TrText, youtubeTrailer } from "./Taste";
 import { PluginSettings } from "./Web";
 import { AddonSettings } from "./Addons";
@@ -755,6 +756,8 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
           </div>
         </div>
       </section>
+
+      <FilmDecisionPanel key={it.key} film={{ title: m?.title ?? it.parsed.title, year: m?.year ?? it.parsed.year, kind: m?.kind ?? it.parsed.kind, id: m?.id, rating: m?.rating }} />
 
       {m?.cast?.length ? (
         <section className="row">
