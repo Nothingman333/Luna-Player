@@ -13,3 +13,5 @@ for (const f of fs.readdirSync(src).filter((f) => /\.tsx?$/.test(f))) {
   v(sf);
 }
 console.log(missing.size ? [...missing].join("\n") : "All texts have English.");
+// CI fails on a text without English
+process.exitCode = missing.size ? 1 : 0;

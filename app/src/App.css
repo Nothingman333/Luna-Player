@@ -776,6 +776,10 @@ button.rating:hover { transform: translateY(-1px); box-shadow: 0 0 0 1px var(--a
 .quit-btn:hover { background: #d93a3a; border-color: #d93a3a; transform: scale(1.08) !important; }
 .quit-zone { gap: 10px; }
 .quit-btn.win:hover { background: rgba(255,255,255,0.22); border-color: rgba(255,255,255,0.4); }
+/* only the very top edge wakes the buttons: the tabs under them stay clickable (the zone grows while in use) */
+.quit-zone { height: 6px; padding-top: 0; overflow: visible; }
+.quit-zone .quit-btn { margin-top: 8px; flex: none; }
+.quit-zone:hover { height: 60px; }
 
 /* Modals never grow past the window: content scrolls, the action buttons stay visible at the bottom. */
 .modal { max-height: calc(100vh - 32px); overflow-y: auto; overscroll-behavior: contain; }
@@ -1505,7 +1509,7 @@ body.ws-open .chat-scrim { background: rgba(4,4,7,.18); }
 .ws-side { background: rgba(0,0,0,.14); }
 
 /* big workspace: the title actions are real buttons */
-.ws-main .title-acts { gap: 6px; margin: 0 8px 0 10px; vertical-align: -6px; }
+:is(.ws-main, .chat-panel) .title-acts { gap: 6px; margin: 0 8px 0 10px; vertical-align: -6px; }
 .ws-main .vote-btn, .ws-main .later-btn, .ws-main .yt-btn { width: 32px; height: 28px; border-radius: 9px; font-size: 14px; opacity: 1; filter: none;
   background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); box-shadow: inset 0 1px 0 rgba(255,255,255,.1); color: #eee; transition: transform .15s, background .15s, border-color .15s; }
 .ws-main .vote-btn:hover, .ws-main .later-btn:hover, .ws-main .yt-btn:hover { transform: translateY(-1px); border-color: rgba(var(--acc-rgb), .6); background: rgba(var(--acc-rgb), .14); }
@@ -1520,22 +1524,22 @@ body.ws-open .chat-scrim { background: rgba(4,4,7,.18); }
 /* title buttons: compact (emoji) in the bubble, labelled buttons in the big workspace */
 .title-acts .ta-i, .title-acts .ta-l, .title-acts .seen-btn { display: none; }
 .title-acts .ta-e { display: inline-flex; align-items: center; }
-.ws-main .seen-box { display: none; }
-.ws-main .title-acts { display: inline-flex; flex-wrap: wrap; gap: 6px; margin: 4px 8px 4px 10px; vertical-align: middle; }
-.ws-main .title-acts .ta-e { display: none; }
-.ws-main .title-acts .ta-i, .ws-main .title-acts .ta-l { display: inline-block; }
-.ws-main .title-acts .seen-btn { display: inline-flex; }
-.ws-main .title-acts button { width: auto !important; height: 32px !important; padding: 0 12px 0 10px; gap: 6px; display: inline-flex; align-items: center;
+.seen-box { display: none; } /* the old tick box: the ⋯ menu has "Watched" (bubble and workspace alike) */
+:is(.ws-main, .chat-panel) .title-acts { display: inline-flex; flex-wrap: wrap; gap: 6px; margin: 4px 8px 4px 10px; vertical-align: middle; }
+:is(.ws-main, .chat-panel) .title-acts .ta-e { display: none; }
+:is(.ws-main, .chat-panel) .title-acts .ta-i, :is(.ws-main, .chat-panel) .title-acts .ta-l { display: inline-block; }
+:is(.ws-main, .chat-panel) .title-acts .seen-btn { display: inline-flex; }
+:is(.ws-main, .chat-panel) .title-acts button { width: auto !important; height: 32px !important; padding: 0 12px 0 10px; gap: 6px; display: inline-flex; align-items: center;
   border-radius: 10px !important; font: 600 13px Inter, system-ui, sans-serif; color: #eee; opacity: 1; filter: none; cursor: pointer;
   background: rgba(255,255,255,.08) !important; border: 1px solid rgba(255,255,255,.16) !important; box-shadow: inset 0 1px 0 rgba(255,255,255,.1);
   transition: transform .15s, background .15s, border-color .15s, color .15s; }
-.ws-main .title-acts button:hover { transform: translateY(-1px); border-color: rgba(var(--acc-rgb), .6) !important; background: rgba(var(--acc-rgb), .14) !important; }
-.ws-main .title-acts .ta-i { width: 16px; height: 16px; flex: none; }
-.ws-main .title-acts .seen-btn.on { background: rgba(70,211,105,.2) !important; border-color: #46d369 !important; color: #b9f0c8; }
-.ws-main .title-acts .vote-btn.on { background: rgba(var(--acc-rgb), .28) !important; border-color: var(--accent) !important; color: #ffd1a6; }
-.ws-main .title-acts .vote-btn.bad.on { background: rgba(220,70,70,.3) !important; border-color: #e06060 !important; color: #ffc0c0; }
-.ws-main .title-acts .later-btn.on { background: rgba(60,130,220,.3) !important; border-color: #4a8fd8 !important; color: #cfe2ff; }
-.ws-main .title-acts .yt-btn:hover { background: #cc0000 !important; border-color: #ff3b3b !important; color: #fff; }
+:is(.ws-main, .chat-panel) .title-acts button:hover { transform: translateY(-1px); border-color: rgba(var(--acc-rgb), .6) !important; background: rgba(var(--acc-rgb), .14) !important; }
+:is(.ws-main, .chat-panel) .title-acts .ta-i { width: 16px; height: 16px; flex: none; }
+:is(.ws-main, .chat-panel) .title-acts .seen-btn.on { background: rgba(70,211,105,.2) !important; border-color: #46d369 !important; color: #b9f0c8; }
+:is(.ws-main, .chat-panel) .title-acts .vote-btn.on { background: rgba(var(--acc-rgb), .28) !important; border-color: var(--accent) !important; color: #ffd1a6; }
+:is(.ws-main, .chat-panel) .title-acts .vote-btn.bad.on { background: rgba(220,70,70,.3) !important; border-color: #e06060 !important; color: #ffc0c0; }
+:is(.ws-main, .chat-panel) .title-acts .later-btn.on { background: rgba(60,130,220,.3) !important; border-color: #4a8fd8 !important; color: #cfe2ff; }
+:is(.ws-main, .chat-panel) .title-acts .yt-btn:hover { background: #cc0000 !important; border-color: #ff3b3b !important; color: #fff; }
 
 /* ---------- film page inside an assistant answer ---------- */
 .fp { width: 100%; border-radius: 18px; overflow: hidden; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1);
@@ -1590,16 +1594,16 @@ body.ws-open .chat-scrim { background: rgba(4,4,7,.18); }
 /* big workspace: one small button by each title, the choices pop up on hover */
 .title-acts .ta-more { display: none; }
 .title-acts .ta-pop { display: inline-flex; gap: 3px; }
-.ws-main .title-acts { position: relative; margin: 0 6px 0 6px; vertical-align: middle; display: inline-block; }
-.ws-main .title-acts .ta-more { display: inline-grid; place-items: center; width: 30px !important; height: 26px !important; padding: 0 !important; border-radius: 9px !important;
+:is(.ws-main, .chat-panel) .title-acts { position: relative; margin: 0 6px 0 6px; vertical-align: middle; display: inline-block; }
+:is(.ws-main, .chat-panel) .title-acts .ta-more { display: inline-grid; place-items: center; width: 30px !important; height: 26px !important; padding: 0 !important; border-radius: 9px !important;
   font-size: 13px; line-height: 1; color: #ddd; }
-.ws-main .title-acts .ta-more.set { border-color: rgba(var(--acc-rgb), .55) !important; background: rgba(var(--acc-rgb), .16) !important; }
-.ws-main .title-acts .ta-pop { position: absolute; left: -6px; top: calc(100% + 6px); z-index: 30; display: flex; flex-wrap: nowrap; gap: 6px; padding: 8px;
+:is(.ws-main, .chat-panel) .title-acts .ta-more.set { border-color: rgba(var(--acc-rgb), .55) !important; background: rgba(var(--acc-rgb), .16) !important; }
+:is(.ws-main, .chat-panel) .title-acts .ta-pop { position: absolute; left: -6px; top: calc(100% + 6px); z-index: 30; display: flex; flex-wrap: nowrap; gap: 6px; padding: 8px;
   border-radius: 14px; background: rgba(24,24,30,.96); border: 1px solid rgba(255,255,255,.14); box-shadow: 0 16px 40px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.08);
   opacity: 0; visibility: hidden; transform: translateY(-4px); transition: opacity .15s, transform .15s, visibility .15s; white-space: nowrap; }
 /* a bridge so the pointer can travel from the button to the menu */
-.ws-main .title-acts .ta-pop::after { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 10px; }
-.ws-main .title-acts:hover .ta-pop, .ws-main b.film-link:hover + .title-acts .ta-pop, .ws-main .title-acts:focus-within .ta-pop { opacity: 1; visibility: visible; transform: none; }
+:is(.ws-main, .chat-panel) .title-acts .ta-pop::after { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 10px; }
+:is(.ws-main, .chat-panel) .title-acts:hover .ta-pop, :is(.ws-main, .chat-panel) b.film-link:hover + .title-acts .ta-pop, :is(.ws-main, .chat-panel) .title-acts:focus-within .ta-pop { opacity: 1; visibility: visible; transform: none; }
 .later-grid { padding: 6px 0 10px; grid-template-columns: repeat(auto-fill, minmax(150px, 190px)); }
 
 /* same-name films: pick one */
@@ -2813,3 +2817,13 @@ body.mine-open .chat-scrim.mine-layer { background: rgba(4,4,7,.22); backdrop-fi
   background: rgba(var(--acc-rgb), .1); border: 1px solid rgba(var(--acc-rgb), .3); }
 .lb-progress .grow { min-width: 0; }
 .hide-hint { align-self: center; max-width: 340px; }
+/* the header folds its labels only while the tabs don't fit (Header sets fold-1…3 by measuring) */
+.app-header.fold-1 .hdr-btn .lbl { display: none; }
+.app-header.fold-1 .hdr-btn { width: 42px; padding: 0; justify-content: center; }
+.app-header.fold-2 .mode-btn:not(.on) .lbl { display: none; }
+.app-header.fold-3 .hdr-open .lbl { display: none; }
+.app-header.fold-3 .hdr-open { width: 42px; padding: 0; justify-content: center; }
+/* the small bubble is narrow: its title menu wraps onto two rows and stays inside the panel (Taste: fitPop) */
+.chat-panel .title-acts .ta-pop { flex-wrap: wrap; width: max-content; max-width: 300px; white-space: normal; }
+.chat-panel .title-acts .ta-pop button { white-space: nowrap; }
+.chat-panel .chat-body { overflow-x: hidden; } /* an open menu never scrolls the answer sideways */

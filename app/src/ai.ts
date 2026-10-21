@@ -54,7 +54,14 @@ function schema(s: any): any {
   if (out.type === "object" && !out.properties) out.properties = {};
   return out;
 }
-const declarations = (body: any): any[] => (body.tools ?? []).flatMap((t: any) => t.functionDeclarations ?? []);
+/** The tools offered. When Luna requires one of a few ("call show_film"), only those are offered: OpenAI's
+ *  "required" and Claude's "any" would otherwise let the model pick any of the forty. */
+const declarations = (body: any): any[] => {
+  const all = (body.tools ?? []).flatMap((t: any) => t.functionDeclarations ?? []);
+  const fc = body.toolConfig?.functionCallingConfig;
+  const only: string[] | undefined = fc?.mode === "ANY" ? fc.allowedFunctionNames : undefined;
+  return only?.length ? all.filter((d: any) => only.includes(d.name)) : all;
+};
 const systemText = (body: any): string => (body.systemInstruction?.parts ?? []).map((p: any) => p.text ?? "").join("\n");
 const wantsJson = (body: any) => body.generationConfig?.responseMimeType === "application/json";
 

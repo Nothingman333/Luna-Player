@@ -1857,9 +1857,10 @@ function profile(items: Item[], recent: Recent[]) {
     .map(([who, a]) => `${who}: ${a.liked}/${a.rated} beğendi (%${Math.round((a.liked / a.rated) * 100)} uyum), ${a.total} öneri`);
   return [
     sec("Kullanıcı hakkında notların (bunlara uy)", loadNotes()),
+    sec("Letterboxd (bu bilgiler Luna'ya aktarıldı ve aşağıdaki bölümlerde; güncelini görmek için read_link ile bu adresleri oku)", letterboxdLinks()),
     sec("Zevk defteri: beğendikleri", diary.filter((e) => e.vote === "like" || (e.rating ?? 0) >= 7).map(lbl)),
     sec("Zevk defteri: beğenmedikleri", diary.filter((e) => e.vote === "dislike" || (e.rating && e.rating <= 4)).map(lbl)),
-    sec("Zevk defteri: izledikleri (tekrar önerme)", diary.filter((e) => e.watched).map((e) => label(e.title, e.year))),
+    sec("Zevk defteri: izledikleri (tekrar önerme; puanı ve notu olanlar yanında)", diary.filter((e) => e.watched).map(lbl)),
     sec("Arkadaşlarla zevk uyumu", aff),
     sec("İçerik hassasiyeti: uyarısına rağmen 'benim için güvenli' dediği filmler (bu konular onu rahatsız etmiyor)",
       Object.values(loadSafe()).map((m) => `${label(m.title, m.year)} — ${cwLabels(m.cats).join(", ")}`)),
@@ -1877,6 +1878,21 @@ function profile(items: Item[], recent: Recent[]) {
     sec("Önerilip ilgilenmediği", recs.filter((r) => r.status === "dismissed").map((r) => `${r.title} (${r.from})`)),
     sec("Kütüphanesindeki (diskte, hemen izlenebilir; ilk 400)", lib),
   ].join("\n\n");
+}
+
+/** The Letterboxd accounts Luna reads: the user's own and each friend's linked lists, with their addresses. */
+function letterboxdLinks(): string[] {
+  const out: string[] = [];
+  if (myLetterboxd()) out.push(`Kullanıcının KENDİ profili: ${myLetterboxd()} — izledikleri, puanları ve beğenileri zevk defterine, izleme listesi İzleyeceklerim'e aktarıldı`);
+  const all = loadPlaylists();
+  const done = new Set<string>();
+  for (const p of all) {
+    if (!p.source?.url || done.has(p.source.url + (p.source.minStars ?? ""))) continue;
+    done.add(p.source.url + (p.source.minStars ?? ""));
+    const owner = p.parent ? all.find((x) => x.id === p.parent)?.name : undefined;
+    out.push(`${owner ? `${owner} (arkadaşı) › ` : ""}${p.name}: ${p.source.url}${p.source.minStars ? ` (${p.source.minStars}★ ve üstü)` : ""} — ${p.items.length} film, Listeleri'nde`);
+  }
+  return out;
 }
 
 /** What the user has in the music part (the assistant's data when it's open there). */
@@ -1927,6 +1943,8 @@ async function booksProfile(): Promise<string> {
   ].join("\n\n");
 }
 const SYSTEM_PARTS = `
+# Elindekiler (önce bunlara bak)
+Aşağıdaki "Kullanıcı profili" Luna'nın kayıtlarıdır, tahmin değil: kullanıcı hakkındaki notlar, zevk defteri (Letterboxd'dan aktarılan izledikleri, puanları, beğenileri dahil), listeleri (arkadaşların Letterboxd'dan dolan listeleri dahil), önerileri, geçmişi, kütüphanesi. Her cevaptan önce ilgili bölümlerine bak; notlara her zaman uy. "Letterboxd'uma/Ali'nin Letterboxd'una bak", "izlediklerim", "notlarım" gibi isteklerde önce profildeki bilgiyi kullan; güncelini ya da tamamını görmek için Letterboxd bölümündeki adresi read_link ile oku, bir listenin bütün filmleri için list_playlists, öneriler için list_recommendations çağır. "Letterboxd'a erişemiyorum", "notlarını göremiyorum" deme: bu araçlarla erişebiliyorsun.
 # Luna'nın bölümleri
 Luna'nın üç bölümü var: Film, Müzik, Kitap. "X var mı / bizde var mı" sorulursa önce bulunduğun bölümde ara (search_books, search_music ya da search_film_library); araç sonucunda diğer bölümlerde bulunanlar da gelir, onları da söyle (ör. "Dune'un kitabı kitaplığında yok ama filmi film kütüphanende var"). Bir bölümdeyken diğer bölümlerden bir şey istenirse ilgili aracı kullan: film/dizi açmak için open_from_library, müzik/radyo/podcast için play_music, play_radio, play_podcast, kitap için open_book, find_free_books, get_free_book, play_audiobook. Araç bulamazsa uydurma; olduğunu söyle.
 # Koleksiyonlar ve ortak geçmiş
@@ -3907,7 +3925,8 @@ export function ChatPanel({ items, recent, onClose, viewing, watching, onPlay, o
     setConvId((m.length && store.get(thread + "@id")) || Date.now().toString(36) + Math.random().toString(36).slice(2, 5));
   }, [thread]);
   const [input, setInput] = useState("");
-  const [big, setBigState] = useState(() => store.get("chatBig") === "1");
+  // the big workspace unless the user made it small (the bubble is the narrow version of the same thing)
+  const [big, setBigState] = useState(() => store.get("chatBig") !== "0");
   const setBig = (v: boolean) => { setBigState(v); store.set("chatBig", v ? "1" : "0"); };
   // the stored id belongs to the conversation that was restored; a fresh start gets a new one (or it would overwrite the old one in the history)
   const [convId, setConvId] = useState(() => (!viewing && msgs.length && store.get(thread + "@id")) || Date.now().toString(36) + Math.random().toString(36).slice(2, 5));
@@ -3960,7 +3979,7 @@ export function ChatPanel({ items, recent, onClose, viewing, watching, onPlay, o
     return () => document.body.classList.remove("ws-open");
   }, [big]);
   useEffect(() => {
-    const k = (e: KeyboardEvent) => { if (e.key === "Escape") { if (zoom) setZoom(null); else if (big) setBig(false); } };
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape") { if (zoom) setZoom(null); else if (big) setBigState(false); } }; // Escape shrinks it only for now: it opens big again next time
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
   }, [big, zoom]);
@@ -3970,7 +3989,7 @@ export function ChatPanel({ items, recent, onClose, viewing, watching, onPlay, o
   const fitPop = (e: React.MouseEvent) => {
     const acts = (e.target as HTMLElement).closest(".title-acts") ?? (e.target as HTMLElement).closest("b.film-link")?.nextElementSibling;
     const pop = acts?.querySelector<HTMLElement>(".ta-pop");
-    const box = acts?.closest(".ws-main, .chat")?.getBoundingClientRect();
+    const box = acts?.closest(".ws-main, .chat-panel")?.getBoundingClientRect();
     if (!acts || !pop || !box) return;
     // slide it just enough to stay inside the panel
     const left = acts.getBoundingClientRect().left;
@@ -4067,7 +4086,8 @@ export function ChatPanel({ items, recent, onClose, viewing, watching, onPlay, o
       // Trivia / behind-the-scenes questions are answered from a live Google search, with sources.
       // (not when something is to be made: a collection or a list needs Luna's tools, not a web search)
       // (typos too: "koleksion", "kolleksiyon"; and any "yap / ekle / topla / indir…" request)
-      const ground = TRIVIA.test(text) && !MAKES.test(text);
+      // (only Gemini has Google search: OpenAI, Claude and the rest answer these with Luna's tools at hand)
+      const ground = TRIVIA.test(text) && !MAKES.test(text) && aiProvider() === "gemini";
       const wantsPick = /öner|ne izle|izlesem|uygun|hangisi|seç|recommend|suggest|what should i watch|pick/i.test(text);
       // a message that names one of the open things ("çalan şarkı…") is about that one; the chooser follows it
       const hint = focuses.length > 1 ? focusHint(text) : null;
@@ -4108,7 +4128,7 @@ export function ChatPanel({ items, recent, onClose, viewing, watching, onPlay, o
             : "İstenen şeyi açan aracı çağır: kitap için open_book (kitaplıkta yoksa find_free_books), sesli kitap için play_audiobook; film ya da müzik isteniyorsa open_from_library / play_music."],
         [/\bkim(ler)?\b.{0,30}(oyn|rol|yonet|cek|yapt|yapm|cizd|yazd)|(yapt|yapm|cekt|cekm|yonett)\w* (kim|kimdir)|oyuncu|kadro|basrol|yonetmen|senarist|\bcast\b|\bwho (stars|starred|acted|directed|plays|played|is in|was in|made|wrote)\b|\bactors?\b|\bdirector\b|\bstarring\b/, ["show_film"], "show_film aracını çağır (filmin sayfası: fotoğraflı kadro, yönetmen, hikaye)."],
         [/hakkinda|anlat|\bkonusu\b|\bhikayesi\b|nasil bir (film|dizi)|ne anlatiyor|neyi anlatiyor|\bbilgi|incele|\bnedir\b|nasil bir sey|tell me about|what'?s .{0,40}\babout\b|\bplot\b|synopsis|storyline/, ["show_film"], "show_film aracını çağır (filmin sayfası), sonra sorulanı cevapla."],
-        [/nere(de|den)?\s*(izle|bul|seyret)|nerden izle|hangi platform|izleyebilir|\blink|baglanti|imdb|letterboxd|vikipedi|wikipedia|where (can i |to |do i )?(watch|stream|find)|streaming|which platform|\blinks?\b/, ["film_links"], "film_links aracını çağır; bilmediğin platformu uydurma."],
+        [/nere(de|den)?\s*(izle|bul|seyret)|nerden izle|hangi platform|izleyebilir|\blink|baglanti|imdb|vikipedi|wikipedia|where (can i |to |do i )?(watch|stream|find)|streaming|which platform|\blinks?\b/, ["film_links"], "film_links aracını çağır; bilmediğin platformu uydurma."],
         [/gorsel|fotograf|foto\b|resim|afis|poster|sahne|kare(ler)?|pictures?|photos?|images?|stills?|scenes?|screenshots?/, ["show_images", "show_person"], "show_images (kişi için show_person) aracını çağır."],
       ];
       // "zevkimi anlat", "listeyi anlat", "5 film öner" are not about one film
@@ -4117,7 +4137,9 @@ export function ChatPanel({ items, recent, onClose, viewing, watching, onPlay, o
       const notOneFilm = /zevk|liste|oneri|oner\b|kutuphan|\bbeni\b|\bbenim\b|arkadas|filmler|taste|\blists?\b|recommend|suggest|library|\bme\b|\bmy\b|friend|films|movies|shows/.test(tn);
       force.unshift([/\bvar mi\b|\bbizde\b|kutuphanemde|arsivimde|kitapligimda|do i (have|own)|is there .* in my|in my library/, ["search_books", "search_music", "search_film_library"],
         mode === "books" ? "Önce search_books ile kitaplıkta ara." : mode === "music" ? "Önce search_music ile arşivde ara." : "Önce search_film_library ile film kütüphanesinde ara."]);
-      const want = ground ? undefined : force.find(([re, tools]) => re.test(tn) && (mode === "film" || tools.includes("open_book") || tools.includes("search_books")) && !(tools[0] === "show_film" && opinion) && !(tools[0] === "show_film" && notOneFilm && !/oyn|kadro|yonetmen|\bwho\b|\bcast\b|director/.test(tn)));
+      const want = ground ? undefined : force.find(([re, tools]) => re.test(tn) && (mode === "film" || tools.includes("open_book") || tools.includes("search_books")) && !(tools[0] === "show_film" && opinion)
+        // a Letterboxd profile, a friend's list, a link: that is read_link / list_playlists, not one film's links
+        && !(tools[0] === "film_links" && (link || /letterboxd|profil|liste|\blist|izledi|watched|arkadas|friend/.test(tn))) && !(tools[0] === "show_film" && notOneFilm && !/oyn|kadro|yonetmen|\bwho\b|\bcast\b|director/.test(tn)));
       if (want) {
         body.contents[body.contents.length - 1].parts[0].text += `
 
@@ -4139,7 +4161,7 @@ export function ChatPanel({ items, recent, onClose, viewing, watching, onPlay, o
         last.text += `\n\n[Bu konuda kullanıcının ZATEN bir koleksiyonu var: “${have.name}” (${collectionSummary(have)}). make_collection ÇAĞIRMA. Kısaca bunu söyle ve “İstersen yeni çıkanlar ve eksikler için internete tekrar bakayım” diye sor.]`;
       } else if (lookAgain || (!ground && COLLECT.test(text))) {
         step("search", tt("İnternette araştırıyorum"));
-        const facts = await researchCollection(key, [...next.slice(-6), ...(have ? [{ role: "user", text: `(Konu: “${have.name}” koleksiyonu)` } as Msg] : [])]).catch(() => "");
+        const facts = aiProvider() !== "gemini" ? "" : await researchCollection(key, [...next.slice(-6), ...(have ? [{ role: "user", text: `(Konu: “${have.name}” koleksiyonu)` } as Msg] : [])]).catch(() => "");
         if (facts) last.text += `\n\n[İnternet araştırması (Google, bugün yapıldı). Koleksiyonu hafızana göre DEĞİL buna göre yap; kullanıcının sınırlarına ("yeni", "sadece filmler" gibi) yine uy:\n${facts}]`;
         if (have) last.text += `\n\n[Kullanıcı “${have.name}” koleksiyonu için tekrar bakılmasını istedi. make_collection'ı AYNI adla (“${have.name}”) çağır ve SADECE koleksiyonda olmayan yeni ya da eksik şeyleri ver. Koleksiyonda şunlar zaten var: ${have.items.map((x) => x.title).join("; ")}. Yeni bir şey yoksa make_collection çağırma, koleksiyonun güncel olduğunu söyle.]`;
         step("list", tt("Listeyi çıkarıyorum"));

@@ -594,13 +594,21 @@ export default function App() {
   const [isFull, setIsFull] = useState(false);
   useEffect(() => {
     const w = getCurrentWindow();
+    // the window stays above the taskbar, and a narrower screen gets the same layout, zoomed out (Rust: fit_window)
+    let fitT = 0;
+    const fit = () => { clearTimeout(fitT); fitT = window.setTimeout(() => invoke("fit_window", { fitZoom: store.get("uiFit") !== "0" }).catch(() => {}), 250); };
     const sync = async () => {
       if (await w.isMaximized()) { await w.unmaximize(); await w.setFullscreen(true); }
       setIsFull(await w.isFullscreen());
+      fit();
     };
+    // Luna opens full screen once on a machine (afterwards the window keeps how it was left)
+    if (!store.get("fullOnce")) { store.set("fullOnce", "1"); w.setFullscreen(true).catch(() => {}); }
     sync();
     const un = w.onResized(() => { sync(); });
-    return () => { un.then((f) => f()); };
+    const unMove = w.onMoved(() => fit());
+    window.addEventListener("luna-fit", fit);
+    return () => { un.then((f) => f()); unMove.then((f) => f()); window.removeEventListener("luna-fit", fit); clearTimeout(fitT); };
   }, []);
   // While a video plays with the Upscaler on: subtitles move to the capture-proof window and
   // Lossless Scaling scales Luna. Leaving the player undoes both.

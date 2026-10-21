@@ -1,0 +1,66 @@
+name: CI
+
+# Every push and pull request is built and tested: the interface (TypeScript, the Vite build, every
+# text has English) and the Rust side (compiles, unit tests). A release only goes out when this is green.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  interface:
+    name: Interface (tsc, build, texts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install
+        working-directory: app
+        run: npm ci
+      - name: Type check and build
+        working-directory: app
+        run: npm run build
+      - name: Every text has English
+        run: node app/scripts/i18n-check.cjs
+
+  rust:
+    name: Rust (build, tests)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      # the Tauri build checks that the bundled files exist (mpv, yt-dlp are not in git)
+      - name: Fetch mpv and yt-dlp
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/fetch-mpv.ps1
+      # the Rust side embeds the built interface
+      - name: Build the interface
+        working-directory: app
+        run: |
+          npm ci
+          npm run build
+      - name: Unit tests
+        working-directory: app/src-tauri
+        run: cargo test --lib

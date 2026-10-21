@@ -1,3 +1,16 @@
+## 1.4.3CC — 2026-10-21 (beta, not built yet: tried with Luna Dev.cmd)
+
+- **Same look on every screen:** on screens narrower than 1920 points (e.g. Windows scaling 125% or 150%) Luna zooms out a little, so text, spacing and the top bar sit as on a 1920-wide screen (Settings › "Fit the layout to the screen"). The top bar's labels fold away step by step only when the tabs don't fit.
+- **Above the taskbar:** a window that was restored taller than the screen is shrunk and moved back into the space above the taskbar (the assistant's input was hidden under it). Luna opens full screen the first time on a machine.
+- **Full screen:** the ⛶ / ✕ buttons wake only at the very top edge, so they no longer cover the "Recommendations" tab.
+- **Assistant:** opens as the big workspace (Escape shrinks it only for the moment); the small bubble has the same ⋯ menu by each title (Watched, Liked, Disliked, Watch later, Trailer) instead of the old tick box.
+- **Assistant with OpenAI / Claude / base URL:** a message mentioning Letterboxd is no longer pushed to the "film links" tool; the assistant is told the addresses of your own and your friends' Letterboxd (it can read them again with read_link) and what data it has (notes, diary, lists); trivia questions keep Luna's tools (no Google search outside Gemini); a required tool is the only one offered.
+
+## 1.4.2CC — 2026-10-21 (beta)
+
+- A clean rebuild of 1.4.1's code (every build file made anew); checked that the interface inside the program is byte for byte the one Luna Dev runs.
+- GitHub: every push and pull request is built and tested (CI), and each release is checked live (downloads, checksums, the updater's latest.json); the services Luna uses are checked daily.
+
 ## 1.4.1CC — 2026-10-21 (beta, not built yet: tried with Luna Dev.cmd)
 
 - **Letterboxd › all their films:** a friend's whole "Watched" list comes in as its own tab (before, only the films they rated 4★+ did); friends connected earlier get it on "⟳ Update". A person with only Letterboxd lists opens on them, not on an empty "Recommendations" tab (that tab only shows when someone typed a recommendation for them).

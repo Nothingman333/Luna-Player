@@ -454,6 +454,8 @@ export const EN: Record<string, string> = {
   "Oynatma hızı": "Playback speed",
   "Oynatıcı": "Player",
   "Oynatınca tam ekran başlat": "Start in full screen when playing",
+  "Görünümü ekrana uydur": "Fit the layout to the screen",
+  "Küçük ya da büyütülmüş ekranlarda (Windows ölçeği %125, %150…) Luna biraz küçülür; yazılar ve boşluklar 1920 genişliğindeki ekrandaki gibi yerleşir, üst çubuk sığar.": "On small or scaled-up screens (Windows scaling 125%, 150%…) Luna shrinks a little: text and spacing sit as on a 1920-wide screen, and the top bar fits.",
   "Oyuncu ve yönetmen hakkında": "About the cast and director",
   "Oyuncular": "Cast",
   "Parlaklık": "Brightness",

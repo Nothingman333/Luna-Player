@@ -2,7 +2,7 @@ import { defaultSubLangs, lang, setLang, tt, DEC } from "./i18n";
 import { BUILD_AGENT, BUILD_AGENT_NAMES, VERSION_LABEL } from "./version";
 import { UpdateSettings } from "./Update";
 import { STACK } from "./Mine";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -171,8 +171,27 @@ export function Header({ mode, setMode, tabs: modeTabs, view, setView, query, se
     return () => { n.removeEventListener("scroll", look); n.removeEventListener("wheel", wheel); ro.disconnect(); };
   }, [mode]);
   useEffect(() => { nav.current?.querySelector<HTMLElement>(".tab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" }); }, [view, mode]);
+  // The labels fold away one step at a time only while the tabs don't fit (any screen width, any
+  // language): the buttons' words first, then the other parts' names, then "Dosya aç"'s.
+  const head = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const h = head.current, n = nav.current;
+    if (!h || !n) return;
+    const FOLDS = ["fold-1", "fold-2", "fold-3"];
+    const fit = () => {
+      h.classList.remove(...FOLDS);
+      for (const f of FOLDS) {
+        if (n.scrollWidth <= n.clientWidth + 1) break;
+        h.classList.add(f);
+      }
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(h);
+    return () => ro.disconnect();
+  }, [mode, tabs.length, downloading > 0, scanning]);
   return (
-    <header className="app-header">
+    <header className="app-header" ref={head}>
       <div className="brand"><LunaMark /></div>
       <ModeSwitch mode={mode} setMode={setMode} />
       <nav className={"tabs" + edges} ref={nav}>
@@ -1105,6 +1124,13 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                       <input type="checkbox" checked={autoFull} onChange={(e) => setAutoFull(e.target.checked)} />
                       {tt("Oynatınca tam ekran başlat")}
                     </label>
+                  </div>
+                  <div className="set-card">
+                    <label className="look-check">
+                      <input type="checkbox" defaultChecked={store.get("uiFit") !== "0"} onChange={(e) => { store.set("uiFit", e.target.checked ? "1" : "0"); window.dispatchEvent(new Event("luna-fit")); }} />
+                      {tt("Görünümü ekrana uydur")}
+                    </label>
+                    <div className="set-hint">{tt("Küçük ya da büyütülmüş ekranlarda (Windows ölçeği %125, %150…) Luna biraz küçülür; yazılar ve boşluklar 1920 genişliğindeki ekrandaki gibi yerleşir, üst çubuk sığar.")}</div>
                   </div>
                   <div className="set-card">
                     <label className="look-check">

@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.4.1"
+version = "1.4.3"
 description = "Luna Player"
 authors = ["you"]
 edition = "2024"

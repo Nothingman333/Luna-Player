@@ -25,6 +25,7 @@ mod books;
 mod mpv;
 mod music;
 mod pgs;
+mod screen;
 mod secrets;
 mod subs;
 mod torrent;
@@ -1046,6 +1047,26 @@ async fn rename_video(path: String, name: String) -> Result<String, String> {
     blocking(move || files::rename(&path, &name)).await
 }
 
+/// Keeps the window inside the space the taskbar leaves (a restored window can be taller than the
+/// screen) and zooms the page out on screens narrower than Luna's layout (off: `fit_zoom` false).
+#[tauri::command]
+fn fit_window(window: tauri::WebviewWindow, fit_zoom: bool) -> Result<f64, String> {
+    let m = window.current_monitor().map_err(|e| e.to_string())?.ok_or("no screen")?;
+    let zoom = if fit_zoom { screen::zoom_for(m.size().width as f64 / m.scale_factor()) } else { 1.0 };
+    window.set_zoom(zoom).map_err(|e| e.to_string())?;
+    if !window.is_fullscreen().unwrap_or(false) && !window.is_maximized().unwrap_or(false) && !window.is_minimized().unwrap_or(false) {
+        let a = m.work_area();
+        if let (Ok(p), Ok(sz)) = (window.outer_position(), window.outer_size()) {
+            let area = (a.position.x, a.position.y, a.size.width as i32, a.size.height as i32);
+            if let Some((x, y, w, h)) = screen::inside((p.x, p.y, sz.width as i32, sz.height as i32), area) {
+                let _ = window.set_size(tauri::PhysicalSize::new(w as u32, h as u32));
+                let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+            }
+        }
+    }
+    Ok(zoom)
+}
+
 #[tauri::command]
 async fn delete_file(path: String) -> Result<u32, String> {
     let _ = tauri::async_runtime::spawn_blocking(preview::release).await;
@@ -1162,6 +1183,7 @@ pub fn run() {
             llm_post,
             llm_models,
             rename_video,
+            fit_window,
             backup_write,
             backup_read,
             clipboard_offer

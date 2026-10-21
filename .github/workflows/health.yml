@@ -1,0 +1,81 @@
+name: Health
+
+# Live checks of what users depend on:
+# - every published release: its files download, match SHA256SUMS, and latest.json points at this
+#   release's installer with the uploaded signature (what Luna's updater reads);
+# - every day: the services Luna talks to still answer (GitHub releases API, TMDB, Letterboxd,
+#   OpenSubtitles, Gutenberg, LibriVox, the AI providers). A failure shows as a red run.
+on:
+  release:
+    types: [published]
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release to check (empty: the newest, betas included)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Release files
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - name: Download the release
+        run: |
+          if [ -z "$TAG" ]; then TAG=$(gh release list -R "$GITHUB_REPOSITORY" --limit 1 --json tagName --jq '.[0].tagName'); fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          mkdir rel && cd rel
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY"
+          ls -la
+      - name: Checksums match
+        working-directory: rel
+        run: |
+          sums=$(ls SHA256SUMS*.txt | head -1)
+          test -n "$sums" || { echo "::error::no SHA256SUMS file"; exit 1; }
+          tr -d '\r' < "$sums" | sha256sum -c -   # files written on Windows end lines with CRLF
+      - name: latest.json points at this release
+        working-directory: rel
+        run: |
+          if [ ! -f latest.json ]; then echo "::warning::no latest.json (the updater skips this release)"; exit 0; fi
+          url=$(jq -r '.platforms["windows-x86_64"].url' latest.json)
+          sig=$(jq -r '.platforms["windows-x86_64"].signature' latest.json)
+          name=$(basename "$url")
+          echo "$url"
+          case "$url" in */download/$TAG/*) ;; *) echo "::error::latest.json points at another release: $url"; exit 1;; esac
+          test -f "$name" || { echo "::error::$name is not in the release"; exit 1; }
+          test "$sig" = "$(tr -d '\r\n' < "$name.sig")" || { echo "::error::signature in latest.json differs from $name.sig"; exit 1; }
+          code=$(curl -sL -o /dev/null -w '%{http_code}' "$url"); test "$code" = 200 || { echo "::error::$url answers $code"; exit 1; }
+          echo "version $(jq -r .version latest.json) OK"
+
+  services:
+    name: Services Luna uses
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check
+        shell: bash
+        run: |
+          fail=0
+          check() { # name, url, accepted codes
+            code=$(curl -s -o /dev/null -w '%{http_code}' -m 25 -A "Mozilla/5.0 Luna-Player-health" "$2")
+            if echo " $3 " | grep -q " $code "; then echo "OK   $1 ($code)"; else echo "::error::$1 answered $code ($2)"; fail=1; fi
+          }
+          check "GitHub releases API (updater)" "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=5" "200"
+          check "TMDB API"            "https://api.themoviedb.org/3/configuration" "401 200"
+          check "TMDB images"         "https://image.tmdb.org/t/p/w92/6izwz7rsy95ARzTR3poZ8H6c5pp.jpg" "200"
+          check "Gemini API"          "https://generativelanguage.googleapis.com/v1beta/models" "400 401 403 200"
+          check "OpenAI API"          "https://api.openai.com/v1/models" "401 200"
+          check "Anthropic API"       "https://api.anthropic.com/v1/models" "401 200 405"
+          check "OpenSubtitles API"   "https://api.opensubtitles.com/api/v1/infos/formats" "401 403 200"
+          check "Letterboxd"          "https://letterboxd.com/dave/films/" "200 403"
+          check "Project Gutenberg"   "https://gutendex.com/books/?search=dune" "200"
+          check "LibriVox"            "https://librivox.org/api/feed/audiobooks?limit=1&format=json" "200"
+          check "Internet Archive"    "https://archive.org/advancedsearch.php?q=collection:librivoxaudio&rows=1&output=json" "200"
+          exit $fail
