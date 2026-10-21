@@ -121,6 +121,8 @@ export function MinePage({ tab, setTab, items, play, onClose, openId }: { tab: M
   useEffect(() => { if (openId) setOpen(openId); }, [openId]);
   const [books, setBooks] = useState<Book[]>([]);
   useEffect(() => { loadBookLibrary().then(setBooks).catch(() => {}); }, []);
+  // the page behind is blurred directly, like the assistant's workspace (the glass alone lets the posters through)
+  useEffect(() => { document.body.classList.add("mine-open"); return () => document.body.classList.remove("mine-open"); }, []);
   useEffect(() => {
     // (not while the assistant is open over this page: Esc is its)
     const k = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector(".chat-panel, .chat-ws-wrap:not(.mine-layer)")) { e.stopPropagation(); open ? setOpen(null) : onClose(); } };

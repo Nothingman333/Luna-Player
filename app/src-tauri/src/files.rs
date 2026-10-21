@@ -231,28 +231,74 @@ fn is_own_sub(name: &str, stem: &str) -> bool {
     })
 }
 
+const SUB_EXT: &[&str] = &["srt", "ass", "ssa", "vtt", "sub", "idx"];
+
+/// The subtitle files that belong to the video `p` in its folder ("Film.srt", "Film.tr.srt"…).
+fn own_subs(p: &Path) -> Vec<PathBuf> {
+    let (Some(dir), Some(stem)) = (p.parent(), p.file_stem().and_then(|s| s.to_str())) else { return vec![] };
+    let stem = stem.to_lowercase();
+    let Ok(rd) = std::fs::read_dir(dir) else { return vec![] };
+    rd.flatten()
+        .filter(|e| {
+            let n = e.file_name().to_string_lossy().to_lowercase();
+            SUB_EXT.iter().any(|x| n.ends_with(&format!(".{x}"))) && is_own_sub(&n, &stem)
+        })
+        .map(|e| e.path())
+        .collect()
+}
+
+/// How many subtitle files sit next to each video (0 for links and missing files).
+pub fn subs_beside(paths: &[String]) -> Vec<u32> {
+    paths.iter().map(|f| {
+        let p = Path::new(f);
+        if f.contains("://") || !p.is_file() { 0 } else { own_subs(p).len() as u32 }
+    }).collect()
+}
+
+/// Gives the video a new name in the same folder (the extension stays); its own subtitle files
+/// are renamed with it so they keep matching. Returns the new path.
+pub fn rename(file: &str, new_name: &str) -> Result<String, String> {
+    let p = Path::new(file);
+    let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("");
+    let mut stem = new_name.trim().to_string();
+    // "New name.mkv" typed with the same extension: not doubled
+    if !ext.is_empty() && stem.to_lowercase().ends_with(&format!(".{}", ext.to_lowercase())) {
+        stem.truncate(stem.len() - ext.len() - 1);
+    }
+    let stem = stem.trim().trim_end_matches('.').to_string();
+    if stem.is_empty() || stem.chars().any(|c| r#"\/:*?"<>|"#.contains(c) || c.is_control()) {
+        return Err(tr!("Bu ad kullanılamaz (şunlar olmamalı: \\ / : * ? \" < > |)", "That name can't be used (none of these: \\ / : * ? \" < > |)"));
+    }
+    let old_stem = p.file_stem().and_then(|s| s.to_str()).ok_or_else(|| tr!("Dosya bulunamadı", "File not found"))?;
+    let dir = p.parent().ok_or_else(|| tr!("Dosya bulunamadı", "File not found"))?;
+    if !p.is_file() {
+        return Err(tr!("Dosya bulunamadı", "File not found"));
+    }
+    let to = dir.join(if ext.is_empty() { stem.clone() } else { format!("{stem}.{ext}") });
+    if to == p {
+        return Ok(file.to_string());
+    }
+    // only the case changes ("alien" → "Alien"): Windows sees the same file, that's fine
+    if to.exists() && to.to_string_lossy().to_lowercase() != p.to_string_lossy().to_lowercase() {
+        return Err(tr!("Bu klasörde aynı adda bir dosya var", "A file with that name is already in this folder"));
+    }
+    let subs = own_subs(p);
+    std::fs::rename(p, &to).map_err(|e| e.to_string())?;
+    for s in subs {
+        let n = s.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let tail = &n[old_stem.len().min(n.len())..];
+        let _ = std::fs::rename(&s, dir.join(format!("{stem}{tail}")));
+    }
+    Ok(to.to_string_lossy().to_string())
+}
+
 /// Moves the file to the Recycle Bin; a video takes its matching subtitle files along
 /// (a book or a song never does: "Film.pdf" must not take "Film.tr.srt" of "Film.mkv").
 pub fn delete(file: &str) -> Result<u32, String> {
     let p = Path::new(file);
     let mut items = vec![p.to_path_buf()];
-    if !is_video(p) {
-        trash::delete_all(&items).map_err(|e| e.to_string())?;
-        return Ok(1);
-    }
-    if let (Some(dir), Some(stem)) = (p.parent(), p.file_stem().and_then(|s| s.to_str())) {
-        if let Ok(rd) = std::fs::read_dir(dir) {
-            for e in rd.flatten() {
-                let q = e.path();
-                let n = e.file_name().to_string_lossy().to_lowercase();
-                let is_sub = ["srt", "ass", "ssa", "vtt", "sub", "idx"]
-                    .iter()
-                    .any(|x| n.ends_with(&format!(".{x}")));
-                if is_sub && is_own_sub(&n, &stem.to_lowercase()) {
-                    items.push(q);
-                }
-            }
-        }
+    if is_video(p) {
+        items.extend(own_subs(p));
     }
     let n = items.len() as u32;
     trash::delete_all(&items).map_err(|e| e.to_string())?;
@@ -275,6 +321,29 @@ mod tests {
 
 #[cfg(test)]
 mod probe_tests {
+    use super::{rename, subs_beside};
+
+    #[test]
+    fn rename_takes_subtitles_along() {
+        let d = std::env::temp_dir().join(format!("luna-rename-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        for n in ["Alien.1979.mkv", "Alien.1979.srt", "Alien.1979.tr.srt", "Aliens.srt", "Other.mkv"] {
+            std::fs::write(d.join(n), b"x").unwrap();
+        }
+        let f = d.join("Alien.1979.mkv").to_string_lossy().to_string();
+        assert_eq!(subs_beside(&[f.clone()]), vec![2]);
+        assert!(rename(&f, "Bad/Name").is_err());
+        assert!(rename(&f, "Other").is_err());
+        let to = rename(&f, "Alien (1979).mkv").unwrap();
+        assert!(to.ends_with("Alien (1979).mkv"));
+        for n in ["Alien (1979).mkv", "Alien (1979).srt", "Alien (1979).tr.srt", "Aliens.srt"] {
+            assert!(d.join(n).exists(), "{n}");
+        }
+        assert!(!d.join("Alien.1979.mkv").exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     /// mpv reads a real file's streams; an address that never answers is cut off by the time limit.
     #[test]
     #[ignore]

@@ -15,8 +15,9 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { fmtTime } from "./mpv";
 import { SubAppearance } from "./PlayerMenu";
 import { BackupSettings } from "./Backup";
+import { AI_PROVIDERS, AiProvider, aiModels, aiProvider } from "./ai";
 import {
-  Episode, fmtSize, IMG, Item, qualityBadges, Recent, SearchHit, searchTmdb, seasonEpisodes, store,
+  besideCopies, Episode, FolderKind, fmtSize, IMG, Item, qualityBadges, Recent, renameVideo, SearchHit, searchTmdb, seasonEpisodes, sidecarSubs, store,
   useMediaInfo, useThumb,
   isRemote, isFinished, setFinished,
 } from "./library";
@@ -93,19 +94,25 @@ export type Actions = {
   rematch?: (t: Target) => void;
   /** Library videos whose file is no longer on disk. */
   missing: Set<string>;
+  /** All copies of a film in the library (the same film twice: 1080p and 4K…). */
+  copies?: (it: Item) => string[];
 };
 
 export function Badges({ path, big, compact }: { path?: string; big?: boolean; compact?: boolean }) {
   // Reads the cached result, or waits for the background probe of this file.
   const info = useMediaInfo(path);
+  const [, bump] = useState(0);
+  useEffect(() => { const f = () => bump((n) => n + 1); window.addEventListener("luna-subs", f); return () => window.removeEventListener("luna-subs", f); }, []);
   const all = qualityBadges(info, path);
   // On small cards only what matters at a glance: resolution and HDR type.
   const list = compact ? all.filter((b) => /^(4K|8K|2K|1080p|720p|480p|SD)$|HDR|HLG|Dolby/.test(b)).slice(0, 2) : all;
+  // a subtitle file next to the video (or one added by hand)
+  if (path && (sidecarSubs(path) > 0 || store.get("extSub:" + path))) list.push("SRT");
   if (!list.length) return null;
   return (
     <div className={"badges" + (big ? " big" : "")}>
       {list.map((b) => (
-        <span key={b} className={"qb" + (/HDR|HLG|Dolby/.test(b) ? " hdr" : b === "4K" ? " uhd" : "")}>{b}</span>
+        <span key={b} className={"qb" + (/HDR|HLG|Dolby/.test(b) ? " hdr" : b === "4K" ? " uhd" : b === "SRT" ? " srt" : "")} title={b === "SRT" ? tt("Altyazı dosyası var") : undefined}>{b}</span>
       ))}
     </div>
   );
@@ -182,7 +189,7 @@ export function Header({ mode, setMode, tabs: modeTabs, view, setView, query, se
         <input value={query} placeholder={film ? tt("Ara") : mode === "music" ? tt("Müzikte ara") : tt("Kitaplarda ara")} aria-label={film ? tt("Kütüphanede ara") : mode === "music" ? tt("Müzikte ara") : tt("Kitaplarda ara")}
           onChange={(e) => { setQuery(e.target.value); if (e.target.value && view === "home") setView(film ? "movies" : "library"); }} />
       </label>
-      <button className="ghost sm hdr-btn" onClick={onChat} title={tt("Film asistanı (Gemini)")} aria-label={tt("Asistan")}>
+      <button className="ghost sm hdr-btn" onClick={onChat} title={tt("Asistan (Alt+A)")} aria-label={tt("Asistan")}>
         <Icon d={I.chat} size={18} /><span className="lbl">{tt("Asistan")}</span>
       </button>
       <button className="ghost sm hdr-btn" onClick={onTorrent} title={tt("Bağlantı aç: magnet, torrent ya da video adresi (Ctrl+N)")} aria-label={tt("Bağlantı aç")}>
@@ -200,6 +207,7 @@ export function Header({ mode, setMode, tabs: modeTabs, view, setView, query, se
 // ---------- cards ----------
 function Poster({ it, a }: { it: Item; a: Actions }) {
   const m = it.meta;
+  const n = it.parsed.kind === "tv" ? 0 : (a.copies?.(it) ?? it.files.map((f) => f.path)).length;
   const thumb = useThumb(it.files[0].path, !m?.poster);
   return (
     <button className="poster" onClick={() => a.details(it.key)}
@@ -216,6 +224,7 @@ function Poster({ it, a }: { it: Item; a: Actions }) {
       <div className="card-title">{m?.title ?? it.parsed.title}</div>
       <div className="muted small">
         {it.parsed.kind === "tv" ? tt("{0} bölüm", it.files.length) : m?.year ?? it.parsed.year ?? ""}
+        {it.parsed.kind !== "tv" && n > 1 && <span className="copies-n" title={tt("Bu filmden {0} kopya var; detaylarda hangisini izleyeceğini seçersin", n)}>{m?.year || it.parsed.year ? " · " : ""}{tt("{0} kopya", n)}</span>}
       </div>
     </button>
   );
@@ -340,8 +349,31 @@ function HeroSlider({ slides, a }: { slides: Slide[]; a: Actions }) {
   );
 }
 
-export function Home({ items, recent, hasFolders, a, onSettings, downloads }: {
-  items: Item[]; recent: Recent[]; hasFolders: boolean; a: Actions; onSettings: () => void; downloads?: React.ReactNode;
+/** No library folder yet: Luna asks where the films and the series are (one click each opens the folder picker). */
+function FolderAsk({ onAdd, big }: { onAdd: (k: FolderKind) => void; big?: boolean }) {
+  return (
+    <section className={"folder-ask" + (big ? " big" : "")}>
+      <div className="fa-ic"><Icon d={I.folder} size={big ? 34 : 24} /></div>
+      <div className="fa-t">
+        <h2>{tt("Filmlerin nerede?")}</h2>
+        <div className="muted">{tt("Film ve dizilerinin olduğu klasörü seç; Luna içindekileri tanır, afişleri ve bilgileri getirir. Diziler ayrı bir klasördeyse onu da dizi olarak ekle.")}</div>
+      </div>
+      <div className="fa-b">
+        <button className="primary" onClick={() => onAdd("movie")}><Icon d={I.folder} size={18} />  {tt("Film klasörü seç")}</button>
+        <button className="ghost" onClick={() => onAdd("tv")}>{tt("Dizi klasörü seç")}</button>
+      </div>
+    </section>
+  );
+}
+
+/** The folder picker for a Films / Series library folder. */
+export async function pickFolder(): Promise<string | null> {
+  const d = await open({ directory: true, multiple: false });
+  return typeof d === "string" ? d : null;
+}
+
+export function Home({ items, recent, hasFolders, a, onAddFolder, downloads }: {
+  items: Item[]; recent: Recent[]; hasFolders: boolean; a: Actions; onAddFolder: (k: FolderKind) => void; downloads?: React.ReactNode;
 }) {
   const itemOf = (p: string) => items.find((i) => i.files.some((f) => f.path === p));
   const continuing = recent.filter((r) => pct(r) < 95 && !isFinished(r.path)).slice(0, 12);
@@ -361,13 +393,13 @@ export function Home({ items, recent, hasFolders, a, onSettings, downloads }: {
 
   return (
     <div className="page">
-      {slides.length ? <HeroSlider slides={slides} a={a} /> : (
+      {slides.length ? <HeroSlider slides={slides} a={a} /> : !hasFolders ? <FolderAsk onAdd={onAddFolder} big /> : (
         <section className="hero empty">
           <h1>{tt("Bir video sürükle bırak")}</h1>
           <div className="muted">{tt("ya da “Dosya aç”a bas. Altyazı yoksa otomatik bulunur.")}</div>
-          {!hasFolders && <button className="ghost" onClick={onSettings}><Icon d={I.folder} size={18} />  {tt("Kütüphaneye klasör ekle")}</button>}
         </section>
       )}
+      {slides.length > 0 && !hasFolders && <FolderAsk onAdd={onAddFolder} />}
 
       {downloads}
 
@@ -389,7 +421,7 @@ export function Home({ items, recent, hasFolders, a, onSettings, downloads }: {
         </section>
       )}
       {shows.length > 0 && <PosterRow title={tt("Diziler")} items={shows} a={a} />}
-      {movies.length > 0 && <PosterRow title={tt("Filmler")} items={movies} a={a} />}
+      {movies.length > 0 && <PosterRow title={tt("Filmler")} items={besideCopies(movies)} a={a} />}
       {finishedItems.length > 0 && <PosterRow title={tt("Bitirdiklerim")} items={finishedItems} a={a} />}
     </div>
   );
@@ -410,11 +442,12 @@ export function Browse({ title, items, query, a }: { title: string; items: Item[
     .filter((i) => !q || (i.meta?.title ?? i.parsed.title).toLocaleLowerCase(lang() === "tr" ? "tr" : "en").includes(q) ||
       i.parsed.title.toLowerCase().includes(q) || i.meta?.cast.some((c) => c.name.toLowerCase().includes(q)))
     .sort((x, y) => (x.meta?.title ?? x.parsed.title).localeCompare(y.meta?.title ?? y.parsed.title, "tr"));
+  const shown = besideCopies(list);
   return (
     <div className="page">
       <section className="row">
         <h2>{q ? tt("Yerel dosyalar · “{0}”", query) : title} <span className="muted small">{list.length}</span></h2>
-        {list.length ? <div className="grid">{list.map((it) => <Poster key={it.key} it={it} a={a} />)}</div>
+        {list.length ? <div className="grid">{shown.map((it) => <Poster key={it.key} it={it} a={a} />)}</div>
           : <div className="muted empty-note">{q ? tt("Kütüphanende bulunamadı.") : tt("Bir şey bulunamadı. Klasörler sekmesinden kütüphaneye klasör ekleyebilirsin.")}</div>}
       </section>
     </div>
@@ -424,20 +457,24 @@ export function Browse({ title, items, query, a }: { title: string; items: Item[
 // ---------- folders ----------
 type Entry = { name: string; path: string; isDir: boolean; size: number; videos: number };
 
-export function Folders({ roots, setRoots, items, recent, a }: {
-  roots: string[]; setRoots: (r: string[]) => void; items: Item[]; recent: Recent[]; a: Actions;
+export function Folders({ roots, setRoots, kinds, onAdd, setKind, items, recent, a }: {
+  roots: string[]; setRoots: (r: string[]) => void; kinds: Record<string, FolderKind>; onAdd: (k: FolderKind) => void;
+  setKind: (dir: string, k: FolderKind) => void; items: Item[]; recent: Recent[]; a: Actions;
 }) {
   const [cwd, setCwd] = useState<string | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [rootInfo, setRootInfo] = useState<Record<string, number>>({});
+  // a file renamed or deleted: the open folder is read again
+  const [again, setAgain] = useState(0);
+  useEffect(() => { const f = () => setAgain((n) => n + 1); window.addEventListener("luna-library", f); return () => window.removeEventListener("luna-library", f); }, []);
 
   useEffect(() => {
     if (!cwd) return;
     let alive = true;
-    setEntries([]);
     invoke<Entry[]>("list_dir", { path: cwd }).then((e) => alive && setEntries(e)).catch(() => alive && setEntries([]));
     return () => { alive = false; };
-  }, [cwd]);
+  }, [cwd, again]);
+  useEffect(() => setEntries([]), [cwd]);
   // Mouse back button: one folder up.
   useEffect(() => {
     const back = (e: Event) => {
@@ -451,14 +488,11 @@ export function Folders({ roots, setRoots, items, recent, a }: {
   }, [cwd, roots.join("|")]);
   useEffect(() => {
     roots.forEach((r) => invoke<Entry[]>("list_dir", { path: r })
-      .then((e) => setRootInfo((m) => ({ ...m, [r]: e.reduce((n, x) => n + (x.isDir ? x.videos : 1), 0) })))
+      .then((e) => setRootInfo((m) => ({ ...m, [r]: (e ?? []).reduce((n, x) => n + (x.isDir ? x.videos : 1), 0) })))
       .catch(() => {}));
   }, [roots.join("|")]);
 
-  const addRoot = async () => {
-    const d = await open({ directory: true, multiple: false });
-    if (typeof d === "string" && !roots.includes(d)) setRoots([...roots, d]);
-  };
+
   const root = cwd ? roots.find((r) => {
     const a = cwd.toLowerCase().replace(/[\\/]+$/, ""), b = r.toLowerCase().replace(/[\\/]+$/, "");
     return a === b || a.startsWith(b + "\\") || a.startsWith(b + "/");
@@ -467,22 +501,19 @@ export function Folders({ roots, setRoots, items, recent, a }: {
   const crumbs = cwd && root ? [root, ...cwd.slice(rootBare.length).split(/[\\/]/).filter(Boolean)] : [];
   const crumbPath = (i: number) => i === 0 ? root! : rootBare + "\\" + crumbs.slice(1, i + 1).join("\\");
 
-  if (!cwd)
-    return (
-      <div className="page">
-        <section className="row">
-          <div className="row-head"><h2>{tt("Klasörler")}</h2><span className="grow" />
-            <button className="ghost sm" onClick={addRoot}><Icon d={I.plus} size={18} />  {tt("Klasör ekle")}</button>
-          </div>
-          {roots.length === 0 && <div className="muted empty-note">{tt("Film ve dizilerinin olduğu klasörleri ekle; içindekiler kütüphaneye girer.")}</div>}
+  const tiles = (list: string[]) => (
           <div className="grid folders">
-            {roots.map((r) => (
+            {list.map((r) => (
               <div key={r} className="folder-tile" role="button" tabIndex={0} onClick={() => setCwd(r)}
                 onKeyDown={(e) => e.key === "Enter" && setCwd(r)}>
                 <Icon d={I.folder} size={40} />
                 <div className="ellipsis folder-name">{fileName(r) || r}</div>
                 <div className="muted small ellipsis">{r}</div>
                 <div className="muted small">{rootInfo[r] != null ? tt("{0} video", rootInfo[r]) : "…"}</div>
+                <button className="chip sm tile-kind" title={tt("Bu klasördekiler nasıl tanınsın")}
+                  onClick={(e) => { e.stopPropagation(); setKind(r, kinds[r] === "tv" ? "movie" : "tv"); }} onKeyDown={(e) => e.stopPropagation()}>
+                  {kinds[r] === "tv" ? tt("Filmlere taşı") : tt("Dizilere taşı")}
+                </button>
                 <button className="icon sm tile-x" aria-label={tt("Kütüphaneden çıkar")}
                   onClick={(e) => { e.stopPropagation(); setRoots(roots.filter((x) => x !== r)); }}
                   onKeyDown={(e) => e.stopPropagation()}>
@@ -491,7 +522,29 @@ export function Folders({ roots, setRoots, items, recent, a }: {
               </div>
             ))}
           </div>
-        </section>
+  );
+  const filmRoots = roots.filter((r) => kinds[r] !== "tv");
+  const tvRoots = roots.filter((r) => kinds[r] === "tv");
+  if (!cwd)
+    return (
+      <div className="page">
+        {roots.length === 0 && <FolderAsk onAdd={onAdd} big />}
+        {roots.length > 0 && (
+          <>
+            <section className="row">
+              <div className="row-head"><h2>{tt("Film klasörleri")}</h2><span className="grow" />
+                <button className="ghost sm" onClick={() => onAdd("movie")}><Icon d={I.plus} size={18} />  {tt("Film klasörü ekle")}</button>
+              </div>
+              {filmRoots.length ? tiles(filmRoots) : <div className="muted empty-note">{tt("Filmlerin olduğu klasörü ekle.")}</div>}
+            </section>
+            <section className="row">
+              <div className="row-head"><h2>{tt("Dizi klasörleri")}</h2><span className="grow" />
+                <button className="ghost sm" onClick={() => onAdd("tv")}><Icon d={I.plus} size={18} />  {tt("Dizi klasörü ekle")}</button>
+              </div>
+              {tvRoots.length ? tiles(tvRoots) : <div className="muted empty-note">{tt("Diziler ayrı bir klasördeyse onu buraya ekle: her dizi kendi klasöründe, bölümler “S01E02” ya da “02” gibi numaralı olabilir.")}</div>}
+            </section>
+          </>
+        )}
       </div>
     );
 
@@ -554,6 +607,17 @@ function FileCard({ e, it, season, episode, rec, a }: {
 }
 
 // ---------- details ----------
+/** One copy of a film on the details page: its quality, subtitles, size and file name. */
+function CopyChip({ path, on, gone, onPick, onMenu }: { path: string; on: boolean; gone: boolean; onPick: () => void; onMenu: (e: React.MouseEvent) => void }) {
+  const info = useMediaInfo(path);
+  return (
+    <button className={"copy" + (on ? " on" : "") + (gone ? " gone" : "")} role="radio" aria-checked={on} onClick={onPick} onContextMenu={onMenu} title={path}>
+      <span className="copy-top"><Badges path={path} compact />{info?.size ? <span className="muted small">{fmtSize(info.size)}</span> : null}</span>
+      <span className="copy-name ellipsis">{gone ? tt("Dosya yok · ") : ""}{fileName(path)}</span>
+    </button>
+  );
+}
+
 export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, missingPanel }: {
   it: Item; recent: Recent[]; a: Actions; onBack: () => void; onAddSub: (path: string) => void; download?: React.ReactNode;
   onAsk?: () => void; missingPanel?: React.ReactNode;
@@ -563,7 +627,11 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
   const m = it.meta;
   const isTv = it.parsed.kind === "tv";
   const seasons = [...new Set(it.files.map((f) => f.season ?? 1))].sort((x, y) => x - y);
-  const { file, rec } = resumeTarget(it, recent);
+  // a film found more than once: the user picks which copy to watch (last watched one first)
+  const copies = isTv ? [] : a.copies?.(it) ?? it.files.map((f) => f.path);
+  const [pick, setPick] = useState<string | null>(null);
+  const chosen = copies.length > 1 ? pick ?? recent.find((r) => copies.includes(r.path))?.path ?? copies[0] : null;
+  const { file, rec } = chosen ? { file: { path: chosen }, rec: recent.find((r) => r.path === chosen) } as { file: { path: string; season?: number; episode?: number }; rec?: Recent } : resumeTarget(it, recent);
   const [season, setSeason] = useState(file.season ?? seasons[0] ?? 1);
   const [eps, setEps] = useState<Episode[]>([]);
   const [more, setMore] = useState(false);
@@ -578,7 +646,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
   }, [isTv, m?.id, season]);
 
   const extSub = store.get("extSub:" + file.path);
-  const hasSub = store.get("hasSub:" + file.path) === "1";
+  const hasSub = store.get("hasSub:" + file.path) === "1" || sidecarSubs(file.path) > 0;
   const playLabel = rec ? (isTv ? tt("{0} · Devam et", epLabel(file.season, file.episode)) : tt("Devam et"))
     : isTv ? tt("{0} · Oynat", epLabel(file.season, file.episode)) : tt("Oynat");
   const longText = (m?.overview.length ?? 0) > 260;
@@ -607,6 +675,14 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
             {m?.genres?.length ? <span>{m.genres.slice(0, 3).join(", ")}</span> : null}
           </div>
           <Badges path={file.path} big />
+          {copies.length > 1 && (
+            <div className="copies">
+              <div className="muted small">{tt("Bu filmden {0} kopya var; izlemek istediğini seç:", copies.length)}</div>
+              <div className="copy-list" role="radiogroup" aria-label={tt("Kopyalar")}>
+                {copies.map((p) => <CopyChip key={p} path={p} on={p === file.path} gone={a.missing.has(p)} onPick={() => setPick(p)} onMenu={(e) => a.menu(e, { path: p, item: it })} />)}
+              </div>
+            </div>
+          )}
           {m?.overview ? (
             <div>
               <TrText className={"overview" + (more ? " open" : "")} text={m.overview} />
@@ -758,6 +834,39 @@ export function Confirm({ title, text, ok, danger, onOk, onCancel }: {
   );
 }
 
+/** Renames the video file on disk (its subtitle files go along). */
+export function RenameFile({ path, onDone, onClose }: { path: string; onDone: (to: string) => void; onClose: () => void }) {
+  const file = fileName(path);
+  const ext = file.match(/\.[a-z0-9]{2,4}$/i)?.[0] ?? "";
+  const [name, setName] = useState(file.slice(0, file.length - ext.length));
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    if (!name.trim() || busy) return;
+    setBusy(true); setErr("");
+    try { onDone(await renameVideo(path, name.trim())); } catch (e) { setErr(String(e).replace(/^Error: /, "")); setBusy(false); }
+  };
+  return (
+    <div className="modal-bg" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal" role="dialog" aria-modal="true" onKeyDown={(e) => e.stopPropagation()}>
+        <h2>{tt("Dosya adını değiştir")}</h2>
+        <div className="muted small ellipsis" title={path}>{path}</div>
+        <div className="rm-row">
+          <input value={name} autoFocus onFocus={(e) => e.currentTarget.select()} onChange={(e) => setName(e.target.value)} aria-label={tt("Yeni ad")} spellCheck={false}
+            onKeyDown={(e) => { if (e.key === "Enter") go(); if (e.key === "Escape") onClose(); }} />
+          {ext && <span className="muted">{ext}</span>}
+        </div>
+        <div className="muted small">{tt("Yanındaki altyazı dosyaları da yeni adı alır; kaldığın yer ve diğer bilgiler korunur. Adında yıl olursa (ör. “Alien (1979)”) afişi daha doğru bulunur.")}</div>
+        {err && <div className="rm-err">{err}</div>}
+        <div className="modal-actions">
+          <button className="chip" onClick={onClose}>{tt("Vazgeç")}</button>
+          <button className="primary" disabled={!name.trim() || busy} onClick={go}>{busy ? tt("Değiştiriliyor…") : tt("Adını değiştir")}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Rematch({ it, onPick, onCustom, onClose }: {
   it: Item; onPick: (h: SearchHit) => void; onCustom: (title: string, kind: "movie" | "tv") => void; onClose: () => void;
 }) {
@@ -819,7 +928,7 @@ const SET_ICONS: Record<SetSec, string> = {
 
 /** An API key: hidden like a password, with a link to where it's made. */
 function KeyField({ label, hint, value, onChange, placeholder, url }: {
-  label: string; hint: string; value: string; onChange: (v: string) => void; placeholder: string; url: string;
+  label: string; hint: string; value: string; onChange: (v: string) => void; placeholder: string; url?: string;
 }) {
   const [show, setShow] = useState(false);
   return (
@@ -828,7 +937,7 @@ function KeyField({ label, hint, value, onChange, placeholder, url }: {
         <b>{label}</b>
         <span className={"set-state" + (value.trim() ? " ok" : "")}>{value.trim() ? tt("✓ Girildi") : tt("Girilmedi")}</span>
         <span className="grow" />
-        <button className="set-link" onClick={() => openUrl(url)}>{tt("Anahtar al ↗")}</button>
+        {url && <button className="set-link" onClick={() => openUrl(url)}>{tt("Anahtar al ↗")}</button>}
       </div>
       <div className="set-hint">{hint}</div>
       <div className="set-key-in">
@@ -851,6 +960,29 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
   const [gemKey, setGemKey] = useState(store.get("geminiKey") ?? "");
   const [gemModel, setGemModel] = useState(store.get("geminiModel") ?? "gemini-3.1-flash-lite");
   const [models, setModels] = useState<[string, string][]>([]);
+  // the assistant's service: Gemini, OpenAI, Claude or any OpenAI-compatible base URL
+  const [prov, setProv] = useState<AiProvider>(aiProvider);
+  const [aiKeys, setAiKeys] = useState<Record<string, string>>(() => Object.fromEntries(AI_PROVIDERS.filter((x) => x.id !== "gemini").map((x) => [x.keyName, store.get(x.keyName) ?? ""])));
+  const [aiModelsBy, setAiModelsBy] = useState<Record<string, string>>(() => Object.fromEntries(AI_PROVIDERS.filter((x) => x.id !== "gemini").map((x) => [x.id, store.get("aiModel:" + x.id) ?? x.model])));
+  const [base, setBase] = useState(store.get("aiBase") ?? "");
+  const [otherList, setOtherList] = useState<string[]>([]);
+  const [otherMsg, setOtherMsg] = useState("");
+  const provSpec = AI_PROVIDERS.find((x) => x.id === prov)!;
+  const loadOther = () => {
+    const k = aiKeys[provSpec.keyName]?.trim() ?? "";
+    if (prov === "gemini" || (prov !== "custom" && !k) || (prov === "custom" && !base.trim())) { setOtherList([]); setOtherMsg(prov === "custom" ? tt("Önce base URL'yi yaz") : tt("Önce API anahtarını gir")); return; }
+    setOtherMsg(tt("Modeller yükleniyor…"));
+    aiModels(prov, k || "-", base).then((l) => { setOtherList(l); setOtherMsg(l.length ? "" : tt("Model bulunamadı")); })
+      .catch((e) => { setOtherList([]); setOtherMsg(String(e).slice(0, 120)); });
+  };
+  // the model list follows the service, its key and the base URL (after typing settles)
+  const otherKey = aiKeys[provSpec.keyName] ?? "";
+  useEffect(() => {
+    setOtherList([]); setOtherMsg("");
+    if (prov === "gemini") return;
+    const id = setTimeout(loadOther, 700);
+    return () => clearTimeout(id);
+  }, [prov, base, otherKey]);
   const [modelsMsg, setModelsMsg] = useState(tt("Önce API anahtarını gir"));
   const [sec, setSecState] = useState<SetSec>(() => (store.get("setSec") as SetSec) || "general");
   const setSec = (s: SetSec) => { setSecState(s); store.set("setSec", s); };
@@ -889,6 +1021,10 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
     store.set("autoFull", autoFull ? "1" : "0");
     if (dlDir) store.set("dlDir", dlDir);
     store.set("geminiKey", gemKey.trim());
+    store.set("aiProvider", prov);
+    for (const [k, v] of Object.entries(aiKeys)) store.set(k, v.trim());
+    for (const [id, m] of Object.entries(aiModelsBy)) store.set("aiModel:" + id, m.trim());
+    store.set("aiBase", base.trim());
     store.set("geminiModel", gemModel.trim() || "gemini-flash-latest");
   };
   const save = () => {
@@ -899,7 +1035,7 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
   };
   const secs: [SetSec, string, string][] = [
     ["general", tt("Genel"), tt("Dil, tam ekran, tanıtım")],
-    ["keys", tt("Hesaplar ve anahtarlar"), tt("TMDB, OpenSubtitles, Gemini")],
+    ["keys", tt("Hesaplar ve anahtarlar"), tt("TMDB, OpenSubtitles, asistan")],
     ["subs", tt("Altyazı"), tt("Diller ve görünüm")],
     ["upscaler", tt("Upscaler"), tt("Lossless Scaling ile yapay zekâ")],
     ["addons", tt("Eklentiler"), tt("Stremio, arama eklentileri, kitap kaynakları")],
@@ -907,7 +1043,8 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
     ["backup", tt("Yedekleme"), tt("Tek dosya, istersen buluta")],
   ];
   const cur = secs.find((x) => x[0] === sec) ?? secs[0];
-  const missingKeys = [tmdbKey, osKey, gemKey].filter((k) => !k.trim()).length;
+  const aiSet = prov === "gemini" ? gemKey : prov === "custom" ? base : aiKeys[provSpec.keyName] ?? "";
+  const missingKeys = [tmdbKey, osKey, aiSet].filter((k) => !k.trim()).length;
   return createPortal(
     <>
       <div className="chat-scrim" />
@@ -990,19 +1127,55 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                       placeholder="opensubtitles.com › Profil › API consumers" url="https://www.opensubtitles.com/consumers" />
                   </div>
                   <div className="set-card">
-                    <KeyField label="Gemini" hint={tt("Film asistanı")} value={gemKey} onChange={setGemKey}
-                      placeholder="aistudio.google.com › Get API key" url="https://aistudio.google.com/app/apikey" />
-                    <div className="field set-sub">
-                      <span>{tt("Gemini modeli")}</span>
-                      <div className="gem-model">
-                        <select value={models.some(([id]) => id === gemModel) ? gemModel : ""} onChange={(e) => { if (e.target.value) { setGemModel(e.target.value); store.set("geminiModel", e.target.value); } }}>
-                          <option value="">{models.length ? tt("Listeden seç…") : modelsMsg}</option>
-                          {models.map(([id, name]) => <option key={id} value={id}>{name} ({id})</option>)}
-                        </select>
-                        <button className="chip" onClick={loadModels} disabled={!gemKey.trim()}>{tt("Listeyi yenile")}</button>
+                    <div className="field">
+                      <span>{tt("Asistanın yapay zekâsı")}</span>
+                      <div className="seg-row">
+                        {AI_PROVIDERS.map((x) => <button key={x.id} className={"seg" + (prov === x.id ? " on" : "")} onClick={() => setProv(x.id)}>{x.id === "custom" ? tt("Başka (base URL)") : x.name}</button>)}
                       </div>
-                      <input value={gemModel} onChange={(e) => setGemModel(e.target.value)} placeholder={tt("ya da model adını yaz: gemini-flash-latest")} />
+                      <div className="set-hint">{prov === "gemini" ? tt("Ücretsiz kotası olan tek seçenek; Google araması ve kaynaklı cevaplar sadece Gemini'de.")
+                        : prov === "custom" ? tt("OpenAI uyumlu her sunucu: OpenRouter, Groq, DeepSeek, Mistral, ya da bilgisayarındaki Ollama / LM Studio (anahtar gerekmez).")
+                        : tt("Ücretli API anahtarı ister; asistanın bütün araçları çalışır, Google araması hariç.")}</div>
                     </div>
+                    {prov === "gemini" ? (
+                      <>
+                        <KeyField label="Gemini" hint={tt("Asistan, koleksiyonlar ve çeviriler")} value={gemKey} onChange={setGemKey}
+                          placeholder="aistudio.google.com › Get API key" url="https://aistudio.google.com/app/apikey" />
+                        <div className="field set-sub">
+                          <span>{tt("Gemini modeli")}</span>
+                          <div className="gem-model">
+                            <select value={models.some(([id]) => id === gemModel) ? gemModel : ""} onChange={(e) => { if (e.target.value) { setGemModel(e.target.value); store.set("geminiModel", e.target.value); } }}>
+                              <option value="">{models.length ? tt("Listeden seç…") : modelsMsg}</option>
+                              {models.map(([id, name]) => <option key={id} value={id}>{name} ({id})</option>)}
+                            </select>
+                            <button className="chip" onClick={loadModels} disabled={!gemKey.trim()}>{tt("Listeyi yenile")}</button>
+                          </div>
+                          <input value={gemModel} onChange={(e) => setGemModel(e.target.value)} placeholder={tt("ya da model adını yaz: gemini-flash-latest")} />
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        {prov === "custom" && (
+                          <label>{tt("Base URL")}
+                            <input value={base} onChange={(e) => setBase(e.target.value)} placeholder="https://openrouter.ai/api/v1  ·  http://localhost:11434/v1" spellCheck={false} />
+                          </label>
+                        )}
+                        <KeyField label={prov === "custom" ? tt("API anahtarı (gerekirse)") : provSpec.name} hint={prov === "openai" ? "platform.openai.com" : prov === "claude" ? "console.anthropic.com" : tt("Yerel sunucular için boş bırak")}
+                          value={aiKeys[provSpec.keyName] ?? ""} onChange={(v) => setAiKeys((m) => ({ ...m, [provSpec.keyName]: v }))}
+                          placeholder={prov === "openai" ? "sk-…" : prov === "claude" ? "sk-ant-…" : ""} url={provSpec.keyUrl} />
+                        <div className="field set-sub">
+                          <span>{tt("Model")}</span>
+                          <div className="gem-model">
+                            <select value={otherList.includes(aiModelsBy[prov] ?? "") ? aiModelsBy[prov] : ""} onChange={(e) => e.target.value && setAiModelsBy((m) => ({ ...m, [prov]: e.target.value }))}>
+                              <option value="">{otherList.length ? tt("Listeden seç…") : otherMsg || tt("Önce API anahtarını gir")}</option>
+                              {otherList.map((id) => <option key={id} value={id}>{id}</option>)}
+                            </select>
+                            <button className="chip" onClick={loadOther}>{tt("Listeyi yenile")}</button>
+                          </div>
+                          <input value={aiModelsBy[prov] ?? ""} onChange={(e) => setAiModelsBy((m) => ({ ...m, [prov]: e.target.value }))} placeholder={tt("ya da model adını yaz")} spellCheck={false} />
+                        </div>
+                        {gemKey.trim() && <div className="set-hint">{tt("Gemini anahtarın duruyor; Gemini'ye geri dönersen o kullanılır.")}</div>}
+                      </>
+                    )}
                   </div>
                 </>
               )}

@@ -7,10 +7,10 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { applySubOpts, fmtTime, isImageSub, isPgs, loadSubOpts, mpv, setProp, useMpv } from "./mpv";
 import { listen } from "@tauri-apps/api/event";
-import { customMeta, details, IMG, seasonKey, isRemote, isUrl, torrentSrc, pinFile, relinkFile, isFinished, setFinished, nearEnd, Episode, Item, loadRecent, parseName, Recent, store, useLibrary } from "./library";
+import { copiesOf, customMeta, details, groupKey, IMG, seasonKey, isRemote, isUrl, torrentSrc, pinFile, relinkFile, isFinished, setFinished, nearEnd, Episode, Item, loadRecent, parseName, Recent, store, useLibrary } from "./library";
 import { SubtitleDialog } from "./Subtitles";
 import { Added, DownloadPanel, Downloads, DownloadsSection, downloadDir, RemoveMode, isOpenableLink, isTorrentSource, TorrentDialog, TorrentLoader, TorrentStat, useTorrents } from "./Torrent";
-import { Actions, Browse, CardMenu, Confirm, Details, Folders, Header, Home, I, Icon, MenuEntry, pct, Rematch, Settings, Target, View, MissingPanel, Mode, MenuHost, filmAsks } from "./Screens";
+import { Actions, Browse, CardMenu, Confirm, Details, Folders, Header, Home, I, Icon, MenuEntry, pct, pickFolder, Rematch, RenameFile, Settings, Target, View, MissingPanel, Mode, MenuHost, filmAsks } from "./Screens";
 import SubTimeline from "./SubTimeline";
 import { askAssistant, ChatPanel, diaryGet, diarySet, migrateDiary, RecsPage } from "./Taste";
 import { WebResults } from "./Web";
@@ -706,6 +706,21 @@ export default function App() {
     const w = getCurrentWindow();
     await w.setFullscreen(!(await w.isFullscreen()));
   };
+  // F11 also on the library screens (the player's own keys handle it during a film)
+  useEffect(() => {
+    if (playing) return;
+    const k = (e: KeyboardEvent) => { if (e.key === "F11") { e.preventDefault(); toggleFull(); } };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [playing]);
+  // each time Luna goes full screen (at start too), a small note at the top left says how to leave it
+  const [fullTip, setFullTip] = useState(false);
+  useEffect(() => {
+    if (!isFull) { setFullTip(false); return; }
+    setFullTip(true);
+    const id = setTimeout(() => setFullTip(false), 3500);
+    return () => clearTimeout(id);
+  }, [isFull]);
   const delayRef = useRef(s.subDelay ?? 0);
   delayRef.current = s.subDelay ?? 0;
   const nudge = (d: number) => { delayRef.current = Math.round((delayRef.current + d) * 1000) / 1000; mpv("add", "sub-delay", d); };
@@ -996,6 +1011,22 @@ export default function App() {
   };
   const [cardMenu, setCardMenu] = useState<{ x: number; y: number; t: Target } | null>(null);
   const [confirmDel, setConfirmDel] = useState<Target | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const addFolder = async (k: "movie" | "tv") => {
+    const d = await pickFolder();
+    if (!d) return;
+    lib.addFolder(d, k);
+    flash(k === "tv" ? tt("Dizi klasörü eklendi; bölümler taranıyor") : tt("Film klasörü eklendi; filmler taranıyor"), "ok");
+  };
+  // a file renamed (here or by the assistant): "Continue watching" follows it
+  useEffect(() => { const f = () => setRecent(loadRecent()); window.addEventListener("luna-library", f); return () => window.removeEventListener("luna-library", f); }, []);
+  const renamed = (from: string, to: string) => {
+    setRenaming(null);
+    // the details page follows the file to its new name
+    if (detailsItem?.files.some((f) => f.path === from) && detailsItem.files.length <= 1) setDetailsKey(groupKey(parseName(to)));
+    lib.refresh();
+    flash(tt("Adı değiştirildi: {0}", to.split(/[\\/]/).pop()!), "ok");
+  };
   const [rematch, setRematch] = useState<Target | null>(null);
   // A video added by hand (not from a library folder) whose file name TMDB didn't recognise:
   // Luna asks once for its name, then looks it up again with what the user writes.
@@ -1035,6 +1066,7 @@ export default function App() {
     menu: (e, t) => { e.preventDefault(); e.stopPropagation(); setCardMenu({ x: e.clientX, y: e.clientY, t }); },
     rematch: (t) => setRematch(t),
     missing: lib.missing,
+    copies: (it) => copiesOf(it, lib.items),
   };
   const menuEntries = (t: Target): MenuEntry[] => {
     const r = recent.find((x) => x.path === t.path);
@@ -1050,6 +1082,7 @@ export default function App() {
       ...(r ? [{ label: tt("İzlemeye devam et listesinden kaldır"), act: () => removeRecent([t.path]) }] : []),
       { label: tt("Altyazı ekle…"), act: () => addSubtitle(t.path) },
       ...(t.item ? [{ label: tt("Adını değiştir / eşleştir…"), act: () => setRematch(t) }] : []),
+      ...(!isUrl(t.path) ? [{ label: tt("Dosya adını değiştir…"), act: () => setRenaming(t.path) }] : []),
       "sep",
       { label: tt("Adını kopyala"), act: () => { navigator.clipboard.writeText(t.item?.meta?.title ?? t.item?.parsed.title ?? t.path.split(/[\\/]/).pop()!); flash(tt("Ad kopyalandı"), "ok"); } },
       { label: tt("Dosya konumunu aç"), act: () => invoke("reveal_file", { path: t.path }) },
@@ -1147,11 +1180,12 @@ export default function App() {
           ) : (
           <div className="shell-body" key={view}>
             {view === "home" && <Home items={lib.items} recent={recent} hasFolders={lib.folders.length > 0} a={actions}
-              onSettings={() => setView("folders")}
+              onAddFolder={addFolder}
               downloads={torrents.length > 0 && <DownloadsSection list={torrents} onPlay={playTorrent} onRemoving={torrentRemoving} onRemoved={torrentRemoved} />} />}
             {view === "movies" && <Browse title={tt("Filmler")} items={lib.items.filter((i) => i.parsed.kind === "movie")} query={query} a={actions} />}
             {view === "shows" && <Browse title={tt("Diziler")} items={lib.items.filter((i) => i.parsed.kind === "tv")} query={query} a={actions} />}
             {view === "folders" && <Folders roots={lib.folders} setRoots={(f) => { lib.setFolders(f); lib.refresh(); }}
+              kinds={lib.kinds} onAdd={addFolder} setKind={lib.setFolderKind}
               items={lib.items} recent={recent} a={actions} />}
             {(view === "movies" || view === "shows") && query.trim() && (
               <div className="page web-page">
@@ -1205,6 +1239,7 @@ export default function App() {
             ? tt("“{0}” kütüphaneden kaldırılacak. İnternet bağlantısı silinmez.", confirmDel.path)
             : tt("“{0}” diskten silinecek ve Geri Dönüşüm Kutusu'na taşınacak. Aynı adlı altyazı dosyaları da silinir.", confirmDel.path.split(/[\\/]/).pop())} />
       )}
+      {renaming && <RenameFile path={renaming} onClose={() => setRenaming(null)} onDone={(to) => renamed(renaming, to)} />}
       {askName && !rematch && !playing && (
         <div className="ask-name glass" role="status">
           <div className="ask-name-t">
@@ -1344,6 +1379,11 @@ export default function App() {
         </>
       )}
 
+      {fullTip && (
+        <div className="full-tip" role="status" onClick={() => setFullTip(false)}>
+          {tt("Tam ekran")} · <kbd>F11</kbd> {tt("ile çık")}{playing ? <> · <kbd>Esc</kbd> {tt("filmi kapatır")}</> : null}
+        </div>
+      )}
       {!playing && isFull && (
         // Top-centre hot zone on the library screens: a round X that quits the app.
         <div className="quit-zone">

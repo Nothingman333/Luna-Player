@@ -332,6 +332,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 }
 .qb.uhd { border-color: var(--text); color: var(--text); }
 .qb.hdr { border-color: #f5c35a; color: #f5c35a; }
+.qb.srt { border-color: #7fd2f7; color: #7fd2f7; }
 .badges.big .qb { font-size: 13px; padding: 3px 9px; }
 .poster-badges, .thumb-badges { position: absolute; left: 8px; top: 8px; }
 
@@ -2766,3 +2767,49 @@ body.ws-open .chat-scrim.mine-layer, body.ws-open .chat-ws-wrap.mine-layer { vis
 .chat-focus-o.on { color: var(--text); background: rgba(var(--acc-rgb), .18); border-color: rgba(var(--acc-rgb), .55); }
 .chat-focus-o small { opacity: .7; font-size: 11px; white-space: nowrap; }
 .chat-focus-o .ellipsis { min-width: 0; }
+/* collections: the page behind blurs like under the assistant, so the glass doesn't show sharp posters through */
+body.mine-open #root { filter: blur(26px) brightness(.7) saturate(1.4); }
+body.mine-open .chat-scrim.mine-layer { background: rgba(4,4,7,.22); backdrop-filter: none; -webkit-backdrop-filter: none; }
+/* no library folder yet: the home page asks for the films' folder */
+.folder-ask { display: flex; align-items: center; gap: 22px; margin: 18px 0 8px; padding: 22px 26px; border-radius: 18px;
+  border: 1px solid rgba(var(--acc-rgb), .35); background: linear-gradient(135deg, rgba(var(--acc-rgb), .12), rgba(255,255,255,.03)); }
+.folder-ask.big { flex-direction: column; text-align: center; padding: 56px 32px; min-height: 340px; justify-content: center; margin-top: 8px; }
+.folder-ask .fa-ic { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; flex: none; color: var(--accent-soft); background: rgba(var(--acc-rgb), .16); }
+.folder-ask.big .fa-ic { width: 76px; height: 76px; border-radius: 22px; }
+.folder-ask .fa-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.folder-ask.big .fa-t { flex: none; max-width: 560px; }
+.folder-ask h2 { margin: 0; font: 700 22px Sora, sans-serif; }
+.folder-ask.big h2 { font-size: 34px; }
+.folder-ask .fa-b { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.folder-ask .fa-b .primary, .folder-ask .fa-b .ghost { height: 44px; }
+@media (max-width: 900px) { .folder-ask:not(.big) { flex-direction: column; align-items: flex-start; } }
+.tile-kind { position: absolute; left: 8px; top: 8px; opacity: 0; transition: opacity .2s; height: 24px; padding: 0 9px; font-size: 11.5px; }
+.folder-tile:hover .tile-kind, .tile-kind:focus-visible { opacity: 1; }
+/* "Full screen · F11 to leave": a few seconds at the top left each time Luna goes full screen */
+.full-tip { position: fixed; top: 16px; left: 16px; z-index: 900; padding: 9px 14px; border-radius: 12px; font-size: 13px; color: #eee;
+  background: rgba(14,14,18,.86); border: 1px solid rgba(255,255,255,.12); box-shadow: 0 8px 30px rgba(0,0,0,.45);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); animation: fullTip 3.5s ease both; cursor: default; }
+.full-tip kbd { font: 600 11.5px Inter, sans-serif; padding: 1px 6px; border-radius: 5px; border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.08); }
+@keyframes fullTip { 0% { opacity: 0; transform: translateY(-8px); } 8%, 85% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+/* the same film more than once: the copies side by side on the details page */
+.copies { display: flex; flex-direction: column; gap: 8px; margin: 2px 0 4px; }
+.copy-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.copy { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; max-width: 300px; min-width: 170px; padding: 9px 12px; border-radius: 12px; cursor: pointer;
+  color: inherit; font: inherit; text-align: left; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); transition: border-color .15s, background .15s; }
+.copy:hover { background: rgba(255,255,255,.09); }
+.copy.on { border-color: var(--accent); background: rgba(var(--acc-rgb), .14); box-shadow: 0 0 0 3px rgba(var(--acc-rgb), .14); }
+.copy.gone { opacity: .55; }
+.copy-top { display: flex; align-items: center; gap: 8px; }
+.copy-name { font-size: 12.5px; color: var(--muted); max-width: 100%; }
+.copies-n { color: var(--accent-soft); }
+/* Letterboxd: whose profile, and a card while the pages are read */
+.lb-box { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; margin-bottom: 10px; border-radius: 14px; background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.08); }
+.lb-box .lb-row { margin-bottom: 0; }
+.lb-row input.lb-url { width: 380px; max-width: 100%; }
+.lb-box .lb-row input:not(.lb-url) { width: 150px; }
+.lb-mine { flex-direction: row !important; align-items: center; gap: 8px; font-size: 13px; color: var(--text); white-space: nowrap; }
+.lb-me { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.lb-progress { display: flex; align-items: center; gap: 12px; padding: 12px 16px; margin-bottom: 10px; border-radius: 14px;
+  background: rgba(var(--acc-rgb), .1); border: 1px solid rgba(var(--acc-rgb), .3); }
+.lb-progress .grow { min-width: 0; }
+.hide-hint { align-self: center; max-width: 340px; }

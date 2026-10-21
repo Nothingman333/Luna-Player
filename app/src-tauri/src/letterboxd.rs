@@ -54,11 +54,39 @@ fn parse(html: &str) -> Vec<Film> {
     out
 }
 
-async fn read_pages(client: &reqwest::Client, url: &str, max_pages: u32) -> Result<Vec<Film>, String> {
+/// What the reader is doing, for the "connecting…" card (a line like "Watched: page 3 · 214 films").
+pub type Progress<'a> = &'a (dyn Fn(String) + Send + Sync);
+
+/// Whatever the user pasted or typed, as a Letterboxd address: "dave", "@dave", "letterboxd.com/dave",
+/// "https://letterboxd.com/dave/films/?x" or a boxd.it short link.
+pub fn normalize(input: &str) -> Result<String, String> {
+    let mut s = input.trim().trim_start_matches('@').to_string();
+    if let Some(i) = s.find(['?', '#']) {
+        s.truncate(i);
+    }
+    let s = s.trim().trim_end_matches('/').to_string();
+    if s.is_empty() {
+        return Err(tr!("Letterboxd kullanıcı adını ya da bağlantısını yaz", "Type a Letterboxd user name or link"));
+    }
+    let lower = s.to_lowercase();
+    if lower.contains("letterboxd.com") || lower.contains("boxd.it") {
+        let rest = lower.find("letterboxd.com").map(|i| &s[i..]).or_else(|| lower.find("boxd.it").map(|i| &s[i..])).unwrap_or(&s);
+        let host_fixed = if rest.to_lowercase().starts_with("letterboxd.com") { format!("letterboxd.com{}", &rest["letterboxd.com".len()..]) } else { rest.to_string() };
+        return Ok(format!("https://{host_fixed}"));
+    }
+    // a bare user name: letters, digits and _
+    if s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && s.len() <= 40 {
+        return Ok(format!("https://letterboxd.com/{s}"));
+    }
+    Err(tr!("Bu bir Letterboxd bağlantısı değil: {}", "That isn't a Letterboxd link: {}", input.trim()))
+}
+
+async fn read_pages(client: &reqwest::Client, url: &str, max_pages: u32, label: &str, progress: Progress<'_>) -> Result<Vec<Film>, String> {
     let base = url.split('?').next().unwrap_or(url).trim_end_matches('/').to_string();
     let base = match base.find("/page/") { Some(i) => base[..i].to_string(), None => base };
     let mut all: Vec<Film> = vec![];
     for page in 1..=max_pages.max(1) {
+        progress(if all.is_empty() { tr!("{}: sayfa {}", "{}: page {}", label, page) } else { tr!("{}: sayfa {} · {} film", "{}: page {} · {} films", label, page, all.len()) });
         let u = if page == 1 { format!("{base}/") } else { format!("{base}/page/{page}/") };
         // Cloudflare turns some requests away (403/429): wait and try again before giving up
         let mut body: Option<String> = None;
@@ -137,15 +165,16 @@ async fn user_lists(client: &reqwest::Client, user: &str) -> Vec<(String, String
 
 /// `url`: a profile (→ watched films + watchlist), or any Letterboxd page with posters
 /// (a list, /films/, /watchlist/, /films/ratings/…).
-pub async fn read(url: &str, max_pages: u32) -> Result<Vec<Section>, String> {
+pub async fn read(url: &str, max_pages: u32, with_lists: bool, progress: Progress<'_>) -> Result<Vec<Section>, String> {
     let client = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36")
         .timeout(std::time::Duration::from_secs(20))
         .build()
         .map_err(|e| e.to_string())?;
     // short links (boxd.it/…) redirect to the real page
-    let mut clean = url.trim().trim_end_matches('/').to_string();
+    let mut clean = normalize(url)?;
     if clean.contains("boxd.it/") {
+        progress(tr!("Kısa bağlantı açılıyor", "Opening the short link"));
         let res = client.get(&clean).send().await.map_err(|e| tr!("Kısa bağlantı açılamadı: {}", "Couldn't open the short link: {}", e))?;
         clean = res.url().as_str().trim_end_matches('/').to_string();
     }
@@ -153,22 +182,30 @@ pub async fn read(url: &str, max_pages: u32) -> Result<Vec<Section>, String> {
     if path.len() == 1 && !["films", "lists", "members", "film", "journal", "showdown"].contains(&path[0]) {
         let user = path[0];
         let root = format!("https://letterboxd.com/{user}");
-        let watched = read_pages(&client, &format!("{root}/films"), max_pages).await?;
-        let liked = read_pages(&client, &format!("{root}/likes/films"), max_pages).await.unwrap_or_default();
-        let watchlist = read_pages(&client, &format!("{root}/watchlist"), max_pages).await.unwrap_or_default();
+        let watched = read_pages(&client, &format!("{root}/films"), max_pages, &tr!("İzledikleri", "Watched"), progress).await
+            .map_err(|e| if e.contains("404") { tr!("“{}” adında bir Letterboxd kullanıcısı bulunamadı", "No Letterboxd user called “{}”", user) } else { e })?;
+        let liked = read_pages(&client, &format!("{root}/likes/films"), max_pages, &tr!("Beğendikleri", "Liked"), progress).await.unwrap_or_default();
+        let watchlist = read_pages(&client, &format!("{root}/watchlist"), max_pages, &tr!("İzleme listesi", "Watchlist"), progress).await.unwrap_or_default();
         let mut out = vec![
             Section { name: tr!("İzledikleri", "Watched"), kind: "watched".into(), url: format!("{root}/films/"), films: watched },
             Section { name: tr!("Beğendikleri", "Liked"), kind: "liked".into(), url: format!("{root}/likes/films/"), films: liked },
             Section { name: tr!("İzleme listesi", "Watchlist"), kind: "watchlist".into(), url: format!("{root}/watchlist/"), films: watchlist },
         ];
-        for (name, url) in user_lists(&client, user).await.into_iter().take(30) {
-            if let Ok(films) = read_pages(&client, &url, max_pages.min(20)).await {
+        if !with_lists {
+            return Ok(out);
+        }
+        progress(tr!("Listeleri aranıyor", "Looking for their lists"));
+        let lists: Vec<_> = user_lists(&client, user).await.into_iter().take(30).collect();
+        let n = lists.len();
+        for (i, (name, url)) in lists.into_iter().enumerate() {
+            let label = tr!("Liste {}/{}: {}", "List {}/{}: {}", i + 1, n, name);
+            if let Ok(films) = read_pages(&client, &url, max_pages.min(20), &label, progress).await {
                 out.push(Section { name, kind: "list".into(), url: format!("{}/", url.trim_end_matches('/')), films });
             }
         }
         return Ok(out);
     }
-    let films = read_pages(&client, &clean, max_pages).await?;
+    let films = read_pages(&client, &clean, max_pages, &tr!("Liste", "List"), progress).await?;
     let (name, kind) = if clean.contains("/watchlist") { (tr!("İzleme listesi", "Watchlist"), "watchlist") }
         else if clean.contains("/likes/") { (tr!("Beğendikleri", "Liked"), "liked") }
         else if clean.contains("/list/") { (tr!("Liste", "List"), "list") }
@@ -178,10 +215,23 @@ pub async fn read(url: &str, max_pages: u32) -> Result<Vec<Section>, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn addresses() {
+        use super::normalize;
+        assert_eq!(normalize("dave").unwrap(), "https://letterboxd.com/dave");
+        assert_eq!(normalize("@dave ").unwrap(), "https://letterboxd.com/dave");
+        assert_eq!(normalize("letterboxd.com/dave/").unwrap(), "https://letterboxd.com/dave");
+        assert_eq!(normalize("https://www.letterboxd.com/dave/films/?a=1").unwrap(), "https://letterboxd.com/dave/films");
+        assert_eq!(normalize("http://Letterboxd.com/dave/list/x/#top").unwrap(), "https://letterboxd.com/dave/list/x");
+        assert_eq!(normalize("https://boxd.it/abc").unwrap(), "https://boxd.it/abc");
+        assert!(normalize("https://imdb.com/x").is_err());
+        assert!(normalize("").is_err());
+    }
+
     #[tokio::test]
     #[ignore]
     async fn real_profile() {
-        let s = super::read("https://letterboxd.com/dave/", 3).await.unwrap();
+        let s = super::read("https://letterboxd.com/dave/", 3, true, &|m| println!("… {m}")).await.unwrap();
         for sec in &s {
             println!("{}: {} film; ilk 3: {:?}", sec.name, sec.films.len(),
                 sec.films.iter().take(3).map(|f| (f.title.clone(), f.year.clone(), f.stars)).collect::<Vec<_>>());

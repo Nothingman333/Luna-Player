@@ -369,6 +369,55 @@ async fn gemini(key: String, model: String, body: Value) -> Result<Value, String
     Ok(v)
 }
 
+/// OpenAI-style (OpenAI and any compatible server: OpenRouter, Groq, Ollama, LM Studio…) or Anthropic
+/// request for the assistant when Gemini isn't the chosen provider. `kind` is "openai" or "anthropic".
+fn llm_req(client: &reqwest::Client, kind: &str, method: reqwest::Method, url: &str, key: &str) -> reqwest::RequestBuilder {
+    let mut req = client.request(method, url);
+    if kind == "anthropic" {
+        req = req.header("x-api-key", key).header("anthropic-version", "2023-06-01");
+    } else if !key.is_empty() {
+        req = req.bearer_auth(key);
+    }
+    req
+}
+
+fn llm_error(status: reqwest::StatusCode, v: &Value) -> String {
+    let msg = v["error"]["message"].as_str().or_else(|| v["error"].as_str()).or_else(|| v["message"].as_str())
+        .map(str::to_string).unwrap_or_else(|| tr!("bilinmeyen hata", "unknown error"));
+    tr!("Asistan hatası ({}): {}", "Assistant error ({}): {}", status, msg)
+}
+
+#[tauri::command]
+async fn llm_post(kind: String, url: String, key: String, body: Value) -> Result<Value, String> {
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(180)).build().map_err(|e| e.to_string())?;
+    let res = llm_req(&client, &kind, reqwest::Method::POST, &url, &key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| tr!("Asistana bağlanılamadı ({}): {}", "Couldn't reach the assistant ({}): {}", url, e))?;
+    let status = res.status();
+    let text = res.text().await.map_err(|e| e.to_string())?;
+    let v: Value = serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({ "message": text.chars().take(300).collect::<String>() }));
+    if !status.is_success() {
+        return Err(llm_error(status, &v));
+    }
+    Ok(v)
+}
+
+/// The models a provider offers (GET …/models): ids.
+#[tauri::command]
+async fn llm_models(kind: String, url: String, key: String) -> Result<Vec<String>, String> {
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(20)).build().map_err(|e| e.to_string())?;
+    let res = llm_req(&client, &kind, reqwest::Method::GET, &url, &key).send().await.map_err(|e| e.to_string())?;
+    let status = res.status();
+    let v: Value = res.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        return Err(llm_error(status, &v));
+    }
+    let list = v["data"].as_array().or_else(|| v["models"].as_array()).cloned().unwrap_or_default();
+    Ok(list.iter().filter_map(|m| m["id"].as_str().or_else(|| m["name"].as_str()).map(str::to_string)).collect())
+}
+
 /// Gemini models usable for chat with this key: (id, display name).
 #[tauri::command]
 async fn gemini_models(key: String) -> Result<Vec<(String, String)>, String> {
@@ -896,8 +945,9 @@ async fn fetch_page_text(url: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn letterboxd_read(url: String, max_pages: Option<u32>) -> Result<Vec<letterboxd::Section>, String> {
-    letterboxd::read(&url, max_pages.unwrap_or(30).min(100)).await
+async fn letterboxd_read(app: AppHandle, url: String, max_pages: Option<u32>, lists: Option<bool>) -> Result<Vec<letterboxd::Section>, String> {
+    let say = move |m: String| { let _ = app.emit("lb-progress", m); };
+    letterboxd::read(&url, max_pages.unwrap_or(30).min(100), lists.unwrap_or(true), &say).await
 }
 
 #[tauri::command]
@@ -982,6 +1032,18 @@ async fn backup_read(path: String) -> Result<String, String> {
         std::fs::read_to_string(&path).map_err(|_| tr!("Yedek dosyası okunamadı", "Couldn't read the backup file"))
     })
     .await
+}
+
+#[tauri::command]
+async fn subs_beside(paths: Vec<String>) -> Result<Vec<u32>, String> {
+    blocking(move || Ok(files::subs_beside(&paths))).await
+}
+
+#[tauri::command]
+async fn rename_video(path: String, name: String) -> Result<String, String> {
+    // the preview player may hold the file open
+    let _ = tauri::async_runtime::spawn_blocking(preview::release).await;
+    blocking(move || files::rename(&path, &name)).await
 }
 
 #[tauri::command]
@@ -1096,6 +1158,10 @@ pub fn run() {
             fonts_list,
             fonts_remove,
             delete_file,
+            subs_beside,
+            llm_post,
+            llm_models,
+            rename_video,
             backup_write,
             backup_read,
             clipboard_offer

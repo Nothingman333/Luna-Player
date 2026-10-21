@@ -1,3 +1,27 @@
+## 1.4.1CC — 2026-10-21 (beta, not built yet: tried with Luna Dev.cmd)
+
+- **Letterboxd › all their films:** a friend's whole "Watched" list comes in as its own tab (before, only the films they rated 4★+ did); friends connected earlier get it on "⟳ Update". A person with only Letterboxd lists opens on them, not on an empty "Recommendations" tab (that tab only shows when someone typed a recommendation for them).
+- **Hide what I watched:** if Luna doesn't know yet what you watched, it says how to connect your own profile ("This is my profile").
+
+## 1.4.0CC — 2026-10-21 (beta, not built yet: tried with Luna Dev.cmd)
+
+From testing with a friend.
+
+- **Home › where are your films?** With no library folder yet, the home screen asks for one right away ("Choose film folder" / "Choose series folder" open the folder picker). Before, the button only led to the Folders page.
+- **Folders › films and series apart:** the Folders page has "Film folders" and "Series folders", each with its own add button; a folder can be moved between the two. In a series folder each show is its own folder, a "Season 2" / "Sezon 2" folder is the season, and "03 - Pilot.mkv" or "Bölüm 3" is the episode, even without S01E03 in the name.
+- **The same film twice:** copies of one film (a 1080p and a 4K, or two file names TMDB matches to the same film) sit side by side in the grids and the poster says "2 copies". The details page lists every copy with its quality, subtitles and size; the chosen one is what Play plays (the last watched copy first).
+- **SRT next to the quality:** a video with a subtitle file beside it ("Film.srt", "Film.tr.srt") shows "SRT" next to 1080p / 4K on the cards and the details page.
+- **Rename a file in Luna:** right-click › "Rename file…" renames the video on disk; its subtitle files get the new name too, and where you stopped, its quality and "finished" stay. The assistant can do it as well ("rename that file to Alien (1979)"), asking first.
+- **Full screen:** F11 now also works on the library screens (before only during a film), and each time Luna goes full screen, at start too, a small note at the top left says "Full screen · F11 to leave" for a few seconds.
+- **Collections window:** the posters behind showed sharply through the glass. The page behind is now blurred, as under the assistant.
+- **The assistant's AI:** besides Gemini, OpenAI, Claude, or any OpenAI-compatible server at a base URL (OpenRouter, Groq, DeepSeek, a local Ollama / LM Studio without a key). Settings › Accounts & keys: pick the service, the key and the model (the list is loaded from the service). All of Luna's tools work with them; Google Search stays Gemini-only, so such answers are marked "no sources".
+- **Letterboxd:**
+  - the link box takes a user name, "@name", "letterboxd.com/name" or a full link (a page with a query or a "www." no longer fails); an unknown user says so;
+  - while a profile is read, a card shows what is being read ("Watched: page 3 · 214 films", "List 4/12…") and for how long, instead of a silent wait of a minute or two;
+  - "This is my profile": your own watched films (with your stars), likes and watchlist are saved in Luna (the diary and "Watch later"), and "⟳ Update" refreshes them;
+  - "Hide what I watched" on friends' recommendations and their Letterboxd lists hides the films you already watched (ticked, rated or on your Letterboxd); it remembers the choice.
+- (Dev: the browser mock can add folders, rename, read Letterboxd with progress and answer as OpenAI / Claude.)
+
 ## 1.3.9CC — 2026-10-21
 
 - **Books › no second copy:** a free book that is already in the library (asked for from the open-libraries row or by the assistant) is opened from the library instead of being downloaded again as "… (2).epub". Its card says "In your library · read".

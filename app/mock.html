@@ -79,11 +79,43 @@
         convertFileSrc: (p) => p,
         invoke: async (cmd, args) => {
           console.log("invoke", cmd);
-          if (cmd === "plugin:window|is_fullscreen" || cmd === "plugin:window|is_maximized") return false;
+          if (cmd === "plugin:window|is_fullscreen") return !!window.__full;
+          if (cmd === "plugin:window|set_fullscreen") { window.__full = !!args.value; setTimeout(() => window.__emit("tauri://resize", { width: 1, height: 1 }), 50); return null; }
+          if (cmd === "plugin:window|is_maximized") return false;
           if (cmd === "plugin:event|listen") { (listeners[args.event] ??= []).push(args.handler); return args.handler; }
           if (cmd.startsWith("plugin:event|")) return null;
           if (cmd === "mpv_command") { mpvSim(args.args); return null; }
+          // ?lib: a film folder and a series folder (two copies of one film, subtitles beside some)
+          if (cmd === "scan_folders" && location.search.includes("lib")) return args.folders.flatMap((f) => /dizi|series/i.test(f)
+            ? ["Severance/Season 1/01 - Good News About Hell.mkv", "Severance/Season 1/02 - Half Loop.mkv", "Severance/Season 2/01 Hello Ms Cobel.mkv"].map((x) => f + "/" + x)
+            : ["Dune.Part.Two.2024.1080p.mkv", "Dune Part Two (2024) 2160p HDR.mkv", "Inception.2010.mkv", "Paprika.2006.mkv"].map((x) => f + "/" + x)).map((x) => window.__renamed?.[x] ?? x);
           if (cmd === "plugins_list" || cmd === "fonts_list" || cmd === "torrent_list" || cmd === "scan_folders") return [];
+          if (cmd === "plugin:dialog|open") return window.__pick ?? "C:/Films";
+          if (cmd === "list_dir") { const files = JSON.parse(localStorage.getItem("files") || "[]").filter((f) => f.startsWith(args.path + "/") && !f.slice(args.path.length + 1).includes("/"));
+            const dirs = [...new Set(JSON.parse(localStorage.getItem("files") || "[]").filter((f) => f.startsWith(args.path + "/") && f.slice(args.path.length + 1).includes("/")).map((f) => f.slice(args.path.length + 1).split("/")[0]))];
+            return [...dirs.map((d) => ({ name: d, path: args.path + "/" + d, isDir: true, size: 0, videos: 2 })), ...files.map((f) => ({ name: f.split("/").pop(), path: f, isDir: false, size: 9e9, videos: 0 }))]; }
+          if (cmd === "subs_beside") return args.paths.map((x) => (/dune|inception/i.test(x) ? 1 : 0));
+          if (cmd === "rename_video") { if (/[\\/:*?"<>|]/.test(args.name)) throw "That name can't be used"; const to = args.path.replace(/[^\\/]+$/, args.name.trim() + "." + args.path.split(".").pop()); (window.__renamed ??= {})[args.path] = to; return to; }
+          if (cmd === "probe_video") return { width: /2160/.test(args.path) ? 3840 : 1920, height: /2160/.test(args.path) ? 2160 : 1080, codec: "hevc", gamma: /hdr/i.test(args.path) ? "pq" : "", dolbyVision: false, audioCodec: "eac3", channels: 6, duration: 9000, size: /2160/.test(args.path) ? 31e9 : 9e9 };
+          if (cmd === "letterboxd_read") {
+            const say = (m) => window.__emit("lb-progress", m);
+            for (const [i, m] of ["Watched: page 1", "Watched: page 2 · 72 films", "Liked: page 1", "Watchlist: page 1"].entries()) { await new Promise((r) => setTimeout(r, 700)); say(m); }
+            if (/nobody/.test(args.url)) throw "No Letterboxd user called “nobody”";
+            return [{ name: "Watched", kind: "watched", url: args.url + "/films/", films: [{ title: "Inception", year: "2010", stars: 4.5 }, { title: "Arrival", year: "2016", stars: 4 }, { title: "Paprika", year: "2006" }] },
+              { name: "Liked", kind: "liked", url: "", films: [{ title: "Arrival", year: "2016" }] },
+              { name: "Watchlist", kind: "watchlist", url: "", films: [{ title: "Prisoners", year: "2013" }, { title: "Sicario", year: "2015" }] },
+              ...(args.lists === false ? [] : [{ name: "Favourites", kind: "list", url: args.url + "/list/fav/", films: [{ title: "Inception", year: "2010" }, { title: "Heat", year: "1995" }, { title: "Arrival", year: "2016" }] }])];
+          }
+          if (cmd === "llm_post") {
+            window.__llm = args;
+            const b = args.body, anth = args.kind === "anthropic";
+            const lastUser = [...b.messages].reverse().find((m) => m.role === "user" || m.role === "tool");
+            const toolDone = lastUser && (lastUser.role === "tool" || (Array.isArray(lastUser.content) && lastUser.content.some((c) => c.type === "tool_result")));
+            const call = !toolDone && b.tools && /kind of blue/i.test(JSON.stringify(lastUser));
+            if (anth) return { content: call ? [{ type: "tool_use", id: "t1", name: "play_music", input: { query: "Kind of Blue" } }] : [{ type: "text", text: "Claude says hi" + (toolDone ? " (tool done)" : "") }] };
+            return { choices: [{ message: call ? { content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "play_music", arguments: JSON.stringify({ query: "Kind of Blue" }) } }] } : { content: "OpenAI-style says hi" + (toolDone ? " (tool done)" : "") } }] };
+          }
+          if (cmd === "llm_models") return args.kind === "anthropic" ? ["claude-haiku-5-5", "claude-sonnet-5-5"] : ["gpt-4.1-mini", "gpt-4.1"];
           if (cmd === "system_check") return { mpv: true, vulkan: !location.search.includes("novulkan"), gpus: ["NVIDIA GeForce RTX 3060"], lossless: false, webview: "131.0.2903.112" };
           if (cmd === "music_scan" && SHOTS) {
             // ?shots: real albums with their covers (Apple's public artwork), for the README pictures

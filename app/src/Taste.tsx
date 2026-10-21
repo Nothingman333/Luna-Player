@@ -3,9 +3,10 @@ import { lang, locale, tt, DEC, pctText } from "./i18n";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { details, Episode, fromImdb, IMG, imdbOf, isFinished, Item, Meta, Recent, SearchHit, searchTmdb, seasonEpisodes, store, tmdbGet, tmdbKeywords } from "./library";
+import { details, Episode, renameVideo, fromImdb, IMG, imdbOf, isFinished, Item, Meta, Recent, SearchHit, searchTmdb, seasonEpisodes, store, tmdbGet, tmdbKeywords } from "./library";
 import { StreamList, streamAddons, useAddons } from "./Addons";
 import { I, Icon, Mode, pct } from "./Screens";
 import { findPodcast, findStations, forgetTracks, groupAlbums, isSpotifyList, loadMusicFolders, loadMusicLibrary, loadMusicPlaylists, loadHistory, loadLikes, mostPlayed, useMusic, nowPlaying, nextTrack, playQueue, prevTrack, setShuffle, stopMusic, QItem, saveMusicPlaylists, showPlaylist, SpotifyMove, trackItem } from "./Music";
@@ -13,6 +14,7 @@ import { abAuthor, abChapters, abTitle, bookOnScreen, fetchAndOpenBook, fetchBoo
 import { fetchFeed, gutenbergBooks, gutenbergSearch, kindOf, loadSources, OEntry, searchUrl } from "./Opds";
 import { mpv, setProp } from "./mpv";
 import { ttsActive, ttsPause, ttsReady, ttsResume, ttsStart, ttsStop } from "./ReadAloud";
+import { aiKey, aiName, aiProvider, otherAi } from "./ai";
 import { addToCollection, CItem, Collection, collectionId, collectionsChanged, goPlace, loadCollections, mineContext } from "./Mine";
 
 // ---------- taste store ----------
@@ -153,7 +155,70 @@ export function lbFlatten(secs: LbSection[]): TaggedFilm[] {
   return [...map.values()];
 }
 export const isLetterboxd = (u: string) => /letterboxd\.com\/|boxd\.it\//i.test(u);
-export const readLetterboxd = (url: string, pages = 30) => invoke<LbSection[]>("letterboxd_read", { url, maxPages: pages });
+export const readLetterboxd = (url: string, pages = 30, lists = true) => invoke<LbSection[]>("letterboxd_read", { url, maxPages: pages, lists });
+
+/** The user's own Letterboxd: what they watched (with their stars), liked and want to watch goes into
+ *  Luna's records (the diary, "Watch later"), so friends' lists can hide it and the assistant knows it. */
+export const myLetterboxd = () => store.get("myLetterboxd") || "";
+export async function linkMyLetterboxd(url: string): Promise<string> {
+  const secs = await readLetterboxd(url, 100, false);
+  const d = loadDiary();
+  const byName = new Map<string, string>();
+  for (const [k, e] of Object.entries(d)) byName.set(seenKey(e.title), k);
+  const keyOf = (f: LbFilm) => {
+    const k = dKey(f.title, f.year);
+    if (d[k]) return k;
+    const other = byName.get(seenKey(f.title));
+    return other && (!f.year || !d[other].year || d[other].year === f.year) ? other : k;
+  };
+  let watched = 0, liked = 0, later = 0;
+  for (const sc of secs) for (const f of sc.films) {
+    if (sc.kind !== "watched" && sc.kind !== "liked") continue;
+    const k = keyOf(f);
+    const cur = d[k] ?? { title: f.title, year: f.year, at: Date.now() };
+    if (!cur.watched) watched++;
+    const next: DiaryEntry = { ...cur, watched: cur.watched ?? Date.now(), at: cur.at };
+    if (f.stars && !cur.rating) next.rating = Math.max(1, Math.min(10, Math.round(f.stars * 2)));
+    if (sc.kind === "liked" && !cur.vote) { next.vote = "like"; liked++; }
+    d[k] = next;
+    byName.set(seenKey(f.title), k);
+  }
+  store.set("diary", JSON.stringify(d));
+  const wl = secs.find((s) => s.kind === "watchlist")?.films ?? [];
+  if (wl.length) {
+    const cur = loadLater();
+    const add = wl.filter((f) => !cur.some((x) => seenKey(x.replace(/\s*\(\d{4}\)\s*$/, "")) === seenKey(f.title)) && !d[keyOf(f)]?.watched)
+      .map((f) => (f.year ? `${f.title} (${f.year})` : f.title));
+    later = add.length;
+    store.set("laterList", JSON.stringify([...cur, ...add]));
+  }
+  store.set("myLetterboxd", url.trim());
+  store.set("myLetterboxdAt", String(Date.now()));
+  listeners.forEach((f) => f());
+  const total = secs.find((s) => s.kind === "watched")?.films.length ?? 0;
+  return tt("Senin Letterboxd'un bağlandı: {0} izlediğin film ({1} yeni), {2} beğeni, izleme listenden {3} film “Sonra izle”ye eklendi.", total, watched, liked, later);
+}
+/** Watched by the user: in the diary (ticked, rated, from their Letterboxd) or on the old "seen" list. */
+export const iWatched = (t: { title: string; year?: string }) => !!diaryGet(t.title, t.year)?.watched || has(loadSeen(), t.title);
+/** "Hide what I watched" on friends' recommendations and lists (one switch for all of them). */
+export function useHideWatched(): [boolean, () => void] {
+  const [on, setOn] = useState(() => store.get("hideWatched") === "1");
+  useEffect(() => { const f = () => setOn(store.get("hideWatched") === "1"); window.addEventListener("luna-hide-watched", f); return () => window.removeEventListener("luna-hide-watched", f); }, []);
+  return [on, () => { store.set("hideWatched", on ? "0" : "1"); window.dispatchEvent(new Event("luna-hide-watched")); }];
+}
+function HideWatched({ hidden }: { hidden: number }) {
+  const [on, toggle] = useHideWatched();
+  return (
+    <>
+    <button className={"chip" + (on ? " on" : "")} onClick={toggle} title={tt("Senin izlediğin filmler (izledim dediklerin, puanladıkların, Letterboxd'undakiler) arkadaşlarının listelerinde görünmez")}>
+      {on ? "✓ " : ""}{tt("İzlediklerimi gizle")}{on && hidden ? <span className="muted"> · {hidden}</span> : null}
+    </button>
+    {/* nothing of the user's own is known yet: hiding has nothing to go by */}
+    {on && !myLetterboxd() && !loadSeen().length && !Object.values(loadDiary()).some((e) => e.watched) &&
+      <span className="muted small hide-hint">{tt("Neyi izlediğini bilmiyorum: “Letterboxd bağla” › “Bu benim profilim” ile kendi profilini bağla.")}</span>}
+    </>
+  );
+}
 const lbLine = (f: TaggedFilm) => `${f.title}${f.year ? ` (${f.year})` : ""}${f.stars ? ` ★${f.stars}` : ""}${f.tags?.length ? ` [${f.tags.join(", ")}]` : ""}`;
 
 /** Adds many recommendations at once without TMDB look-ups (posters are fetched lazily). */
@@ -303,23 +368,34 @@ export async function followLetterboxd(person: string, url: string, given?: LbSe
   const made: string[] = [];
   const put = (name: string, src: { url: string; minStars?: number }, films: LbFilm[]) => {
     // the same list is found by its Letterboxd address (a custom list called "Watchlist" isn't the watchlist)
-    let pl = all.find((p) => p.parent === folder!.id && (src.url ? p.source?.url === src.url : !p.source && p.name === name));
+    let pl = all.find((p) => p.parent === folder!.id && (src.url ? p.source?.url === src.url && (p.source?.minStars ?? 0) === (src.minStars ?? 0) : !p.source && p.name === name));
     if (!pl) { pl = { id: Date.now().toString(36) + made.length, name, items: [], at: Date.now(), parent: folder!.id }; all.push(pl); }
     pl.source = src.url ? src : undefined;
     pl.items = films.filter((f) => !src.minStars || (f.stars ?? 0) >= src.minStars).map((f) => ({ title: f.title, year: f.year, stars: f.stars }));
     made.push(`${name}: ${pl.items.length}`);
   };
   for (const sc of secs) {
-    if (sc.kind === "watched") put(tt("Yüksek puanladıkları (4★+)"), { url: sc.url, minStars: 4 }, sc.films);
+    // everything they watched, and their favourites (4★+) apart
+    if (sc.kind === "watched") { put(tt("İzledikleri"), { url: sc.url }, sc.films); put(tt("Yüksek puanladıkları (4★+)"), { url: sc.url, minStars: 4 }, sc.films); }
     else if (sc.films.length) put(sc.kind === "list" ? sc.name : sc.name, { url: sc.url }, sc.films);
   }
   savePlaylists(all);
-  return `“${person}” klasörü: ${made.join(" · ")}`;
+  return tt("“{0}” klasörü: {1}", person.trim(), made.join(" · "));
 }
 
 /** "Güncelle": refills every list that is linked to Letterboxd; new films are added, nothing is lost. */
 export async function refreshLinkedPlaylists(progress?: (m: string) => void): Promise<string> {
+  // a friend connected before 1.4.0 only had their 4★+ films: their whole "watched" list is added
+  const pls = loadPlaylists();
+  let addedLists = false;
+  for (const fav of pls.filter((p) => p.source?.minStars && p.parent)) {
+    if (pls.some((x) => x.parent === fav.parent && x.source?.url === fav.source!.url && !x.source?.minStars)) continue;
+    pls.splice(pls.indexOf(fav), 0, { id: Date.now().toString(36) + "w" + pls.length, name: tt("İzledikleri"), items: [], at: Date.now(), parent: fav.parent, source: { url: fav.source!.url } });
+    addedLists = true;
+  }
+  if (addedLists) savePlaylists(pls);
   const linked = loadPlaylists().filter((p) => p.source);
+  const byUrl = new Map<string, LbFilm[]>();
   // read everything first; the lists are changed only at the end, on what is saved by then
   // (a list renamed or made while the pages were loading stays as it is)
   const got = new Map<string, LbFilm[]>();
@@ -327,7 +403,9 @@ export async function refreshLinkedPlaylists(progress?: (m: string) => void): Pr
   for (const [i, pl] of linked.entries()) {
     progress?.(tt("Güncelleniyor {0}/{1}: {2}", i + 1, linked.length, pl.name));
     try {
-      got.set(pl.id, (await readLetterboxd(pl.source!.url, 80)).flatMap((sc) => sc.films));
+      const u = pl.source!.url;
+      if (!byUrl.has(u)) byUrl.set(u, (await readLetterboxd(u, 80, false)).flatMap((sc) => sc.films));
+      got.set(pl.id, byUrl.get(u)!);
     } catch { failed++; /* keep the old content if the page can't be read */ }
   }
   const all = loadPlaylists();
@@ -510,7 +588,7 @@ export function TasteButtons({ it }: { it: Item }) {
 /** Imports friends' recommendations: Letterboxd / IMDb CSV exports, or any pasted text (Gemini picks out the titles). */
 /** Film titles out of any text: CSV exports directly, otherwise the assistant picks them out. */
 async function extractTitles(t: string): Promise<{ title: string; year?: string }[]> {
-  const key = store.get("geminiKey");
+  const key = aiKey();
   if (key) {
     const body = {
       systemInstruction: { parts: [{ text: "Verilen metindeki film ve dizi adlarını bul. Sadece JSON dizi döndür: [{\"title\":\"...\",\"year\":\"YYYY\"}]. Yıl yoksa year alanını boş bırak. Film olmayanları alma." }] },
@@ -550,7 +628,7 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
     const onlyUrl = /^\s*https?:\/\/\S+\s*$/i.test(t);
     // Letterboxd is read by Luna itself: no Gemini key needed for it
     if (onlyUrl && isLetterboxd(t)) return lbFlatten(await readLetterboxd(t.trim(), 80));
-    const key = store.get("geminiKey");
+    const key = aiKey();
     if (key) {
       if (onlyUrl) t = await invoke<string>("fetch_page_text", { url: t.trim() });
       const body: any = {
@@ -1068,6 +1146,7 @@ function PlaylistView({ pl, owner, items, onPlay, onOpen, onClose }: {
   const [sort, setSort] = useState<PlSort>("order");
   const [q, setQ] = useState("");
   const [onlyLib, setOnlyLib] = useState(false);
+  const [hideSeen] = useHideWatched();
   const [shown, setShown] = useState(60);
   const [drag, setDrag] = useState<number | null>(null);
   // the search as it settles (the posters aren't looked up on every key press)
@@ -1081,6 +1160,7 @@ function PlaylistView({ pl, owner, items, onPlay, onOpen, onClose }: {
     let list = cur.items;
     if (dq.trim()) list = list.filter((t) => seenKey(t.title).includes(seenKey(dq)));
     if (onlyLib) list = list.filter((t) => libMatch(items, t));
+    if (hideSeen) list = list.filter((t) => !iWatched(t));
     // a sorted wall can put any film on top, so all of them are looked up then
     const work = sort === "order" ? list.slice(0, shown) : list;
     if (!work.some((x) => (!x.poster || x.rating == null) && !x.noPoster)) return;
@@ -1091,7 +1171,7 @@ function PlaylistView({ pl, owner, items, onPlay, onOpen, onClose }: {
       for (const x of p.items) { const w = work.find((y) => y.title === x.title && y.year === x.year); if (w) posterInfo(x, w); }
       savePlaylists(fresh);
     }, sort === "order" ? shown : work.length);
-  }, [pl.id, shown, dq, onlyLib, sort]);
+  }, [pl.id, shown, dq, onlyLib, sort, hideSeen]);
   const inLib = (t: PlItem) => libMatch(items, t);
   const edit = (f: (p: Playlist) => void) => { const all = loadPlaylists(); const p = all.find((x) => x.id === pl.id); if (p) { f(p); savePlaylists(all); } };
   const removeItem = (t: PlItem) => edit((p) => { p.items = p.items.filter((x) => !(x.title === t.title && x.year === t.year)); });
@@ -1102,6 +1182,9 @@ function PlaylistView({ pl, owner, items, onPlay, onOpen, onClose }: {
   let view = all.map((t, i) => ({ t, i }));
   if (q.trim()) view = view.filter(({ t }) => seenKey(t.title).includes(seenKey(q)));
   if (onlyLib) view = view.filter(({ t }) => inLib(t));
+  const before = view.length;
+  if (hideSeen) view = view.filter(({ t }) => !iWatched(t));
+  const hiddenN = before - view.length;
   const by: Record<PlSort, (a: PlItem, b: PlItem) => number> = {
     order: () => 0,
     tmdb: (a, b) => (b.rating ?? 0) - (a.rating ?? 0),
@@ -1136,6 +1219,7 @@ function PlaylistView({ pl, owner, items, onPlay, onOpen, onClose }: {
           <div className="plv-search"><Icon d={I.search} size={14} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tt("Listede ara")} /></div>
           <select value={sort} onChange={(e) => setSort(e.target.value as PlSort)}>{PL_SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
           <button className={"chip" + (onlyLib ? " on" : "")} onClick={() => setOnlyLib((v) => !v)}>{tt("Kütüphanemdekiler")}</button>
+          <HideWatched hidden={hiddenN} />
           <button className="chip" onClick={del}>{tt("Listeyi sil")}</button>
         </div>
       </div>
@@ -1145,7 +1229,7 @@ function PlaylistView({ pl, owner, items, onPlay, onOpen, onClose }: {
           const d = diaryGet(t.title, t.year);
           return (
             <div key={t.title + (t.year ?? "") + i} className={"plg-card" + (drag === i ? " dragging" : "")}
-              draggable={sort === "order" && !q && !onlyLib}
+              draggable={sort === "order" && !q && !onlyLib && !hideSeen}
               onDragStart={() => setDrag(i)} onDragEnd={() => setDrag(null)}
               onDragOver={(e) => { if (drag != null) e.preventDefault(); }}
               onDrop={() => { if (drag != null) moveTo(drag, i); setDrag(null); }}>
@@ -1296,6 +1380,17 @@ export function RecsPage({ items, onPlay, onTorrent, onAsk, onSource, onDownload
   const [lbOpen, setLbOpen] = useState(false);
   const [lb, setLb] = useState("");
   const [lbWho, setLbWho] = useState("");
+  const [lbMine, setLbMine] = useState(false);
+  // while Letterboxd is read: what it is doing (pages, lists) and for how long
+  const [lbBusy, setLbBusy] = useState<{ msg: string; at: number } | null>(null);
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!lbBusy) return;
+    const id = setInterval(() => tick((n) => n + 1), 1000);
+    const un = listen<string>("lb-progress", (e) => setLbBusy((b) => (b ? { ...b, msg: e.payload } : b)));
+    return () => { clearInterval(id); un.then((f) => f()); };
+  }, [!!lbBusy]);
+  const [hideSeen] = useHideWatched();
   const [busyMsg, setBusyMsg] = useState("");
   const pick = (w: string | null) => { setWho(w); setTab("recs"); setModOpen(false); setShown(48); setDoneShown(24); if (w && w !== "*") setFrom(w); };
   const [imp, setImp] = useState(false);
@@ -1330,7 +1425,8 @@ export function RecsPage({ items, onPlay, onTorrent, onAsk, onSource, onDownload
   const remove = (id: string) => saveRecs(loadRecs().filter((r) => r.id !== id));
   const inLib = (r: Rec) => !!libMatch(items, r);
   const mine = who && who !== "*" ? recs.filter((r) => seenKey(r.from) === seenKey(who)) : recs;
-  const open = who ? mine.filter((r) => !r.status || r.id === askFor?.id) : [];
+  const open0 = who ? mine.filter((r) => !r.status || r.id === askFor?.id) : [];
+  const open = hideSeen ? open0.filter((r) => r.id === askFor?.id || !iWatched(r)) : open0;
   const done = who ? mine.filter((r) => r.status && r.id !== askFor?.id) : [];
   useContentWarnings(open.slice(0, shown));
   // posters for the cards on screen (and the next page as they open)
@@ -1409,6 +1505,7 @@ export function RecsPage({ items, onPlay, onTorrent, onAsk, onSource, onDownload
   const folder = who && who !== "*" ? folderOf(who) : undefined;
   const subLists = folder ? allPl.filter((x) => x.parent === folder.id) : [];
   const curList = subLists.find((x) => x.id === tab);
+  useEffect(() => { if (tab === "recs" && !mine.length && subLists.length) setTab(subLists[0].id); }, [who, tab, mine.length, subLists.length]);
   useEffect(() => {
     if (!who) { setRecsView(null); return; }
     setRecsView(curList
@@ -1426,9 +1523,14 @@ export function RecsPage({ items, onPlay, onTorrent, onAsk, onSource, onDownload
     try { setBusyMsg(await followLetterboxd(lbWho, "", await readLetterboxdExport(paths))); setLbOpen(false); pick(lbWho.trim()); } catch (e) { setBusyMsg(String(e).replace(/^Error: /, "")); }
   };
   const follow = async () => {
-    if (!lb.trim() || !lbWho.trim()) return;
-    setBusyMsg(tt("Letterboxd okunuyor… (beğenileri, izleme listesi ve kendi listeleri)"));
-    try { setBusyMsg(await followLetterboxd(lbWho, lb.trim())); setLb(""); setLbOpen(false); pick(lbWho.trim()); } catch (e) { setBusyMsg(String(e)); }
+    if (!lb.trim() || (!lbMine && !lbWho.trim()) || lbBusy) return;
+    setBusyMsg("");
+    setLbBusy({ msg: tt("Letterboxd'a bağlanılıyor"), at: Date.now() });
+    try {
+      if (lbMine) { setBusyMsg(await linkMyLetterboxd(lb.trim())); setLb(""); setLbOpen(false); }
+      else { setBusyMsg(await followLetterboxd(lbWho, lb.trim())); setLb(""); setLbOpen(false); pick(lbWho.trim()); }
+    } catch (e) { setBusyMsg(String(e).replace(/^Error: /, "")); }
+    setLbBusy(null);
   };
   const delPerson = (w: string) => {
     if (!confirm(tt("{0} ile ilgili her şey (önerileri ve Letterboxd listeleri) silinsin mi?", w))) return;
@@ -1480,21 +1582,51 @@ export function RecsPage({ items, onPlay, onTorrent, onAsk, onSource, onDownload
           <button className={"chip" + (addOpen ? " on" : "")} onClick={() => setAddOpen((v) => !v)}>{tt("+ Öneri ekle")}</button>
           <button className={"chip" + (imp ? " on" : "")} onClick={() => setImp((v) => !v)}>{tt("İçe aktar")}</button>
           <button className={"chip" + (lbOpen ? " on" : "")} onClick={() => setLbOpen((v) => !v)}>{tt("Letterboxd bağla")}</button>
-          <button className="chip" onClick={async () => { setBusyMsg(tt("Güncelleniyor…")); setBusyMsg(await refreshLinkedPlaylists(setBusyMsg).catch((e) => String(e).replace(/^Error: /, ""))); }}>{tt("⟳ Güncelle")}</button>
+          <HideWatched hidden={open0.length - open.length} />
+          <button className="chip" onClick={async () => {
+            setBusyMsg(tt("Güncelleniyor…"));
+            let mineMsg = "";
+            if (myLetterboxd()) { setBusyMsg(tt("Senin Letterboxd'un güncelleniyor…")); mineMsg = await linkMyLetterboxd(myLetterboxd()).catch((e) => String(e).replace(/^Error: /, "")); }
+            const r = await refreshLinkedPlaylists(setBusyMsg).catch((e) => String(e).replace(/^Error: /, ""));
+            setBusyMsg([mineMsg, r].filter(Boolean).join(" · "));
+          }}>{tt("⟳ Güncelle")}</button>
         </h2>
         {addOpen && addForm}
         {imp && <ImportPanel onDone={() => setImp(false)} />}
         {lbOpen && (
-          <div className="lb-row">
-            <input value={lbWho} onChange={(e) => setLbWho(e.target.value)} placeholder={tt("Kimin? (ör. Ali)")} />
-            <input value={lb} onChange={(e) => setLb(e.target.value)} onKeyDown={(e) => e.key === "Enter" && follow()} placeholder={tt("Letterboxd profil ya da liste bağlantısı")} />
-            <button className="primary sm" onClick={follow} disabled={!lb.trim() || !lbWho.trim()}>{tt("Bağla")}</button>
-            <span className="muted small">{tt("ya da")}</span>
-            <button className="chip" onClick={followExport} disabled={!lbWho.trim()}
-              data-tip={tt("Letterboxd'da Ayarlar → Veri → Dışa aktar ile indirilen ZIP (ya da içindeki CSV'ler). Site okunamadığında da çalışır.")}>{tt("Dışa aktarma dosyası seç")}</button>
+          <div className="lb-box">
+            <div className="lb-row">
+              <label className="look-check lb-mine">
+                <input type="checkbox" checked={lbMine} onChange={(e) => setLbMine(e.target.checked)} />
+                {tt("Bu benim profilim")}
+              </label>
+              {!lbMine && <input value={lbWho} onChange={(e) => setLbWho(e.target.value)} placeholder={tt("Kimin? (ör. Ali)")} />}
+              <input className="lb-url" value={lb} onChange={(e) => setLb(e.target.value)} onKeyDown={(e) => e.key === "Enter" && follow()} placeholder={tt("Letterboxd kullanıcı adı ya da bağlantısı (ör. ali ya da letterboxd.com/ali)")} spellCheck={false} />
+              <button className="primary sm" onClick={follow} disabled={!lb.trim() || (!lbMine && !lbWho.trim()) || !!lbBusy}>{lbBusy ? tt("Bağlanıyor…") : tt("Bağla")}</button>
+              {!lbMine && <>
+                <span className="muted small">{tt("ya da")}</span>
+                <button className="chip" onClick={followExport} disabled={!lbWho.trim()}
+                  data-tip={tt("Letterboxd'da Ayarlar → Veri → Dışa aktar ile indirilen ZIP (ya da içindeki CSV'ler). Site okunamadığında da çalışır.")}>{tt("Dışa aktarma dosyası seç")}</button>
+              </>}
+            </div>
+            <div className="muted small">{lbMine
+              ? tt("İzlediğin filmler (puanlarınla), beğenilerin ve izleme listen Luna'ya kaydedilir: arkadaşlarının listelerinde “İzlediklerimi gizle” bunları gizler, asistan da bunları sana tekrar önermez.")
+              : tt("Arkadaşının izledikleri, beğenileri, izleme listesi ve kendi listeleri onun adıyla bir klasöre gelir. Büyük profillerde 1-2 dakika sürebilir.")}</div>
+            {myLetterboxd() && <div className="small lb-me">{tt("Senin Letterboxd'un:")} <b>{myLetterboxd()}</b>
+              <button className="set-link" onClick={() => { store.remove("myLetterboxd"); setBusyMsg(tt("Letterboxd profilin ayrıldı; kaydedilen izlediklerin yerinde duruyor.")); }}>{tt("Ayır")}</button></div>}
           </div>
         )}
-        {busyMsg && <div className="small import-msg">{busyMsg}</div>}
+        {lbBusy && (
+          <div className="lb-progress" role="status">
+            <span className="mu-spin sm" />
+            <div className="grow">
+              <b>{tt("Letterboxd okunuyor")}</b>
+              <div className="muted small">{lbBusy.msg}</div>
+            </div>
+            <span className="muted small">{Math.round((Date.now() - lbBusy.at) / 1000)} {tt("sn")}</span>
+          </div>
+        )}
+        {busyMsg && !lbBusy && <div className="small import-msg">{busyMsg}</div>}
         {!people.length && <div className="muted empty-note">{tt("Arkadaşlarının önerdiği filmleri ekle ya da Letterboxd'larını bağla. Luna Asistanı bunları da hesaba katar.")}</div>}
 
         {people.length > 0 && (
@@ -1563,7 +1695,7 @@ export function RecsPage({ items, onPlay, onTorrent, onAsk, onSource, onDownload
 
             {subLists.length > 0 && (
               <div className="ppl-tabs">
-                <button className={"seg sm" + (tab === "recs" ? " on" : "")} onClick={() => setTab("recs")}>{tt("Önerileri")} <span className="muted">{mine.length}</span></button>
+                {mine.length > 0 && <button className={"seg sm" + (tab === "recs" ? " on" : "")} onClick={() => setTab("recs")}>{tt("Önerileri")} <span className="muted">{mine.length}</span></button>}
                 {subLists.map((x) => (
                   <button key={x.id} className={"seg sm" + (tab === x.id ? " on" : "")} onClick={() => setTab(x.id)}>{x.name} <span className="muted">{x.items.length}</span></button>
                 ))}
@@ -1616,7 +1748,7 @@ function translateTr(text: string): Promise<string | null> {
   const k = trKey(text);
   const hit = store.get(k);
   if (hit) return Promise.resolve(hit);
-  const key = store.get("geminiKey");
+  const key = aiKey();
   if (!key) return Promise.resolve(null);
   if (!trWaiting.has(k)) trWaiting.set(k, (async () => {
     try {
@@ -1674,6 +1806,11 @@ function modelChain(): string[] {
 /** Calls Gemini; on any error moves on to the next model. A search-grounded request that keeps failing
  *  is finally retried without search, so the user still gets an (unsourced) answer. */
 async function geminiWithFallback(key: string, body: any): Promise<{ r: any; model: { id: string; note?: string } }> {
+  if (aiProvider() !== "gemini") {
+    // OpenAI, Claude or a base URL: one model, the request translated (ai.ts)
+    const { r, id, noSearch } = await otherAi(body);
+    return { r, model: { id, note: noSearch ? tt("{0} ile Google araması yok; bilgiler kaynaksız, kontrol edilmedi", aiName()) : undefined } };
+  }
   const chain = modelChain();
   let lastErr: unknown = null;
   // without its tools the model must not pretend it did something (or write the call out as text)
@@ -2163,6 +2300,16 @@ const TOOLS = [{
       parameters: { type: "OBJECT", properties: { url: { type: "STRING", description: "find_free_books sonucundaki [url …]" }, gutenberg_id: { type: "STRING" }, title: { type: "STRING" }, author: { type: "STRING" } }, required: ["title"] },
     },
     {
+      name: "rename_file",
+      description: "Film kütüphanesindeki bir video dosyasının diskteki adını değiştirir (uzantı aynı kalır, yanındaki altyazı dosyaları da yeni adı alır, izleme bilgileri korunur). 'Dosyanın adını X yap', 'şu filmin adını düzelt' denince kullan. Yeni adı film adı ve yılıyla yaz: 'Alien (1979)'; dizi bölümü için 'Dizi Adı S01E02'. Kullanıcı onay kartında görür; sen sorma.",
+      parameters: { type: "OBJECT", properties: {
+        title: { type: "STRING", description: "Filmin/dizinin kütüphanedeki adı ya da dosya adının bir parçası" },
+        year: { type: "STRING" },
+        file: { type: "STRING", description: "Dizide ya da birden çok dosyada hangisi: dosya adının bir parçası (ör. 'S01E02')" },
+        new_name: { type: "STRING", description: "Uzantısız yeni dosya adı" },
+      }, required: ["title", "new_name"] },
+    },
+    {
       name: "delete_from_library",
       description: "Film kütüphanesindeki bir film/diziyi kaldırır. Kullanıcıya ne yapılacağı (dosyayı Geri Dönüşüm Kutusu'na silmek ya da sadece 'İzlemeye devam et'ten kaldırmak) onay kartında sorulur; sen sorma, aracı çağır.",
       parameters: { type: "OBJECT", properties: { title: { type: "STRING" }, year: { type: "STRING" } }, required: ["title"] },
@@ -2221,12 +2368,12 @@ const TOOL_MODE: Record<string, Mode> = {
 /** Tools that change the user's records (asked every time, undoable). */
 const CHANGES = new Set(["add_recommendation", "mark_watched", "add_watch_later", "remove_watch_later", "rate_title", "remove_recommendations", "import_link",
   "follow_letterboxd", "refresh_playlists", "add_to_playlist", "remove_from_playlist", "delete_playlist", "update_recommendation", "sort_recommendations",
-  "remember_note", "forget_note", "get_free_book", "make_collection"]);
+  "remember_note", "forget_note", "get_free_book", "make_collection", "rename_file"]);
 /** Tools that open or play something (asked unless the user said not to). */
 const OPENS = new Set(["open_playlist", "open_from_library", "play_music", "play_song", "play_radio", "play_podcast", "open_book", "play_audiobook"]);
 /** What "Undo" can put back: the changes above, but not a download (the file stays on disk), plus a
  *  music playlist made after its own preview card (asked there, so not asked twice). */
-const undoable = (name: string) => (CHANGES.has(name) && name !== "get_free_book") || name === "make_music_playlist";
+const undoable = (name: string) => (CHANGES.has(name) && name !== "get_free_book" && name !== "rename_file") || name === "make_music_playlist";
 const askOpens = () => store.get("assistAskOpen") !== "0";
 /** Everything those tools write: a snapshot of these is what "Undo" puts back. */
 const UNDO_KEYS = ["recs", "diary", "seenList", "laterList", "playlists", "userNotes", "taste", "musicPlaylists", "bookDiary", "collections"];
@@ -2312,6 +2459,7 @@ function describeTool(name: string, a: any): string {
     }
     case "play_audiobook": return tt("{0} sesli kitabı çalınacak", t(a?.query));
     case "delete_from_library": return tt("{0} kütüphaneden kaldırılacak", t(a?.title, a?.year));
+    case "rename_file": { const f = renameTarget(a); return tt("Dosyanın adı değişecek: {0} → {1}", f ? f.split(/[\\/]/).pop()! : t(a?.title), t(a?.new_name)); }
     case "open_playlist": return tt("{0} listesinin sayfası açılacak", t(a?.query));
     case "delete_music": return tt("{0} müzik arşivinden kaldırılacak", t(a?.query));
     case "delete_book": return tt("{0} kitaplıktan kaldırılacak", t(a?.title));
@@ -2860,6 +3008,18 @@ async function runMediaTool(name: string, a: any): Promise<string | null> {
   return null;
 }
 
+/** The one library file the assistant's rename means; a string listing the choices when it's not clear. */
+function renameMatches(a: any): string[] {
+  const q = String(a?.title ?? "").trim().toLowerCase();
+  const it = libMatch(toolCtx.items, { title: String(a?.title ?? ""), year: a?.year });
+  let files = it ? it.files.map((f) => f.path) : toolCtx.items.flatMap((i) => i.files.map((f) => f.path)).filter((p) => q && p.split(/[\\/]/).pop()!.toLowerCase().includes(q));
+  files = files.filter((p) => !/^[a-z][a-z0-9+.-]*:\/\//i.test(p));
+  const part = String(a?.file ?? "").trim().toLowerCase();
+  if (part && files.length > 1) files = files.filter((p) => p.split(/[\\/]/).pop()!.toLowerCase().includes(part));
+  return files;
+}
+const renameTarget = (a: any) => { const l = renameMatches(a); return l.length === 1 ? l[0] : null; };
+
 async function runTool(name: string, a: any): Promise<string> {
   const media = await runMediaTool(name, a);
   if (media != null) return media;
@@ -2887,6 +3047,15 @@ async function runTool(name: string, a: any): Promise<string> {
     }
     clearBookRecord(b);
     return `“${b.title}” için okuma kaydı silindi; dosya yerinde duruyor.`;
+  }
+  if (name === "rename_file") {
+    const l = renameMatches(a);
+    if (!l.length) return "Kütüphanede böyle bir dosya bulunamadı";
+    if (l.length > 1) return `Birden çok dosya var; file ile hangisi olduğunu belirt ya da kullanıcıya sor: ${l.slice(0, 12).map((p) => p.split(/[\\/]/).pop()).join("; ")}`;
+    try {
+      const to = await renameVideo(l[0], String(a?.new_name ?? ""));
+      return `Adı değiştirildi: ${l[0].split(/[\\/]/).pop()} → ${to.split(/[\\/]/).pop()}`;
+    } catch (e) { return `Adı değiştirilemedi: ${String(e).replace(/^Error: /, "")}`; }
   }
   if (name === "delete_from_library") {
     const it = libMatch(toolCtx.items, { title: String(a?.title ?? ""), year: a?.year });
@@ -3862,7 +4031,7 @@ export function ChatPanel({ items, recent, onClose, viewing, watching, onPlay, o
   const [err, setErr] = useState("");
   const bodyRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
-  const key = store.get("geminiKey") ?? "";
+  const key = aiKey();
 
   // the answer follows as it is written; if the user scrolled up, leave them there
   useEffect(() => {
@@ -4148,7 +4317,7 @@ export function ChatPanel({ items, recent, onClose, viewing, watching, onPlay, o
   const body = (
     <div className="chat-body" ref={bodyRef} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 90; }}>
       <div className="chat-col">
-        {!key && <div className="chat-note">{tt("Asistan için Ayarlar'a")} <b>{tt("Gemini API anahtarı")}</b>  {tt("gir (aistudio.google.com › Get API key, ücretsiz).")}</div>}
+        {!key && <div className="chat-note">{tt("Asistan için Ayarlar'a")} <b>{tt("bir yapay zekâ anahtarı")}</b>  {tt("gir: Gemini (aistudio.google.com, ücretsiz), OpenAI, Claude ya da kendi sunucun (base URL).")}</div>}
         {!msgs.length && key && (
           <div className="chat-empty">
             <div className="muted">{mode === "music" ? tt("Ne dinlemek istediğini söyle; arşivine, beğendiklerine ve geçmişine bakıp çalayım ya da önereyim. Radyo, podcast ve koleksiyon da yapabilirim.")

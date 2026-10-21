@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 // ---------- small persistent store ----------
 /** API keys: kept by Windows (Credential Manager), held here in memory, never in localStorage, the
  *  state file or a backup. */
-export const SECRET_KEYS = ["geminiKey", "tmdbKey", "osKey"];
+export const SECRET_KEYS = ["geminiKey", "tmdbKey", "osKey", "openaiKey", "claudeKey", "customAiKey"];
 const secrets = new Map<string, string>();
 /** At start, before anything reads a key; an old plain-text key is moved into Windows and removed. */
 export async function loadSecrets() {
@@ -122,6 +122,21 @@ export function parseName(path: string): Parsed {
     if (+m[1] <= maxYear && clean(scrubbed.slice(0, m.index))) y = { at: m.index!, year: +m[1] };
   if (y) return { kind: "movie", title: clean(scrubbed.slice(0, y.at)), year: y.year };
   return { kind: "movie", title: clean(scrubbed) || clean(parentDir(path)) };
+}
+/** A video in a folder the user added as "series": the show is the first folder under it, the season
+ *  a "Season 2" / "Sezon 2" folder, the episode the number in the name ("03 - Pilot.mkv", "Bölüm 3"). */
+export function parseInSeries(path: string, root: string): Parsed {
+  const p = parseName(path);
+  if (p.kind === "tv") return p;
+  const rel = path.slice(root.replace(/[\\/]+$/, "").length).replace(/^[\\/]+/, "").split(/[\\/]/);
+  const dirs = rel.slice(0, -1);
+  const seasonRe = /^(?:season|sezon|s)\s*(\d{1,2})\b|(\d{1,2})\.?\s*(?:sezon|season)\b/i;
+  const show = dirs.find((d) => !seasonRe.test(d.trim()));
+  const sm = dirs.map((d) => d.trim().match(seasonRe)).find(Boolean);
+  // the episode: the last 1–3 digit number that isn't a year, a resolution or a codec
+  const name = base(path).replace(/\b(19|20)\d{2}\b|\b\d{3,4}p\b|\b[xh]\.?26[45]\b/gi, " ");
+  const nums = [...name.matchAll(/(?<![\d.])(\d{1,3})(?![\d.])/g)].map((m) => +m[1]);
+  return { kind: "tv", title: show ? clean(show) : p.title, season: sm ? +(sm[1] ?? sm[2]) : 1, ...(nums.length ? { episode: nums[nums.length - 1] } : {}) };
 }
 export const groupKey = (p: Parsed) =>
   p.kind === "tv" ? "tv:" + p.title.toLowerCase() + (p.year ? ":" + p.year : "") : "movie:" + p.title.toLowerCase() + ":" + (p.year ?? "");
@@ -310,14 +325,68 @@ export function relinkFile(from: string, to: string) {
   window.dispatchEvent(new Event("luna-library"));
 }
 
+/** Subtitle files next to each video ("Film.srt", "Film.tr.srt"), counted on every library scan. */
+let sideSubs: Record<string, number> | null = null;
+export const sidecarSubs = (path: string) => (sideSubs ??= store.json<Record<string, number>>("sideSubs", {}))[path] ?? 0;
+async function checkSidecarSubs(paths: string[]) {
+  const local = paths.filter((p) => !isUrl(p));
+  if (!local.length) return;
+  const n = await invoke<number[]>("subs_beside", { paths: local }).catch(() => null);
+  if (!n) return;
+  const next: Record<string, number> = {};
+  local.forEach((p, i) => { if (n[i]) next[p] = n[i]; });
+  const before = JSON.stringify(sideSubs ??= store.json("sideSubs", {}));
+  sideSubs = next;
+  if (JSON.stringify(next) !== before) { store.set("sideSubs", JSON.stringify(next)); window.dispatchEvent(new Event("luna-subs")); }
+}
+
+/** Renames a video on disk (its own subtitles go along) and moves everything Luna kept for it
+ *  (where you stopped, quality, finished…) to the new name. Returns the new path. */
+export async function renameVideo(path: string, name: string): Promise<string> {
+  const to = await invoke<string>("rename_video", { path, name });
+  if (to === path) return to;
+  const wasPinned = loadPinned().includes(path);
+  relinkFile(path, to);
+  if (!wasPinned) store.set("pinned", JSON.stringify(loadPinned().filter((x) => x !== to)));
+  if (sideSubs?.[path]) { sideSubs[to] = sideSubs[path]; delete sideSubs[path]; store.set("sideSubs", JSON.stringify(sideSubs)); }
+  window.dispatchEvent(new Event("luna-library"));
+  return to;
+}
+
+/** Films that are the same film (two copies: a 1080p and a 4K, a different file name): one TMDB id. */
+const filmId = (i: Item) => (i.parsed.kind === "movie" && i.meta && i.meta.id > 0 ? i.meta.id : null);
+/** Every copy of a film in the library, this item's files first. */
+export function copiesOf(it: Item, items: Item[]): string[] {
+  const id = filmId(it);
+  const sibs = id == null ? [] : items.filter((i) => i !== it && filmId(i) === id);
+  return [...new Set([it, ...sibs].flatMap((i) => i.files.map((f) => f.path)))];
+}
+/** A grid order where the copies of one film sit side by side (where the first one is). */
+export function besideCopies(list: Item[]): Item[] {
+  const out: Item[] = [];
+  const seen = new Set<Item>();
+  for (const it of list) {
+    if (seen.has(it)) continue;
+    const id = filmId(it);
+    const group = id == null ? [it] : list.filter((i) => i === it || filmId(i) === id);
+    for (const g of group) { seen.add(g); out.push(g); }
+  }
+  return out;
+}
+
 // ---------- library ----------
 export type LibFile = { path: string; season?: number; episode?: number };
 export type Item = { key: string; parsed: Parsed; files: LibFile[]; meta: Meta | null };
 
 const normDir = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 
+/** "movie" or "tv" for each library folder (added from the Films or the Series side). */
+export type FolderKind = "movie" | "tv";
+export const loadFolderKinds = () => store.json<Record<string, FolderKind>>("folderKinds", {});
+
 export function useLibrary(opened: string[] = []) {
   const [folders, setFoldersState] = useState<string[]>(() => store.json("folders", []));
+  const [kinds, setKinds] = useState<Record<string, FolderKind>>(loadFolderKinds);
   const [files, setFiles] = useState<string[]>(() => store.json("files", []));
   const [pinned, setPinned] = useState<string[]>(loadPinned);
   const [missing, setMissing] = useState<Set<string>>(new Set());
@@ -334,6 +403,11 @@ export function useLibrary(opened: string[] = []) {
   const setFolders = (f: string[]) => {
     store.set("folders", JSON.stringify(f));
     setFoldersState(f);
+  };
+  const setFolderKind = (dir: string, k: FolderKind) => {
+    const next = { ...loadFolderKinds(), [dir]: k };
+    store.set("folderKinds", JSON.stringify(next));
+    setKinds(next);
   };
 
   // Show the cached library instantly, refresh from disk in the background.
@@ -352,6 +426,7 @@ export function useLibrary(opened: string[] = []) {
       if (!alive) return;
       store.set("files", JSON.stringify(f));
       setFiles(f);
+      checkSidecarSubs([...f, ...loadPinned()]);
     })().catch(() => {}).finally(() => alive && setScanning(false));
     return () => { alive = false; };
   }, [folders, tick]);
@@ -359,8 +434,10 @@ export function useLibrary(opened: string[] = []) {
   const items = useMemo(() => {
     const map = new Map<string, Item>();
     // Files opened directly (outside library folders) get posters and details too.
+    const series = folders.filter((f) => kinds[f] === "tv").map((f) => [f, normDir(f)] as const);
     for (const path of [...new Set([...files, ...pinned, ...opened])]) {
-      const parsed = parseName(path);
+      const inSeries = series.find(([, n]) => normDir(path).startsWith(n + "/"));
+      const parsed = inSeries ? parseInSeries(path, inSeries[0]) : parseName(path);
       const key = groupKey(parsed);
       const it = map.get(key) ?? { key, parsed, files: [], meta: meta[key] ?? null };
       it.files.push({ path, season: parsed.season, episode: parsed.episode });
@@ -372,7 +449,7 @@ export function useLibrary(opened: string[] = []) {
     for (const it of map.values())
       it.files.sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? 0) - (b.episode ?? 0));
     return [...map.values()];
-  }, [files, pinned, meta, opened.join("\n")]);
+  }, [files, pinned, meta, opened.join("\n"), folders, kinds]);
 
   // Which videos are gone from disk (moved, deleted, drive unplugged).
   useEffect(() => {
@@ -432,7 +509,13 @@ export function useLibrary(opened: string[] = []) {
     });
 
   return {
-    folders, setFolders, items, scanning,
+    folders, setFolders, items, scanning, kinds, setFolderKind,
+    /** Adds a library folder from the Films or the Series side. */
+    addFolder: (dir: string, k: FolderKind) => {
+      setFolderKind(dir, k);
+      if (!folders.some((f) => normDir(f) === normDir(dir))) setFolders([...folders, dir]);
+      setTick((t) => t + 1);
+    },
     /** Looked up on TMDB and nothing was found by its file name. */
     unknown: (key: string) => key in meta && meta[key] === null,
     refresh: () => setTick((t) => t + 1),
