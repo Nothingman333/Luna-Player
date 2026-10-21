@@ -94,7 +94,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
         </div>
       </div>
       <div className="tour-foot">
-        <button className="tour-back" onClick={() => setN((x) => x + 1)} disabled={c == null}>↻ {tt("Tekrar kontrol et")}</button>
+        <button className="tour-back" onClick={() => setN((x) => x + 1)} disabled={c == null && !failed}>↻ {tt("Tekrar kontrol et")}</button>
         <div className="tour-count">{blocking ? tt("Eksikler giderilene kadar videolar açılmayabilir") : ""}</div>
         <div className="tour-act">
           <button className="go" onClick={done}>{blocking ? tt("Yine de devam et") : tt("Devam")} <Icon d={I.right} size={18} /></button>

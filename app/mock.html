@@ -18,18 +18,120 @@
         }
         localStorage.setItem("geminiKey", "x");
       } catch {}
+      // ?tmdb: answer TMDB with made-up lists so Keşfet can be laid out without a key
+      if (location.search.includes("tmdb")) {
+        try { localStorage.setItem("tmdbKey", "mock"); } catch {}
+        const names = ["Arrival", "Prisoners", "Sicario", "Enemy", "Incendies", "Dune", "Annihilation", "Ex Machina", "Her", "Interstellar", "Gravity", "Moon", "Contact", "Solaris"];
+        const hit = (i, tv) => ({ id: 100 + i, title: tv ? undefined : names[i % names.length], name: tv ? names[i % names.length] + " (series)" : undefined,
+          media_type: tv ? "tv" : "movie", release_date: "20" + String(10 + (i % 15)) + "-01-01", first_air_date: "2019-01-01",
+          poster_path: "/p" + i + ".jpg", backdrop_path: "/b" + i + ".jpg", vote_average: 6 + (i % 4) * 0.7,
+          overview: "A made-up overview so the layout has text to show. It runs a little long on purpose, to check the clamp." });
+        const realFetch = window.fetch;
+        window.fetch = async (u, o) => {
+          const url = String(u);
+          if (!url.includes("api.themoviedb.org")) return realFetch(u, o);
+          const path = new URL(url).pathname.replace("/3", "");
+          const tv = path.startsWith("/tv");
+          let body;
+          if (/external_ids/.test(path)) body = { imdb_id: "tt0" + path.match(/\d+/)[0] };
+          else if (/^\/find\//.test(path)) body = { movie_results: [hit(3, false)], tv_results: [] };
+          else if (/\/season\/\d+$/.test(path)) body = { episodes: Array.from({ length: 8 }, (_, i) => ({ episode_number: i + 1, name: "Episode " + (i + 1), overview: "", still_path: null, runtime: 50 })) };
+          else if (path === "/genre/movie/list") body = { genres: [{ id: 18, name: "Drama" }, { id: 878, name: "Science Fiction" }] };
+          else if (/credits|keywords/.test(path)) body = { cast: [], keywords: [] };
+          else if (/^\/(movie|tv)\/\d+$/.test(path)) body = { ...hit(+path.match(/\d+/)[0] - 100, tv), genres: [{ name: "Drama" }], runtime: 118, number_of_seasons: 3 };
+          else body = { results: Array.from({ length: 14 }, (_, i) => hit(i + (path.length % 5), tv || (path.includes("trending") && i % 4 === 1))) };
+          return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+        };
+      }
+      const SHOTS = location.search.includes("shots");
+      const mockAddon = (url) => {
+        if (url.endsWith("/manifest.json")) return { id: "mock.addon", version: "1.0.0", name: "Mock Addon", description: "Test addon", types: ["movie", "series"], idPrefixes: ["tt"],
+          resources: ["catalog", "stream"], catalogs: [{ type: "movie", id: "top", name: "Mock top films" }, { type: "movie", id: "search", name: "Search", extra: [{ name: "search", isRequired: true }] }] };
+        if (url.includes("/catalog/")) return { metas: Array.from({ length: 10 }, (_, i) => ({ id: "tt01" + i, type: "movie", name: "Catalog film " + (i + 1), releaseInfo: "2021", imdbRating: "7.4" })) };
+        if (url.includes("/stream/")) return { streams: [
+          { name: "Mock\n4K", title: "Some.Film.2160p.WEB-DL.mkv\n💾 14.2 GB 👤 120", infoHash: "0123456789abcdef0123456789abcdef01234567", fileIdx: 2, sources: ["tracker:udp://tracker.example:1337/announce"] },
+          { name: "Mock\n1080p", title: "Direct link\n2.1 GB", url: "https://example.com/video.mp4" },
+          { name: "Mock", title: "Official trailer", ytId: "dQw4w9WgXcQ" },
+        ] };
+        return null;
+      };
+      window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
       let cb = 0;
+      // events: window.__emit("mpv", {...}) reaches the app's listen() handlers
+      const fns = {}, listeners = {};
+      window.__emit = (event, payload) => (listeners[event] ?? []).forEach((id) => fns[id]?.({ event, id, payload }));
+      // a tiny mpv: a path with "bad" in it fails to open, anything else starts playing
+      const mpvSim = (args) => {
+        const [c, a1, a2] = args;
+        const prop = (name, data) => window.__emit("mpv", { event: "property-change", name, data });
+        if (c === "loadfile") setTimeout(() => {
+          if (/bad/i.test(a1)) { window.__emit("mpv", { event: "end-file", reason: "error", file_error: "loading failed" }); return; }
+          window.__emit("mpv", { event: "start-file" }); prop("path", a1); prop("media-title", a1.split("/").pop()); prop("duration", 240);
+          window.__emit("mpv", { event: "file-loaded" }); window.__emit("mpv", { event: "playback-restart" }); prop("pause", false); prop("time-pos", 1);
+        }, 150);
+        if (c === "set_property") prop(a1, a2);
+        if (c === "cycle" && a1 === "pause") { window.__mpvPaused = !window.__mpvPaused; prop("pause", window.__mpvPaused); }
+        if (c === "stop") { window.__emit("mpv", { event: "end-file", reason: "stop" }); prop("path", null); prop("duration", 0); }
+      };
       window.__TAURI_INTERNALS__ = {
         metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
-        transformCallback: () => ++cb,
+        transformCallback: (fn) => { fns[++cb] = fn; return cb; },
         convertFileSrc: (p) => p,
         invoke: async (cmd, args) => {
           console.log("invoke", cmd);
           if (cmd === "plugin:window|is_fullscreen" || cmd === "plugin:window|is_maximized") return false;
-          if (cmd.startsWith("plugin:event|listen")) return cb;
+          if (cmd === "plugin:event|listen") { (listeners[args.event] ??= []).push(args.handler); return args.handler; }
+          if (cmd.startsWith("plugin:event|")) return null;
+          if (cmd === "mpv_command") { mpvSim(args.args); return null; }
           if (cmd === "plugins_list" || cmd === "fonts_list" || cmd === "torrent_list" || cmd === "scan_folders") return [];
           if (cmd === "system_check") return { mpv: true, vulkan: !location.search.includes("novulkan"), gpus: ["NVIDIA GeForce RTX 3060"], lossless: false, webview: "131.0.2903.112" };
+          if (cmd === "music_scan" && SHOTS) {
+            // ?shots: real albums with their covers (Apple's public artwork), for the README pictures
+            const art = (p) => "https://is1-ssl.mzstatic.com/image/thumb/" + p + "/600x600bb.jpg";
+            const albums = [["Pink Floyd", "Wish You Were Here", 1975, art("Music211/v4/aa/e0/ab/aae0ab6a-d906-a189-81bf-70b56aa43f7a/886445635843.jpg"), ["Shine On You Crazy Diamond", "Welcome to the Machine", "Have a Cigar", "Wish You Were Here"]],
+              ["Miles Davis", "Kind of Blue", 1959, art("Music/7f/9f/d6/mzi.vtnaewef.jpg"), ["So What", "Freddie Freeloader", "Blue in Green", "All Blues"]],
+              ["Radiohead", "In Rainbows", 2007, art("Music126/v4/dd/50/c7/dd50c790-99ac-d3d0-5ab8-e3891fb8fd52/634904032463.png"), ["15 Step", "Bodysnatchers", "Nude", "Weird Fishes/Arpeggi", "Reckoner"]],
+              ["Daft Punk", "Random Access Memories", 2013, art("Music115/v4/e8/43/5f/e8435ffa-b6b9-b171-40ab-4ff3959ab661/886443919266.jpg"), ["Give Life Back to Music", "Instant Crush", "Get Lucky"]],
+              ["Fleetwood Mac", "Rumours", 1977, art("Music124/v4/4d/13/ba/4d13bac3-d3d5-7581-2c74-034219eadf2b/081227970949.jpg"), ["Dreams", "Never Going Back Again", "Go Your Own Way"]],
+              ["Barış Manço", "Sözüm Meclisten Dışarı", 1981, art("Music221/v4/60/dc/6e/60dc6ee6-d097-bbfb-fd4c-78522ba290e3/cover.jpg"), ["Dönence", "Gülpembe"]]];
+            return albums.flatMap(([a, al, y, cover, ts]) => ts.map((t, i) => ({ path: `C:/Music/${a}/${al}/${i + 1} ${t}.flac`, title: t, artist: a, album: al, albumArtist: a, track: i + 1, year: y, duration: 200 + i * 47, cover })));
+          }
+          if (cmd === "music_scan") {
+            const albums = [["Pink Floyd", "Wish You Were Here", 1975, ["Shine On You Crazy Diamond", "Welcome to the Machine", "Have a Cigar", "Wish You Were Here"]],
+              ["Miles Davis", "Kind of Blue", 1959, ["So What", "Freddie Freeloader", "Blue in Green"]],
+              ["Radiohead", "In Rainbows", 2007, ["15 Step", "Bodysnatchers", "Nude", "Reckoner"]],
+              ["Barış Manço", "Sözüm Meclisten Dışarı", 1981, ["Dönence", "Gülpembe"]], ["Test", "Bozuk Dosyalar", 2020, ["bad one", "bad two", "Good three"]]];
+            return albums.flatMap(([a, al, y, ts]) => ts.map((t, i) => ({ path: `C:/Music/${a}/${al}/${i + 1} ${t}.flac`, title: t, artist: a, album: al, albumArtist: a, track: i + 1, year: y, duration: 180 + i * 47, cover: null })));
+          }
+          // books: test files under public/__t (not committed)
+          if (cmd === "books_scan" && SHOTS) return [[84, "Frankenstein", "Mary Shelley"], [1342, "Pride and Prejudice", "Jane Austen"], [2701, "Moby Dick", "Herman Melville"],
+            [11, "Alice's Adventures in Wonderland", "Lewis Carroll"], [345, "Dracula", "Bram Stoker"], [1661, "The Adventures of Sherlock Holmes", "Arthur Conan Doyle"]]
+            .map(([n, title, author]) => ({ path: `C:/Books/${title}.epub`, kind: "epub", title, author, cover: `https://www.gutenberg.org/cache/epub/${n}/pg${n}.cover.medium.jpg` }));
+          if (cmd === "books_scan") return [
+            { path: "C:/Books/test.epub", kind: "epub", title: "Deneme Kitabı", author: "Luna Test", cover: "/__t/cover.jpg" },
+            { path: "C:/Books/test.pdf", kind: "pdf", title: "test", author: "" },
+            { path: "C:/Books/comic.cbz", kind: "cbz", title: "Çizgi Roman", author: "" }];
+          if (cmd === "book_bytes") return (await fetch("/__t/" + (args.path.endsWith(".pdf") ? "test.pdf" : "test.epub"))).arrayBuffer();
+          if (cmd === "cbz_pages") return ["1.png", "2.png", "3.png"];
+          if (cmd === "cbz_page") return (await fetch("/__t/" + args.name)).arrayBuffer();
+          if (cmd === "books_default_dir") return "C:/Luna Books";
+          if (cmd === "addon_get") { if (!args.url.includes("mock")) throw "Couldn't reach the addon"; return mockAddon(args.url); }
           if (cmd === "paths_exist") return args.paths.map((p) => !p.includes("Arrival"));
+          if (cmd === "http_text_at") { const r = await fetch(args.url); if (!r.ok) throw "HTTP " + r.status; return [r.url, await r.text()]; }
+          if (cmd === "http_text") { const r = await fetch(args.url); if (!r.ok) throw "HTTP " + r.status; return r.text(); }
+          if (cmd === "gemini") {
+            // a tool round, for "... kind of blue ..." (tests the assistant's cross-part tools)
+            const c = args.body.contents, last = c[c.length - 1].parts[0];
+            const asked = c.filter((x) => x.role === "user" && x.parts[0].text).pop()?.parts[0].text ?? "";
+            if (last.functionResponse) return { candidates: [{ content: { parts: [{ text: "OK: " + last.functionResponse.response.result + "\n>> More | Radio" }] } }] };
+            if (/dune var/i.test(asked)) return { candidates: [{ content: { parts: [{ functionCall: { name: "search_books", args: { query: "Dune" } } }] } }] };
+            if (/listemi çal/i.test(asked)) return { candidates: [{ content: { parts: [{ functionCall: { name: "play_music", args: { query: "All Out 80s" } } }] } }] };
+            if (/albümü kaldır/i.test(asked)) return { candidates: [{ content: { parts: [{ functionCall: { name: "delete_music", args: { query: "Kind of Blue", what: "album" } } }] } }] };
+            if (/kitabı kaldır/i.test(asked)) return { candidates: [{ content: { parts: [{ functionCall: { name: "delete_book", args: { title: "Deneme Kitabı" } } }] } }] };
+            if (/maraton/i.test(asked)) return { candidates: [{ content: { parts: [{ functionCall: { name: "add_to_playlist", args: { playlist: "Villeneuve maratonu", titles: ["Arrival (2016)", "Prisoners (2013)", "Sicario (2015)"] } } }] } }] };
+            if (/\bsil\b/i.test(asked)) return { candidates: [{ content: { parts: [{ functionCall: { name: "delete_from_library", args: { title: "The Matrix Reloaded" } } }] } }] };
+            if (/kind of blue/i.test(asked)) return { candidates: [{ content: { parts: [{ functionCall: { name: "play_music", args: { query: "Kind of Blue" } } }] } }] };
+          }
           if (cmd === "gemini") return { candidates: [{ content: { parts: [{ text: "Since you loved **Arrival (2016)** and **Blade Runner 2049 (2017)**, these should hit the spot tonight:\n\n- **Prisoners (2013)** — Villeneuve again: a slow-burning, tense mystery. Not in your library yet.\n- **Annihilation (2018)** — eerie, beautiful sci-fi with a haunting finale.\n- **Paprika (2006)** — in your library: a dreamlike anime thriller you can start right now.\n>> Something lighter | Only from my library | More like Arrival" }] } }] };
           return null;
         },

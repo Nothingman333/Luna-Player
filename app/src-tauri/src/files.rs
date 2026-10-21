@@ -231,10 +231,15 @@ fn is_own_sub(name: &str, stem: &str) -> bool {
     })
 }
 
-/// Moves the video (and its matching subtitle files) to the Recycle Bin.
+/// Moves the file to the Recycle Bin; a video takes its matching subtitle files along
+/// (a book or a song never does: "Film.pdf" must not take "Film.tr.srt" of "Film.mkv").
 pub fn delete(file: &str) -> Result<u32, String> {
     let p = Path::new(file);
     let mut items = vec![p.to_path_buf()];
+    if !is_video(p) {
+        trash::delete_all(&items).map_err(|e| e.to_string())?;
+        return Ok(1);
+    }
     if let (Some(dir), Some(stem)) = (p.parent(), p.file_stem().and_then(|s| s.to_str())) {
         if let Ok(rd) = std::fs::read_dir(dir) {
             for e in rd.flatten() {

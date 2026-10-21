@@ -104,6 +104,10 @@ export function VideoPanel({ path, onClose }: { path: string; onClose: () => voi
   // Sharpness and grain removal rebuild a video filter (expensive): applied when the slider is released.
   const commit = () => setV((cur) => { applyVideoSet(cur); save(cur); return cur; });
   const set = (patch: Partial<VideoSet>) => {
+    // a slider value still waiting to be sent would land after this and undo it (e.g. Reset)
+    clearTimeout(timer.current);
+    timer.current = 0;
+    pending.current = {};
     const next = { ...v, ...patch };
     setV(next);
     applyVideoSet(next);
@@ -203,7 +207,7 @@ export function SubAppearance() {
         <select value={o.font} onChange={(e) => set({ font: e.target.value })}>
           <optgroup label="Luna">
             {SUB_FONTS.filter(([v]) => v.startsWith("Inter") || v.startsWith("Netflix")).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            {extra.map((f) => <option key={f.file} value={f.name}>{f.name}</option>)}
+            {extra.map((f) => <option key={f.file + "|" + f.name} value={f.name}>{f.name}</option>)}
           </optgroup>
           <optgroup label="Windows">
             {builtIn.map(([v, l]) => <option key={v} value={v}>{l}</option>)}

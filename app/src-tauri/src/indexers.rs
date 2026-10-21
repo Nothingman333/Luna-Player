@@ -55,7 +55,7 @@ pub fn list(dir: &Path) -> Vec<PluginInfo> {
     let Ok(rd) = std::fs::read_dir(dir) else { return out };
     for e in rd.flatten() {
         let p = e.path();
-        if !p.extension().is_some_and(|x| x == "yml" || x == "yaml") {
+        if !p.extension().is_some_and(|x| x.eq_ignore_ascii_case("yml") || x.eq_ignore_ascii_case("yaml")) {
             continue;
         }
         let file = p.file_name().unwrap().to_string_lossy().into_owned();
@@ -201,6 +201,15 @@ fn term(t: &[String], i: &mut usize, ctx: &Ctx) -> String {
     tok.clone()
 }
 
+/// Every argument left in the call.
+fn rest(t: &[String], i: &mut usize, ctx: &Ctx) -> Vec<String> {
+    let mut out = Vec::new();
+    while *i < t.len() {
+        out.push(term(t, i, ctx));
+    }
+    out
+}
+
 fn call(t: &[String], ctx: &Ctx) -> String {
     if t.is_empty() {
         return String::new();
@@ -211,12 +220,13 @@ fn call(t: &[String], ctx: &Ctx) -> String {
     match f {
         "eq" => { let a = args(2); (a[0] == a[1]).then(|| "true".into()).unwrap_or_default() }
         "ne" => { let a = args(2); (a[0] != a[1]).then(|| "true".into()).unwrap_or_default() }
-        "and" => { let a = args(2); (truthy(&a[0]) && truthy(&a[1])).then(|| a[1].clone()).unwrap_or_default() }
-        "or" => { let a = args(2); if truthy(&a[0]) { a[0].clone() } else { a[1].clone() } }
+        // Go templates: and/or take any number of arguments (the first false / the first true one, else the last)
+        "and" => { let a = rest(t, &mut i, ctx); a.iter().find(|x| !truthy(x)).or(a.last()).cloned().unwrap_or_default() }
+        "or" => { let a = rest(t, &mut i, ctx); a.iter().find(|x| truthy(x)).or(a.last()).cloned().unwrap_or_default() }
         "not" => { let a = args(1); (!truthy(&a[0])).then(|| "true".into()).unwrap_or_default() }
         "re_replace" => {
             let a = args(3);
-            Regex::new(&a[1]).map(|r| r.replace_all(&a[0], a[2].as_str()).into_owned()).unwrap_or(a[0].clone())
+            Regex::new(&a[1]).map(|r| r.replace_all(&a[0], dotnet_repl(&a[2]).as_str()).into_owned()).unwrap_or(a[0].clone())
         }
         "join" => String::new(),
         "print" | "printf" => args(1).remove(0),
@@ -312,6 +322,36 @@ fn ystr(v: &Y) -> String {
     }
 }
 
+/// .NET replacement syntax → Rust's: "$1E" means group 1 then "E" there, but group "1E" in Rust.
+fn dotnet_repl(r: &str) -> String {
+    Regex::new(r"\$(\d+)").unwrap().replace_all(r, "$${$1}").into_owned()
+}
+/// HTML entities: the common names and numeric ones.
+fn html_decode(s: &str) -> String {
+    let re = Regex::new(r"&(#[xX][0-9a-fA-F]+|#\d+|[a-zA-Z]+);").unwrap();
+    re.replace_all(s, |c: &regex::Captures| {
+        let n = &c[1];
+        let ch = if let Some(h) = n.strip_prefix("#x").or_else(|| n.strip_prefix("#X")) {
+            u32::from_str_radix(h, 16).ok().and_then(char::from_u32)
+        } else if let Some(d) = n.strip_prefix('#') {
+            d.parse::<u32>().ok().and_then(char::from_u32)
+        } else {
+            match n {
+                "amp" => Some('&'), "lt" => Some('<'), "gt" => Some('>'), "quot" => Some('"'), "apos" => Some('\''), "nbsp" => Some(' '),
+                _ => None,
+            }
+        };
+        ch.map(String::from).unwrap_or_else(|| c[0].to_string())
+    })
+    .into_owned()
+}
+/// "Amélie Çağrı" → "Amelie Cagri" (the Latin letters with marks that site titles use).
+fn strip_accents(s: &str) -> String {
+    const FROM: &str = "ÀÁÂÃÄÅàáâãäåÇçĆćČčÈÉÊËèéêëĞğÌÍÎÏìíîïİıÑñÒÓÔÕÖØòóôõöøŞşŠšÙÚÛÜùúûüÝýÿŽž";
+    const TO: &str = "AAAAAAaaaaaaCcCcCcEEEEeeeeGgIIIIiiiiIiNnOOOOOOooooooSsSsUUUUuuuuYyyZz";
+    s.chars().map(|c| FROM.chars().position(|f| f == c).and_then(|i| TO.chars().nth(i)).unwrap_or(c)).collect()
+}
+
 fn apply_filters(mut v: String, filters: Option<&Y>, ctx: &Ctx) -> String {
     let Some(Y::Sequence(fs)) = filters else { return v };
     for f in fs {
@@ -321,7 +361,7 @@ fn apply_filters(mut v: String, filters: Option<&Y>, ctx: &Ctx) -> String {
         let a1 = render(&yarg(&args, 1), ctx);
         v = match name.as_str() {
             "replace" => v.replace(&a0, &a1),
-            "re_replace" => Regex::new(&a0).map(|r| r.replace_all(&v, a1.replace("$$", "$").as_str()).into_owned()).unwrap_or(v),
+            "re_replace" => Regex::new(&a0).map(|r| r.replace_all(&v, dotnet_repl(&a1.replace("$$", "$")).as_str()).into_owned()).unwrap_or(v),
             "regexp" => Regex::new(&a0)
                 .ok()
                 .and_then(|r| r.captures(&v).map(|c| c.get(1).or(c.get(0)).map(|m| m.as_str().to_string()).unwrap_or_default()))
@@ -345,7 +385,15 @@ fn apply_filters(mut v: String, filters: Option<&Y>, ctx: &Ctx) -> String {
                 .and_then(|u| u.query_pairs().find(|(k, _)| k == &a0).map(|(_, val)| val.into_owned()))
                 .unwrap_or_default(),
             "validfilename" => v.chars().filter(|c| !r#"<>:"/\|?*"#.contains(*c)).collect(),
-            "diacritics" | "htmldecode" | "dateparse" | "timeago" | "fuzzytime" | "timeparse" | "validate" => v,
+            "htmldecode" => html_decode(&v),
+            "diacritics" => strip_accents(&v),
+            // keeps only the words of the value that are in the comma-separated list
+            "validate" => {
+                let ok: Vec<String> = a0.split(',').map(|x| x.trim().to_lowercase()).filter(|x| !x.is_empty()).collect();
+                v.split(|c: char| c == ',' || c.is_whitespace()).filter(|w| ok.contains(&w.to_lowercase())).collect::<Vec<_>>().join(",")
+            }
+            // dates are not shown in Luna's results, so these leave the text as it is
+            "dateparse" | "timeago" | "fuzzytime" | "timeparse" => v,
             _ => v,
         };
     }
@@ -440,7 +488,15 @@ pub struct Hit {
 }
 
 fn parse_size(t: &str) -> u64 {
-    let t = t.trim().replace(',', ".");
+    let raw = t.trim();
+    // "1,234,567" and "1.234,5" are thousands; a lone comma ("1,5 GB") is the decimal point
+    let t = if Regex::new(r"^\d{1,3}(,\d{3})+(\.\d+)?\b").unwrap().is_match(raw) {
+        raw.replace(',', "")
+    } else if Regex::new(r"^\d{1,3}(\.\d{3})+(,\d+)?\b").unwrap().is_match(raw) && (raw.contains(',') || raw.matches('.').count() > 1) {
+        raw.replace('.', "").replace(',', ".")
+    } else {
+        raw.replace(',', ".")
+    };
     if let Ok(n) = t.parse::<f64>() {
         return n as u64;
     }
@@ -551,7 +607,12 @@ pub async fn search_one(path: &Path, query: &str) -> Result<Vec<Hit>, String> {
         add_inputs(p.get("inputs"));
         let post = s(p, "method").eq_ignore_ascii_case("post");
         let req = if post {
-            http.post(&url).form(&inputs)
+            // a $raw input goes into the form body as written ("category[]=1&category[]=2")
+            let mut body: Vec<String> = inputs.iter().map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))).collect();
+            if !raw.is_empty() {
+                body.push(raw.clone());
+            }
+            http.post(&url).header(reqwest::header::CONTENT_TYPE, "application/x-www-form-urlencoded").body(body.join("&"))
         } else {
             let mut u = Url::parse(&url).map_err(|e| tr!("Adres hatalı: {} ({})", "Bad address: {} ({})", url, e))?;
             if !inputs.is_empty() {
@@ -655,8 +716,17 @@ pub async fn search_one(path: &Path, query: &str) -> Result<Vec<Hit>, String> {
 pub async fn resolve(path: &Path, url: &str) -> Result<String, String> {
     let def = load(path)?;
     let base = base_url(&def);
-    let body = client().get(url).send().await.map_err(|e| e.to_string())?.text().await.map_err(|e| e.to_string())?;
+    let res = client().get(url).send().await.map_err(|e| e.to_string())?;
+    let page = res.url().clone();
+    let body = res.text().await.map_err(|e| e.to_string())?;
     let doc = Html::parse_document(&body);
+    // <base href> on the page wins, like in a browser
+    let page = Selector::parse("base[href]").ok()
+        .and_then(|b| doc.select(&b).next().and_then(|e| e.value().attr("href")).and_then(|h| page.join(h).ok()))
+        .unwrap_or(page);
+    let resolve_link = |v: &str| -> String {
+        if v.starts_with("magnet:") || v.contains("://") { v.to_string() } else { page.join(v).map(|u| u.to_string()).unwrap_or_else(|_| absolutize(&base, v)) }
+    };
     let sels = def.get("download").and_then(|d| d.get("selectors")).and_then(|v| v.as_sequence()).cloned().unwrap_or_default();
     for sd in &sels {
         let Ok(css) = Selector::parse(&s(sd, "selector")) else { continue };
@@ -666,7 +736,7 @@ pub async fn resolve(path: &Path, url: &str) -> Result<String, String> {
                 let empty = HashMap::new();
                 let config = config_defaults(&def);
                 let ctx = Ctx { keywords: String::new(), config: &config, result: &empty };
-                return Ok(absolutize(&base, &apply_filters(v.to_string(), sd.get("filters"), &ctx)));
+                return Ok(resolve_link(&apply_filters(v.to_string(), sd.get("filters"), &ctx)));
             }
         }
     }
@@ -718,6 +788,16 @@ pub async fn search(dir: &Path, query: String, disabled: Vec<String>) -> SearchO
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cardigann_bits() {
+        assert_eq!(regex::Regex::new(r"(\d{2})x(\d{2})").unwrap().replace_all("12x45", super::dotnet_repl("S$1E$2").as_str()), "S12E45");
+        assert_eq!(super::parse_size("1,234,567"), 1234567);
+        assert_eq!(super::parse_size("1,5 GB"), (1.5 * 1024f64.powi(3)) as u64);
+        assert_eq!(super::parse_size("1.234,5 MB"), (1234.5 * 1024f64.powi(2)) as u64);
+        assert_eq!(super::html_decode("a&amp;b&#233;"), "a&bé");
+        assert_eq!(super::strip_accents("Amélie Çağrı"), "Amelie Cagri");
+    }
+
     use super::*;
 
     #[test]

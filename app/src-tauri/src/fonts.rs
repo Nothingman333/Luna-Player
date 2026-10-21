@@ -28,6 +28,22 @@ pub fn prepare(dir: &Path, bundled: &Path) {
 pub fn add(dir: &Path, paths: Vec<String>) -> Result<u32, String> {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let mut n = 0;
+    // names already in the folder or written by this call: "FamilyA/Regular.ttf" and
+    // "FamilyB/Regular.ttf" both stay, also when they're added at different times
+    // (lowercase: Windows names ignore case)
+    let mut taken: std::collections::HashSet<String> = std::fs::read_dir(dir)
+        .map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().to_lowercase()).collect())
+        .unwrap_or_default();
+    let mut free_name = |name: &str| {
+        let (stem, ext) = name.rsplit_once('.').unwrap_or((name, ""));
+        let mut cand = name.to_string();
+        let mut k = 2;
+        while !taken.insert(cand.to_lowercase()) {
+            cand = format!("{stem} ({k}).{ext}");
+            k += 1;
+        }
+        cand
+    };
     for p in paths {
         let path = PathBuf::from(&p);
         if p.to_lowercase().ends_with(".zip") {
@@ -39,13 +55,13 @@ pub fn add(dir: &Path, paths: Vec<String>) -> Result<u32, String> {
                 if entry.is_file() && is_font(&name) {
                     let mut buf = Vec::new();
                     entry.read_to_end(&mut buf).map_err(|e| e.to_string())?;
-                    std::fs::write(dir.join(&name), buf).map_err(|e| e.to_string())?;
+                    std::fs::write(dir.join(free_name(&name)), buf).map_err(|e| e.to_string())?;
                     n += 1;
                 }
             }
         } else if is_font(&p) {
-            let name = path.file_name().ok_or(tr!("Geçersiz dosya", "Invalid file"))?;
-            std::fs::copy(&path, dir.join(name)).map_err(|e| e.to_string())?;
+            let name = path.file_name().ok_or(tr!("Geçersiz dosya", "Invalid file"))?.to_string_lossy().into_owned();
+            std::fs::copy(&path, dir.join(free_name(&name))).map_err(|e| e.to_string())?;
             n += 1;
         }
     }
@@ -74,16 +90,19 @@ pub fn list(dir: &Path) -> Vec<FontInfo> {
             continue;
         }
         let Ok(data) = std::fs::read(e.path()) else { continue };
-        let Ok(face) = ttf_parser::Face::parse(&data, 0) else { continue };
-        let get = |id: u16| {
-            face.names()
-                .into_iter()
-                .filter(|n| n.name_id == id)
-                .find_map(|n| n.to_string())
-        };
-        let family = get(16).or_else(|| get(1)).unwrap_or_else(|| file.clone());
-        let name = get(4).unwrap_or_else(|| family.clone());
-        out.push(FontInfo { name, family, file });
+        // a .ttc collection holds several fonts: each one is listed
+        for index in 0..ttf_parser::fonts_in_collection(&data).unwrap_or(1) {
+            let Ok(face) = ttf_parser::Face::parse(&data, index) else { continue };
+            let get = |id: u16| {
+                face.names()
+                    .into_iter()
+                    .filter(|n| n.name_id == id)
+                    .find_map(|n| n.to_string())
+            };
+            let family = get(16).or_else(|| get(1)).unwrap_or_else(|| file.clone());
+            let name = get(4).unwrap_or_else(|| family.clone());
+            out.push(FontInfo { name, family, file: file.clone() });
+        }
     }
     out.sort_by(|a, b| a.family.cmp(&b.family).then(a.name.cmp(&b.name)));
     out

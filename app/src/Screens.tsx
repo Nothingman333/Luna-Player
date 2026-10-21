@@ -1,13 +1,20 @@
 import { defaultSubLangs, lang, setLang, tt, DEC } from "./i18n";
-import { useEffect, useState } from "react";
+import { BUILD_AGENT, BUILD_AGENT_NAMES, VERSION_LABEL } from "./version";
+import { UpdateSettings } from "./Update";
+import { STACK } from "./Mine";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { TasteButtons, TrText, youtubeTrailer } from "./Taste";
+import { askAssistant, TasteButtons, TrText, youtubeTrailer } from "./Taste";
 import { PluginSettings } from "./Web";
+import { AddonSettings } from "./Addons";
+import { SourceSettings } from "./Opds";
 import { UpscalerSettings } from "./Upscaler";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { fmtTime } from "./mpv";
 import { SubAppearance } from "./PlayerMenu";
+import { BackupSettings } from "./Backup";
 import {
   Episode, fmtSize, IMG, Item, qualityBadges, Recent, SearchHit, searchTmdb, seasonEpisodes, store,
   useMediaInfo, useThumb,
@@ -23,11 +30,11 @@ export const Icon = ({ d, fill, size = 22 }: { d: string; fill?: boolean; size?:
 export const LunaMark = ({ size = 28 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 240 240" aria-hidden="true">
     <defs>
-      <linearGradient id="lm-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#FFB070" /><stop offset="0.6" stopColor="#E8701A" /><stop offset="1" stopColor="#B4470C" /></linearGradient>
+      <linearGradient id="lm-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style={{ stopColor: "var(--accent-soft, #FFB070)" }} /><stop offset="0.6" style={{ stopColor: "var(--accent, #E8701A)" }} /><stop offset="1" style={{ stopColor: "var(--accent-deep, #B4470C)" }} /></linearGradient>
       <mask id="lm-k"><rect width="240" height="240" fill="#fff" /><circle cx="38" cy="120" r="58" fill="#000" /></mask>
     </defs>
     <path d="M64 36 Q50 28 50 44 L50 196 Q50 212 64 204 L204 130 Q218 120 204 110 Z" fill="url(#lm-g)" mask="url(#lm-k)" />
-    <circle cx="44" cy="120" r="18" fill="#FFB070" />
+    <circle cx="44" cy="120" r="18" style={{ fill: "var(--accent-soft, #FFB070)" }} />
   </svg>
 );
 
@@ -64,14 +71,15 @@ export const I = {
 export const pct = (r?: Recent) => (r && r.duration ? Math.min(100, (r.time / r.duration) * 100) : 0);
 const fileName = (p: string) => p.split(/[\\/]/).pop()!;
 const epLabel = (s?: number, e?: number) =>
-  s != null ? `S${String(s).padStart(2, "0")} · B${String(e).padStart(2, "0")}` : "";
+  s != null ? `S${String(s).padStart(2, "0")} · ${lang() === "tr" ? "B" : "E"}${String(e).padStart(2, "0")}` : "";
 
 /** What "Continue" plays for an item: last watched file, or the next one if it was finished. */
 export function resumeTarget(it: Item, recent: Recent[]) {
   const watched = recent.find((r) => it.files.some((f) => f.path === r.path));
   if (!watched) return { file: it.files[0], rec: undefined };
   const idx = it.files.findIndex((f) => f.path === watched.path);
-  if (pct(watched) > 92 && idx + 1 < it.files.length) return { file: it.files[idx + 1], rec: undefined };
+  // finished: watched to the end, or marked "I finished this episode" by hand
+  if ((pct(watched) >= 95 || isFinished(watched.path)) && idx + 1 < it.files.length) return { file: it.files[idx + 1], rec: undefined };
   return { file: it.files[idx], rec: watched };
 }
 
@@ -104,17 +112,63 @@ export function Badges({ path, big, compact }: { path?: string; big?: boolean; c
 }
 
 // ---------- header ----------
-export type View = "home" | "movies" | "shows" | "folders" | "downloads" | "recs";
+export type View = "home" | "discover" | "movies" | "shows" | "folders" | "downloads" | "recs";
 
-export function Header({ view, setView, query, setQuery, scanning, onOpen, onSettings, onTorrent, downloading, onChat }: {
-  view: View; setView: (v: View) => void; query: string; setQuery: (q: string) => void;
-  scanning: boolean; onOpen: () => void; onSettings: () => void; onTorrent: () => void; downloading: number; onChat: () => void;
+export type Mode = "film" | "music" | "books";
+const LINK = "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1";
+const MODE_ICON: Record<Mode, string> = {
+  film: "M4 4h16v16H4zM8 4v16M16 4v16",
+  music: "M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
+  books: "M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5",
+};
+/** Film · Müzik · Kitap: each part of Luna has its own colour. */
+export function ModeSwitch({ mode, setMode }: { mode: Mode; setMode: (m: Mode) => void }) {
+  const modes: [Mode, string, boolean][] = [["film", tt("Film"), true], ["music", tt("Müzik"), true], ["books", tt("Kitap"), true]];
+  return (
+    <nav className="mode-switch" aria-label={tt("Mod")}>
+      {modes.map(([m, label, ready]) => (
+        <button key={m} className={"mode-btn" + (m === mode ? " on" : "")} disabled={!ready} title={ready ? label : tt("Yakında")}
+          onClick={() => setMode(m)} aria-pressed={m === mode}>
+          <Icon d={MODE_ICON[m]} size={15} /><span className="lbl">{label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+export function Header({ mode, setMode, tabs: modeTabs, view, setView, query, setQuery, scanning, onOpen, onSettings, onTorrent, downloading, onChat, onMine }: {
+  mode: Mode; setMode: (m: Mode) => void; tabs?: [string, string][];
+  view: string; setView: (v: any) => void; query: string; setQuery: (q: string) => void;
+  scanning: boolean; onOpen: () => void; onSettings: () => void; onTorrent: () => void; downloading: number; onChat: () => void; onMine: () => void;
 }) {
-  const tabs: [View, string][] = [["home", tt("Ana sayfa")], ["movies", tt("Filmler")], ["shows", tt("Diziler")], ["folders", tt("Klasörler")], ["downloads", tt("İndirmeler")], ["recs", tt("Öneriler")]];
+  const film = mode === "film";
+  const tabs: [string, string][] = modeTabs ?? [["home", tt("Ana sayfa")], ["discover", tt("Keşfet")], ["movies", tt("Filmler")], ["shows", tt("Diziler")], ["folders", tt("Klasörler")], ["downloads", tt("İndirmeler")], ["recs", tt("Öneriler")]];
+  // On a narrow window the tabs scroll sideways: the wheel scrolls them, the edges fade where more tabs wait,
+  // and the open tab is brought into view
+  const nav = useRef<HTMLElement>(null);
+  const [edges, setEdges] = useState("");
+  useEffect(() => {
+    const n = nav.current;
+    if (!n) return;
+    const look = () => setEdges((n.scrollLeft > 2 ? " more-l" : "") + (n.scrollLeft + n.clientWidth < n.scrollWidth - 2 ? " more-r" : ""));
+    const wheel = (e: WheelEvent) => {
+      if (n.scrollWidth <= n.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      n.scrollLeft += e.deltaY;
+    };
+    look();
+    n.addEventListener("scroll", look);
+    n.addEventListener("wheel", wheel, { passive: false });
+    const ro = new ResizeObserver(look);
+    ro.observe(n);
+    return () => { n.removeEventListener("scroll", look); n.removeEventListener("wheel", wheel); ro.disconnect(); };
+  }, [mode]);
+  useEffect(() => { nav.current?.querySelector<HTMLElement>(".tab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" }); }, [view, mode]);
   return (
     <header className="app-header">
-      <div className="brand"><LunaMark />  {tt("Luna Player")}</div>
-      <nav className="tabs">
+      <div className="brand"><LunaMark /></div>
+      <ModeSwitch mode={mode} setMode={setMode} />
+      <nav className={"tabs" + edges} ref={nav}>
         {tabs.map(([v, l]) => (
           <button key={v} className={"tab" + (v === view ? " on" : "")} onClick={() => setView(v)}>
             {l}{v === "downloads" && downloading > 0 && <span className="tab-badge">{downloading}</span>}
@@ -125,17 +179,20 @@ export function Header({ view, setView, query, setQuery, scanning, onOpen, onSet
       {scanning && <span className="muted small pulse">{tt("Taranıyor…")}</span>}
       <label className="search">
         <Icon d={I.search} size={18} />
-        <input value={query} placeholder={tt("Ara")} aria-label={tt("Kütüphanede ara")}
-          onChange={(e) => { setQuery(e.target.value); if (e.target.value && view === "home") setView("movies"); }} />
+        <input value={query} placeholder={film ? tt("Ara") : mode === "music" ? tt("Müzikte ara") : tt("Kitaplarda ara")} aria-label={film ? tt("Kütüphanede ara") : mode === "music" ? tt("Müzikte ara") : tt("Kitaplarda ara")}
+          onChange={(e) => { setQuery(e.target.value); if (e.target.value && view === "home") setView(film ? "movies" : "library"); }} />
       </label>
       <button className="ghost sm hdr-btn" onClick={onChat} title={tt("Film asistanı (Gemini)")} aria-label={tt("Asistan")}>
         <Icon d={I.chat} size={18} /><span className="lbl">{tt("Asistan")}</span>
       </button>
       <button className="ghost sm hdr-btn" onClick={onTorrent} title={tt("Bağlantı aç: magnet, torrent ya da video adresi (Ctrl+N)")} aria-label={tt("Bağlantı aç")}>
-        <Icon d={I.magnet} size={18} /><span className="lbl">{tt("Bağlantı")}</span>
+        <Icon d={film ? I.magnet : LINK} size={18} /><span className="lbl">{tt("Bağlantı")}</span>
+      </button>
+      <button className="ghost sm hdr-btn" onClick={onMine} title={tt("Koleksiyonlar ve geçmiş: film, müzik, kitap bir arada")} aria-label={tt("Koleksiyonlar")}>
+        <Icon d={STACK} size={18} /><span className="lbl">{tt("Koleksiyonlar")}</span>
       </button>
       <button className="round gear" aria-label={tt("Ayarlar")} title={tt("Ayarlar")} onClick={onSettings}><Icon d={I.gear} /></button>
-      <button className="primary hdr-open" onClick={onOpen} title={tt("Dosya aç (Ctrl+O)")}><Icon d={I.folder} size={18} /><span className="lbl">{tt("Dosya aç")}</span></button>
+      <button className="primary hdr-open" onClick={onOpen} title={film ? tt("Dosya aç (Ctrl+O)") : mode === "music" ? tt("Müzik dosyası aç") : tt("Kitap dosyası aç (EPUB, PDF, CBZ)")}><Icon d={I.folder} size={18} /><span className="lbl">{tt("Dosya aç")}</span></button>
     </header>
   );
 }
@@ -148,7 +205,7 @@ function Poster({ it, a }: { it: Item; a: Actions }) {
     <button className="poster" onClick={() => a.details(it.key)}
       onContextMenu={(e) => a.menu(e, { path: it.files[0].path, item: it })}>
       <div className={"poster-img" + (it.files.every((f) => isRemote(f.path) || a.missing.has(f.path)) ? " remote" : "")}
-        title={it.files.every((f) => isRemote(f.path)) ? tt("İnik değil · detaylardan indirebilirsin")
+        title={it.files.every((f) => isRemote(f.path)) ? tt("İndirilmeli · detaylardan indirebilirsin")
           : it.files.every((f) => a.missing.has(f.path)) ? tt("Dosya bulunamadı · detaylardan yeniden bağlayabilirsin") : undefined}>
         {it.files.every((f) => isFinished(f.path)) && <span className="done-badge" title={tt("Bitirdin")}>✓</span>}
         {m?.poster ? <img src={IMG + "w342" + m.poster} alt="" loading="lazy" />
@@ -163,6 +220,21 @@ function Poster({ it, a }: { it: Item; a: Actions }) {
     </button>
   );
 }
+
+/** Ready questions about a film or series: the top of its right-click menu. */
+export const filmAsks = (it: Item): MenuEntry[] => titleAsks(it.meta?.title ?? it.parsed.title, it.meta?.year ?? it.parsed.year, it.parsed.kind);
+export const titleAsks = (t: string, y: string | number | undefined, kind?: string): MenuEntry[] => {
+  const tv = kind === "tv";
+  const n = y ? `“${t}” (${y})` : `“${t}”`;
+  return [
+    { label: "✦  " + (tv ? tt("Bu dizi ne hakkında?") : tt("Bu film ne hakkında?")), act: () => askAssistant(tv ? tt("{0} dizisi ne hakkında? Spoiler vermeden anlat", n) : tt("{0} filmi ne hakkında? Spoiler vermeden anlat", n)) },
+    { label: "✦  " + (tv ? tt("Bu dizinin kitabı var mı?") : tt("Bu filmin kitabı var mı?")), act: () => askAssistant(tv ? tt("{0} dizisinin kitabı var mı?", n) : tt("{0} filminin kitabı var mı?", n)) },
+    { label: "✦  " + (tv ? tt("Bu dizide hangi şarkılar çalıyor?") : tt("Bu filmde hangi şarkılar çalıyor?")), act: () => askAssistant(tv ? tt("{0} dizisinde hangi şarkılar çalıyor?", n) : tt("{0} filminde hangi şarkılar çalıyor?", n)) },
+    { label: "✦  " + tt("İlginç bilgiler (trivia)"), act: () => askAssistant(tt("{0} hakkında ilginç bilgiler", n)) },
+    { label: "✦  " + (tv ? tt("Buna benzer diziler") : tt("Buna benzer filmler")), act: () => askAssistant(tv ? tt("{0} dizisine benzer diziler öner", n) : tt("{0} filmine benzer filmler öner", n)) },
+    { label: "✦  " + tt("Bu bana uygun mu?"), act: () => askAssistant(tt("{0} bana uygun mu?", n)) },
+  ];
+};
 
 /** The small "i" in a card's corner: opens the details page instead of playing. */
 function InfoBtn({ onClick }: { onClick: () => void }) {
@@ -181,7 +253,7 @@ function WideCard({ path, item, title, sub, progress, a, still }: {
   return (
     <button className="card" onClick={() => a.play(path)} onContextMenu={(e) => a.menu(e, { path, item })}>
       <div className={"thumb" + (isRemote(path) || a.missing.has(path) ? " remote" : "")} style={bg ? { backgroundImage: `url("${bg}")` } : undefined}
-        title={isRemote(path) ? tt("İnik değil · oynatınca torrent'ten akar") : undefined}>
+        title={isRemote(path) ? tt("İndirilmeli · oynatınca torrent'ten akar") : undefined}>
         <div className="thumb-play"><Icon d={I.play} fill size={28} /></div>
         {item && <InfoBtn onClick={() => a.details(item.key)} />}
         {progress != null && <div className="progress"><div style={{ width: progress + "%" }} /></div>}
@@ -213,7 +285,9 @@ function HeroSlider({ slides, a }: { slides: Slide[]; a: Actions }) {
     const id = setTimeout(() => go(1), 7000);
     return () => clearTimeout(id);
   }, [i, hover, n]);
-  const s = slides[Math.min(i, n - 1)];
+  // (one index for the text and the picture, also after the list got shorter)
+  const cur = Math.min(i, n - 1);
+  const s = slides[cur];
   const it = s.item;
   const f = it?.files.find((x) => x.path === s.path);
   const title = it?.meta?.title ?? it?.parsed.title ?? s.rec?.title ?? "";
@@ -221,7 +295,7 @@ function HeroSlider({ slides, a }: { slides: Slide[]; a: Actions }) {
     <section className="hero clickable" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
       onClick={() => (it ? a.details(it.key) : a.play(s.path))} onContextMenu={(e) => a.menu(e, { path: s.path, item: it })}>
       {slides.map((sl, k) => (
-        <HeroBg key={sl.kind + sl.path} on={k === i} path={sl.path} backdrop={sl.item?.meta?.backdrop} />
+        <HeroBg key={sl.kind + sl.path} on={k === cur} path={sl.path} backdrop={sl.item?.meta?.backdrop} />
       ))}
       <div className="hero-shade" />
       <div className="hero-body" key={s.kind + s.path}>
@@ -239,7 +313,7 @@ function HeroSlider({ slides, a }: { slides: Slide[]; a: Actions }) {
         ) : (
           <div className="muted hero-meta">
             {it?.meta?.rating ? `★ ${String(it.meta.rating).replace(".", DEC)} · ` : ""}{it?.meta?.year}
-            {it?.meta?.genres.length ? " · " + it.meta.genres.slice(0, 3).join(", ") : ""}
+            {it?.meta?.genres?.length ? " · " + it.meta.genres.slice(0, 3).join(", ") : ""}
             {it?.meta?.overview && <p className="hero-ov">{it.meta.overview}</p>}
           </div>
         )}
@@ -331,9 +405,9 @@ function PosterRow({ title, items, a }: { title: string; items: Item[]; a: Actio
 }
 
 export function Browse({ title, items, query, a }: { title: string; items: Item[]; query: string; a: Actions }) {
-  const q = query.trim().toLocaleLowerCase("tr");
+  const q = query.trim().toLocaleLowerCase(lang() === "tr" ? "tr" : "en");
   const list = items
-    .filter((i) => !q || (i.meta?.title ?? i.parsed.title).toLocaleLowerCase("tr").includes(q) ||
+    .filter((i) => !q || (i.meta?.title ?? i.parsed.title).toLocaleLowerCase(lang() === "tr" ? "tr" : "en").includes(q) ||
       i.parsed.title.toLowerCase().includes(q) || i.meta?.cast.some((c) => c.name.toLowerCase().includes(q)))
     .sort((x, y) => (x.meta?.title ?? x.parsed.title).localeCompare(y.meta?.title ?? y.parsed.title, "tr"));
   return (
@@ -359,7 +433,10 @@ export function Folders({ roots, setRoots, items, recent, a }: {
 
   useEffect(() => {
     if (!cwd) return;
-    invoke<Entry[]>("list_dir", { path: cwd }).then(setEntries).catch(() => setEntries([]));
+    let alive = true;
+    setEntries([]);
+    invoke<Entry[]>("list_dir", { path: cwd }).then((e) => alive && setEntries(e)).catch(() => alive && setEntries([]));
+    return () => { alive = false; };
   }, [cwd]);
   // Mouse back button: one folder up.
   useEffect(() => {
@@ -382,9 +459,13 @@ export function Folders({ roots, setRoots, items, recent, a }: {
     const d = await open({ directory: true, multiple: false });
     if (typeof d === "string" && !roots.includes(d)) setRoots([...roots, d]);
   };
-  const root = cwd ? roots.find((r) => cwd.toLowerCase().startsWith(r.toLowerCase())) : undefined;
-  const crumbs = cwd && root ? [root, ...cwd.slice(root.length).split(/[\\/]/).filter(Boolean)] : [];
-  const crumbPath = (i: number) => i === 0 ? root! : root + "\\" + crumbs.slice(1, i + 1).join("\\");
+  const root = cwd ? roots.find((r) => {
+    const a = cwd.toLowerCase().replace(/[\\/]+$/, ""), b = r.toLowerCase().replace(/[\\/]+$/, "");
+    return a === b || a.startsWith(b + "\\") || a.startsWith(b + "/");
+  }) : undefined;
+  const rootBare = root?.replace(/[\\/]+$/, "") ?? "";
+  const crumbs = cwd && root ? [root, ...cwd.slice(rootBare.length).split(/[\\/]/).filter(Boolean)] : [];
+  const crumbPath = (i: number) => i === 0 ? root! : rootBare + "\\" + crumbs.slice(1, i + 1).join("\\");
 
   if (!cwd)
     return (
@@ -403,7 +484,8 @@ export function Folders({ roots, setRoots, items, recent, a }: {
                 <div className="muted small ellipsis">{r}</div>
                 <div className="muted small">{rootInfo[r] != null ? tt("{0} video", rootInfo[r]) : "…"}</div>
                 <button className="icon sm tile-x" aria-label={tt("Kütüphaneden çıkar")}
-                  onClick={(e) => { e.stopPropagation(); setRoots(roots.filter((x) => x !== r)); }}>
+                  onClick={(e) => { e.stopPropagation(); setRoots(roots.filter((x) => x !== r)); }}
+                  onKeyDown={(e) => e.stopPropagation()}>
                   <Icon d={I.x} size={16} />
                 </button>
               </div>
@@ -488,7 +570,11 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
   const info = useMediaInfo(file.path);
 
   useEffect(() => {
-    if (isTv && m && m.id > 0) seasonEpisodes(m.id, season).then(setEps);
+    setEps([]);
+    if (!isTv || !m || m.id <= 0) return;
+    let alive = true;
+    seasonEpisodes(m.id, season).then((l) => alive && setEps(l));
+    return () => { alive = false; };
   }, [isTv, m?.id, season]);
 
   const extSub = store.get("extSub:" + file.path);
@@ -518,7 +604,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
             {m?.year && <span>{m.year}</span>}
             {m?.seasons && <span>{m.seasons}  {tt("sezon")}</span>}
             {m?.runtime ? <span>{Math.floor(m.runtime / 60)}  {tt("sa")} {m.runtime % 60}  {tt("dk")}</span> : null}
-            {m?.genres.length ? <span>{m.genres.slice(0, 3).join(", ")}</span> : null}
+            {m?.genres?.length ? <span>{m.genres.slice(0, 3).join(", ")}</span> : null}
           </div>
           <Badges path={file.path} big />
           {m?.overview ? (
@@ -568,7 +654,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
         </div>
       </section>
 
-      {m && m.cast.length > 0 && (
+      {m?.cast?.length ? (
         <section className="row">
           <h2>{tt("Oyuncular")}</h2>
           <div className="cast">
@@ -583,7 +669,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
             ))}
           </div>
         </section>
-      )}
+      ) : null}
 
       {isTv && (
         <section className="row">
@@ -602,7 +688,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
                 <WideCard key={f.path} path={f.path} item={it} a={a} progress={r ? p : undefined}
                   still={e?.still ? `${IMG}w300${e.still}` : null}
                   title={`${f.episode}. ${e?.name ?? fileName(f.path)}`}
-                  sub={[e?.runtime ? e.runtime + tt(" dk") : "", p > 92 || isFinished(f.path) ? tt("İzlendi") : r ? tt("{0} kaldı", fmtTime(r.duration - r.time)) : ""].filter(Boolean).join(" · ")} />
+                  sub={[e?.runtime ? e.runtime + tt(" dk") : "", p >= 95 || isFinished(f.path) ? tt("İzlendi") : r ? tt("{0} kaldı", fmtTime(r.duration - r.time)) : ""].filter(Boolean).join(" · ")} />
               );
             })}
           </div>
@@ -614,12 +700,34 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
 
 // ---------- menus & dialogs ----------
 export type MenuEntry = { label: string; act: () => void; danger?: boolean } | "sep";
+let menuState: { x: number; y: number; entries: MenuEntry[] } | null = null;
+const menuSubs = new Set<() => void>();
+/** Opens a right-click menu at the mouse (music, books: covers and rows). */
+export function openMenu(e: React.MouseEvent, entries: MenuEntry[]) {
+  e.preventDefault(); e.stopPropagation();
+  menuState = { x: e.clientX, y: e.clientY, entries };
+  lastMenuAt = { x: e.clientX, y: e.clientY };
+  menuSubs.forEach((f) => f());
+}
+/** A second menu where the last one was (e.g. "Add to a collection…" → the collections). */
+export function menuAgain(entries: MenuEntry[]) {
+  const at = lastMenuAt;
+  setTimeout(() => { menuState = { ...at, entries }; menuSubs.forEach((f) => f()); }, 0);
+}
+let lastMenuAt = { x: 0, y: 0 };
+export function MenuHost() {
+  const [, bump] = useState(0);
+  useEffect(() => { const f = () => bump((n) => n + 1); menuSubs.add(f); return () => { menuSubs.delete(f); }; }, []);
+  if (!menuState) return null;
+  return <CardMenu x={menuState.x} y={menuState.y} entries={menuState.entries} onClose={() => { menuState = null; menuSubs.forEach((f) => f()); }} />;
+}
 
 export function CardMenu({ x, y, entries, onClose }: { x: number; y: number; entries: MenuEntry[]; onClose: () => void }) {
   const W = 260;
   const left = Math.min(x, window.innerWidth - W - 8);
   const top = Math.min(y, window.innerHeight - entries.length * 36 - 16);
-  return (
+  // on body, outside #root: when a workspace blurs the app, the menu must stay sharp and on top
+  return createPortal(
     <div className="cm-bg" onMouseDown={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }}>
       <div className="cm" style={{ left, top, width: W }} onMouseDown={(e) => e.stopPropagation()}>
         {entries.map((e, i) => e === "sep" ? <div key={i} className="cm-sep" /> : (
@@ -628,7 +736,8 @@ export function CardMenu({ x, y, entries, onClose }: { x: number; y: number; ent
           </button>
         ))}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -682,7 +791,7 @@ export function Rematch({ it, onPick, onCustom, onClose }: {
         {err && <div className="muted">{err}</div>}
         <div className="rm-grid">
           {hits === null && !err && <div className="muted">{tt("Aranıyor…")}</div>}
-          {hits?.length === 0 && <div className="muted">{tt("Sonuç yok.")}</div>}
+          {hits?.length === 0 && <div className="muted">{q.trim() && store.get("tmdbKey") ? tt("Bulamadık; bu bir film olmayabilir ya da adını doğru yazdığından emin ol. Yine de Kaydet ile bu adı kullanabilirsin.") : tt("Sonuç yok.")}</div>}
           {hits?.map((h) => (
             <button key={h.id} className="poster" onClick={() => onPick(h)}>
               <div className="poster-img">{h.poster ? <img src={IMG + "w185" + h.poster} alt="" /> : <span>{h.title}</span>}</div>
@@ -692,6 +801,42 @@ export function Rematch({ it, onPick, onCustom, onClose }: {
           ))}
         </div>
         <div className="modal-actions"><button className="chip" onClick={onClose}>{tt("Kapat")}</button></div>
+      </div>
+    </div>
+  );
+}
+
+type SetSec = "general" | "keys" | "subs" | "upscaler" | "addons" | "downloads" | "backup";
+const SET_ICONS: Record<SetSec, string> = {
+  general: I.gear,
+  keys: "M15 7a4 4 0 1 1-3.9 4.9L3 20v-3h3v-3h3l1.1-1.1A4 4 0 0 1 15 7zM16.5 10.5h.01",
+  subs: I.subs,
+  upscaler: "M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4zM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z",
+  addons: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM16.5 13v7M13 16.5h7",
+  downloads: I.down,
+  backup: "M12 3v12M7 10l5 5 5-5M5 21h14",
+};
+
+/** An API key: hidden like a password, with a link to where it's made. */
+function KeyField({ label, hint, value, onChange, placeholder, url }: {
+  label: string; hint: string; value: string; onChange: (v: string) => void; placeholder: string; url: string;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="set-key">
+      <div className="set-key-top">
+        <b>{label}</b>
+        <span className={"set-state" + (value.trim() ? " ok" : "")}>{value.trim() ? tt("✓ Girildi") : tt("Girilmedi")}</span>
+        <span className="grow" />
+        <button className="set-link" onClick={() => openUrl(url)}>{tt("Anahtar al ↗")}</button>
+      </div>
+      <div className="set-hint">{hint}</div>
+      <div className="set-key-in">
+        <input type={show ? "text" : "password"} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+          spellCheck={false} autoComplete="off" />
+        <button className="set-eye" onClick={() => setShow((s) => !s)} aria-label={show ? tt("Gizle") : tt("Göster")} title={show ? tt("Gizle") : tt("Göster")}>
+          {show ? tt("Gizle") : tt("Göster")}
+        </button>
       </div>
     </div>
   );
@@ -707,6 +852,8 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
   const [gemModel, setGemModel] = useState(store.get("geminiModel") ?? "gemini-3.1-flash-lite");
   const [models, setModels] = useState<[string, string][]>([]);
   const [modelsMsg, setModelsMsg] = useState(tt("Önce API anahtarını gir"));
+  const [sec, setSecState] = useState<SetSec>(() => (store.get("setSec") as SetSec) || "general");
+  const setSec = (s: SetSec) => { setSecState(s); store.set("setSec", s); };
   const loadModels = () => {
     if (!gemKey.trim()) return;
     setModelsMsg(tt("Modeller yükleniyor…"));
@@ -716,6 +863,13 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
   };
   useEffect(() => { if (store.get("geminiKey")) loadModels(); }, []);
   useEffect(() => { if (!dlDir) invoke<string | null>("downloads_dir").then((d) => d && setDlDir(d)); }, []);
+  // the page behind goes blurred, like the assistant's big view
+  useEffect(() => {
+    document.body.classList.add("ws-open");
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", esc);
+    return () => { document.body.classList.remove("ws-open"); window.removeEventListener("keydown", esc); };
+  }, []);
   const pickDl = async () => {
     const d = await open({ directory: true, multiple: false });
     if (typeof d === "string") setDlDir(d);
@@ -743,63 +897,161 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
     // Reload so the library, posters and details pick up the new settings right away.
     window.location.reload();
   };
-  return (
-    <div className="modal-bg" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
-        <h2>{tt("Ayarlar")}{onTour && <button className="tour-again" onClick={onTour}>{tt("Tanıtımı göster")}</button>}{onSetup && <button className="tour-again" onClick={onSetup}>{tt("Sistem kontrolü")}</button>}</h2>
-        <div className="field">
-          <span>{tt("Dil")}</span>
-          <div className="seg-row">
-            <button className={"seg" + (lang() === "en" ? " on" : "")} onClick={() => { if (lang() !== "en") { persist(); setLang("en"); } }}>English</button>
-            <button className={"seg" + (lang() === "tr" ? " on" : "")} onClick={() => { if (lang() !== "tr") { persist(); setLang("tr"); } }}>Türkçe</button>
-          </div>
-        </div>
-        <label>{tt("TMDB API anahtarı (afiş, özet, oyuncular)")}
-          <input value={tmdbKey} onChange={(e) => setTmdbKey(e.target.value)} placeholder={tt("themoviedb.org › Ayarlar › API")} />
-        </label>
-        <label>{tt("OpenSubtitles API anahtarı (otomatik altyazı)")}
-          <input value={osKey} onChange={(e) => setOsKey(e.target.value)} placeholder="opensubtitles.com › Profil › API consumers" />
-        </label>
-        <label>{tt("Gemini API anahtarı (film asistanı)")}
-          <input value={gemKey} onChange={(e) => setGemKey(e.target.value)} placeholder="aistudio.google.com › Get API key" />
-        </label>
-        <div className="field">
-          <span>{tt("Gemini modeli")}</span>
-          <div className="gem-model">
-            <select value={models.some(([id]) => id === gemModel) ? gemModel : ""} onChange={(e) => { if (e.target.value) { setGemModel(e.target.value); store.set("geminiModel", e.target.value); } }}>
-              <option value="">{models.length ? tt("Listeden seç…") : modelsMsg}</option>
-              {models.map(([id, name]) => <option key={id} value={id}>{name} ({id})</option>)}
-            </select>
-            <button className="chip" onClick={loadModels} disabled={!gemKey.trim()}>{tt("Listeyi yenile")}</button>
-          </div>
-          <input value={gemModel} onChange={(e) => setGemModel(e.target.value)} placeholder={tt("ya da model adını yaz: gemini-flash-latest")} />
-        </div>
-        <div className="field">
-          <span>{tt("Altyazı görünümü")}</span>
-          <SubAppearance />
-        </div>
-        <UpscalerSettings />
-        <PluginSettings />
-        <div className="field">
-          <span>{tt("Torrent indirme klasörü")}</span>
-          <div className="dir"><Icon d={I.folder} size={18} /><span className="grow ellipsis">{dlDir || "…"}</span>
-            <button className="chip" onClick={pickDl}>{tt("Değiştir…")}</button></div>
-        </div>
-        <label className="look-check">
-          <input type="checkbox" checked={autoFull} onChange={(e) => setAutoFull(e.target.checked)} />
-          
-          {tt("Oynatınca tam ekran başlat")}
-        </label>
-        <label>{tt("Altyazı dilleri (öncelik sırasıyla)")}
-          <input value={langs} onChange={(e) => setLangs(e.target.value)} />
-        </label>
-        <div className="muted small">{tt("Kütüphane klasörleri artık “Klasörler” sekmesinde.")}</div>
-        <div className="modal-actions">
-          <button className="chip" onClick={onClose}>{tt("Vazgeç")}</button>
-          <button className="primary" onClick={save}>{tt("Kaydet")}</button>
+  const secs: [SetSec, string, string][] = [
+    ["general", tt("Genel"), tt("Dil, tam ekran, tanıtım")],
+    ["keys", tt("Hesaplar ve anahtarlar"), tt("TMDB, OpenSubtitles, Gemini")],
+    ["subs", tt("Altyazı"), tt("Diller ve görünüm")],
+    ["upscaler", tt("Upscaler"), tt("Lossless Scaling ile yapay zekâ")],
+    ["addons", tt("Eklentiler"), tt("Stremio, arama eklentileri, kitap kaynakları")],
+    ["downloads", tt("İndirmeler"), tt("Torrent klasörü")],
+    ["backup", tt("Yedekleme"), tt("Tek dosya, istersen buluta")],
+  ];
+  const cur = secs.find((x) => x[0] === sec) ?? secs[0];
+  const missingKeys = [tmdbKey, osKey, gemKey].filter((k) => !k.trim()).length;
+  return createPortal(
+    <>
+      <div className="chat-scrim" />
+      <div className="chat-ws-wrap" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+        <div className="chat-ws glass set-ws" role="dialog" aria-label={tt("Ayarlar")}>
+          <aside className="ws-side">
+            <div className="ws-side-head">
+              <div className="ws-brand"><Icon d={I.gear} size={18} />  {tt("Ayarlar")}</div>
+            </div>
+            <nav className="ws-hist set-nav">
+              {secs.map(([id, label, sub]) => (
+                <button key={id} className={"set-nav-i" + (id === sec ? " on" : "")} onClick={() => setSec(id)}>
+                  <Icon d={SET_ICONS[id]} size={18} />
+                  <span className="set-nav-t"><b>{label}</b><small>{sub}</small></span>
+                  {id === "keys" && missingKeys > 0 && <span className="set-dot" title={tt("{0} anahtar eksik", missingKeys)}>{missingKeys}</span>}
+                </button>
+              ))}
+            </nav>
+            <div className="set-side-foot">
+              {onTour && <button className="chip" onClick={onTour}>{tt("Tanıtımı göster")}</button>}
+              {onSetup && <button className="chip" onClick={onSetup}>{tt("Sistem kontrolü")}</button>}
+            </div>
+          </aside>
+          <section className="ws-main">
+            <div className="chat-head set-head">
+              <div>
+                <h2 className="ws-title">{cur[1]}</h2>
+                <div className="muted small">{cur[2]}</div>
+              </div>
+              <span className="grow" />
+              <button className="round" aria-label={tt("Kapat")} title={tt("Kapat")} onClick={onClose}><Icon d={I.x} size={18} /></button>
+            </div>
+            <div className="set-body" key={sec}>
+              {sec === "general" && (
+                <>
+                  <div className="set-card">
+                    <div className="field">
+                      <span>{tt("Dil")}</span>
+                      <div className="seg-row">
+                        <button className={"seg" + (lang() === "en" ? " on" : "")} onClick={() => { if (lang() !== "en") { persist(); setLang("en"); } }}>English</button>
+                        <button className={"seg" + (lang() === "tr" ? " on" : "")} onClick={() => { if (lang() !== "tr") { persist(); setLang("tr"); } }}>Türkçe</button>
+                      </div>
+                      <div className="set-hint">{tt("Dil değişince uygulama yeniden yüklenir; diğer ayarların kaydedilir.")}</div>
+                    </div>
+                  </div>
+                  <div className="set-card">
+                    <div className="field">
+                      <span>{tt("Sürüm")}</span>
+                      <b className="set-version">{VERSION_LABEL}</b>
+                      <div className="set-hint">{tt("Son değişikliği yapan model: {0}", BUILD_AGENT_NAMES[BUILD_AGENT] ?? BUILD_AGENT)}</div>
+                      {/* the notice TMDB's API terms ask for */}
+                      <div className="set-hint">{tt("Bu ürün TMDB API'sini kullanır ama TMDB tarafından onaylanmış ya da sertifikalandırılmış değildir. Film afişleri ve bilgileri TMDB'den gelir.")}</div>
+                    </div>
+                  </div>
+                  <UpdateSettings onBackup={() => setSec("backup")} />
+                  <div className="set-card">
+                    <label className="look-check">
+                      <input type="checkbox" checked={autoFull} onChange={(e) => setAutoFull(e.target.checked)} />
+                      {tt("Oynatınca tam ekran başlat")}
+                    </label>
+                  </div>
+                  <div className="set-card">
+                    <label className="look-check">
+                      <input type="checkbox" defaultChecked={store.get("clipOffer") !== "0"} onChange={(e) => { store.set("clipOffer", e.target.checked ? "1" : "0"); invoke("clipboard_offer", { on: e.target.checked }).catch(() => {}); }} />
+                      {tt("Bağlantı kopyalayınca “İçe aktar” öner")}
+                    </label>
+                    <div className="set-hint">{tt("Başka bir yerde Spotify, YouTube, torrent, podcast ya da kitap bağlantısı kopyaladığında üstte 30 saniyeliğine küçük bir öneri çıkar. Panodaki başka hiçbir şey okunmaz ya da saklanmaz.")}</div>
+                  </div>
+                </>
+              )}
+              {sec === "keys" && (
+                <>
+                  <div className="set-note">{tt("Anahtarlar ücretsiz; Windows'un Kimlik Bilgileri kasasında, şifreli olarak sadece bu bilgisayarda saklanır.")}</div>
+                  <div className="set-card">
+                    <KeyField label="TMDB" hint={tt("Afişler, özetler, oyuncular, Keşfet ve sana özel öneriler")} value={tmdbKey} onChange={setTmdbKey}
+                      placeholder={tt("themoviedb.org › Ayarlar › API")} url="https://www.themoviedb.org/settings/api" />
+                  </div>
+                  <div className="set-card">
+                    <KeyField label="OpenSubtitles" hint={tt("Altyazı yoksa otomatik bulunur")} value={osKey} onChange={setOsKey}
+                      placeholder="opensubtitles.com › Profil › API consumers" url="https://www.opensubtitles.com/consumers" />
+                  </div>
+                  <div className="set-card">
+                    <KeyField label="Gemini" hint={tt("Film asistanı")} value={gemKey} onChange={setGemKey}
+                      placeholder="aistudio.google.com › Get API key" url="https://aistudio.google.com/app/apikey" />
+                    <div className="field set-sub">
+                      <span>{tt("Gemini modeli")}</span>
+                      <div className="gem-model">
+                        <select value={models.some(([id]) => id === gemModel) ? gemModel : ""} onChange={(e) => { if (e.target.value) { setGemModel(e.target.value); store.set("geminiModel", e.target.value); } }}>
+                          <option value="">{models.length ? tt("Listeden seç…") : modelsMsg}</option>
+                          {models.map(([id, name]) => <option key={id} value={id}>{name} ({id})</option>)}
+                        </select>
+                        <button className="chip" onClick={loadModels} disabled={!gemKey.trim()}>{tt("Listeyi yenile")}</button>
+                      </div>
+                      <input value={gemModel} onChange={(e) => setGemModel(e.target.value)} placeholder={tt("ya da model adını yaz: gemini-flash-latest")} />
+                    </div>
+                  </div>
+                </>
+              )}
+              {sec === "subs" && (
+                <>
+                  <div className="set-card">
+                    <label>{tt("Altyazı dilleri (öncelik sırasıyla)")}
+                      <input value={langs} onChange={(e) => setLangs(e.target.value)} />
+                    </label>
+                    <div className="set-hint">{tt("Virgülle ayır: tr,en,de")}</div>
+                  </div>
+                  <div className="set-card">
+                    <div className="field">
+                      <span>{tt("Altyazı görünümü")}</span>
+                      <SubAppearance />
+                    </div>
+                  </div>
+                </>
+              )}
+              {sec === "upscaler" && <div className="set-card"><UpscalerSettings /></div>}
+              {sec === "addons" && (
+                <>
+                  <div className="set-card"><AddonSettings /></div>
+                  <div className="set-card"><PluginSettings /></div>
+                  <div className="set-card"><SourceSettings /></div>
+                </>
+              )}
+              {sec === "backup" && <BackupSettings />}
+              {sec === "downloads" && (
+                <div className="set-card">
+                  <div className="field">
+                    <span>{tt("Torrent indirme klasörü")}</span>
+                    <div className="dir"><Icon d={I.folder} size={18} /><span className="grow ellipsis">{dlDir || "…"}</span>
+                      <button className="chip" onClick={pickDl}>{tt("Değiştir…")}</button></div>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="set-foot">
+              <span className="muted small">{tt("Kaydedince uygulama yenilenir.")}</span>
+              <span className="grow" />
+              <button className="chip" onClick={onClose}>{tt("Vazgeç")}</button>
+              <button className="primary" onClick={save}>{tt("Kaydet")}</button>
+            </div>
+          </section>
         </div>
       </div>
-    </div>
+    </>,
+    document.body
   );
 }
 

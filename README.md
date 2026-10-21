@@ -5,8 +5,8 @@
 <h1 align="center">Luna Player</h1>
 
 <p align="center">
-  A good-looking video player for your films and series.<br>
-  It organises your collection, helps you decide what to watch, and plays almost anything.
+  Your films, series, music and books in one good-looking app.<br>
+  It organises your collection, helps you decide what to watch, hear and read, and plays almost anything.
 </p>
 
 <p align="center">
@@ -15,7 +15,12 @@
 
 ![Luna Player home screen](docs/screenshots/home.jpg)
 
-## What it does
+## Three parts, one app
+
+Switch between **Film**, **Music** and **Books** at the top left. Each part has its own colour, its own library and
+its own home screen, and the assistant knows all three.
+
+### Film
 
 **Your films, nicely organised.** Point Luna at the folders where you keep your videos. It recognises each film and
 series and adds posters, summaries, cast and trailers, so your collection looks like a streaming service.
@@ -31,22 +36,48 @@ recommend, or connect their Letterboxd, and see everything in one place.
 
 ![Recommendations from friends](docs/screenshots/recommendations.jpg)
 
-**A film assistant you can talk to.** Ask things like *"What should I watch tonight?"* or *"Who's in Dune?"*
-and get answers with posters, cast and links.
-
-![The film assistant](docs/screenshots/assistant.jpg)
-
 **Open links and torrents.** Like VLC's "Open network stream": paste a video link (http, m3u8, rtsp…), a magnet
-link or a `.torrent` file, and Luna plays it. Torrents start playing while they download, and Luna finds the
-title, poster and subtitles for you. Press **Ctrl+N** or just paste a link into the window.
+link or a `.torrent` file, and Luna plays it. Torrents start playing while they download. Press **Ctrl+N** or just
+paste a link into the window.
 
 **Sharper picture with AI upscaling.** If you have [Lossless Scaling](https://store.steampowered.com/app/993090/Lossless_Scaling/)
-(a paid app on Steam), Luna can switch it on for you while a video plays: AI and FSR upscaling make lower-resolution
-videos look sharper on big screens, and AI frame generation makes motion smoother. Subtitles stay crisp on top.
-Press **Q** in the player or use the **UP** menu.
+(a paid app on Steam), Luna switches it on for you while a video plays: sharper lower-resolution videos and smoother
+motion, with subtitles kept crisp on top. Press **Q** in the player or use the **UP** menu.
 
-**And more:**
-- A first-run check that tells you if anything is missing, with download links
+### Music
+
+**Your music archive, like a streaming app.** Add your music folder and Luna builds albums, artists and covers from
+the files' tags (MP3, FLAC, M4A, OGG, OPUS, WAV…). Shuffle, your most played, recently played albums, likes and
+playlists, plus synced lyrics that light up line by line. Live radio stations from around the world and podcasts
+are one tab away.
+
+![Music](docs/screenshots/music.jpg)
+
+### Books
+
+**Read and listen.** EPUB, PDF and comics (CBZ) open in a calm reader with themes, bookmarks, highlights and notes,
+and Luna can read a book aloud. Classics from open libraries (Project Gutenberg, Wikisource) download with one
+click, and free audiobooks from LibriVox play right away.
+
+![Books](docs/screenshots/books.jpg)
+
+## An assistant that sees what's open
+
+Ask things like *"What should I watch tonight?"*, *"Play something calm"* or *"Which book is this film based on?"*.
+The assistant knows the film page, the song or the book you have open; when more than one is open (a song playing
+while you look at a film), it asks which one you mean. It can play music, find free books, and answer with posters,
+cast and links. Open it from anywhere with **Alt+A**.
+
+![The assistant asks which one you mean](docs/screenshots/assistant.jpg)
+
+**Collections.** Ask for a collection about anything ("everything Dune") and the assistant gathers the films,
+songs and books on that topic into one page. One history keeps what you watched, listened to and read.
+
+## And more
+
+- **Updates by itself:** Luna finds new versions and installs them (signed, so only real Luna updates go in).
+- **A backup in one file:** your library, likes, history and settings, to keep or move to another computer.
+- A first-run tour, and a check that tells you if anything is missing, with download links
 - Hide posters of films with disturbing content (optional)
 - English and Turkish (change it in Settings)
 
@@ -60,14 +91,21 @@ Press **Q** in the player or use the **UP** menu.
 
 ![First-run tour](docs/screenshots/tour.jpg)
 
+### Portable version
+
+There is also a **`Luna.Player_…_x64-portable.zip`** on the same Releases page. Extract it anywhere and run
+`Luna Player.exe`; it needs no installer (WebView2 must already be on the computer, which is the case on
+Windows 10/11).
+
 ### Optional: free keys for the extra features
 
-Luna plays videos without any setup. For posters, the assistant and subtitle search, add these free keys in **Settings**:
+Luna plays films, music and books without any setup. For posters, the assistant and subtitle search, add these
+free keys in **Settings**:
 
 | Key | Unlocks | Get it here |
 |---|---|---|
 | TMDB | Posters, summaries, cast, recommendations | [themoviedb.org](https://www.themoviedb.org/settings/api) |
-| Gemini | The film assistant and translations | [aistudio.google.com](https://aistudio.google.com/apikey) |
+| Gemini | The assistant, collections and translations | [aistudio.google.com](https://aistudio.google.com/apikey) |
 | OpenSubtitles | Automatic subtitles | [opensubtitles.com](https://www.opensubtitles.com/consumers) |
 
 Your keys and your library stay on your own computer.
@@ -76,28 +114,39 @@ Your keys and your library stay on your own computer.
 
 | Key | Action |
 |---|---|
-| Space | Play / pause |
-| ← / → | Skip back / forward |
-| Mouse wheel | Volume |
-| F or double-click | Full screen |
-| S | Subtitles |
+| Alt+A | Open / close the assistant |
+| Ctrl+O | Open a file |
 | Ctrl+N | Open a link |
+| Space | Play / pause (hold for 2× speed in a film) |
+| ← / → | Skip back / forward |
+| Ctrl+← / Ctrl+→ | Previous / next song |
+| F or double-click | Full screen |
+| S | Subtitle timeline |
 | Q | AI upscaling on / off (needs Lossless Scaling) |
+| Esc | Close a window or panel, then leave the film |
 
 ## For developers
 
-Want to build it yourself or help out? See [BUILDING.md](BUILDING.md).
+Want to build it yourself or help out? See [BUILDING.md](BUILDING.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+The source is the whole repository: React/TypeScript in `app/src`, Rust/Tauri in `app/src-tauri`.
+What changed in each version: [CHANGELOG.md](CHANGELOG.md).
 
 ## Please use it responsibly
 
 Luna is a player: it doesn't come with any content, sites or search sources. Only open and download videos you
 have the right to watch. Downloading copyrighted material without permission is illegal in many countries.
+The free books and audiobooks come from Project Gutenberg, Wikisource and LibriVox, whose works are in the
+public domain in the United States; check the rules where you live.
 
 Friends' Letterboxd lists are read from their public Letterboxd pages. This is not an official Letterboxd feature.
 
 ## License
 
 Luna Player is free and open source under the [GPL-3.0](LICENSE) license.
+
+The source code is this repository. Contributions are welcome; read [CONTRIBUTING.md](CONTRIBUTING.md) and
+[SECURITY.md](SECURITY.md) first. The installers include GPLv2+ mpv and Unlicense yt-dlp binaries; see
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for their licenses, source links and the shipped copyright texts.
 
 This product uses the TMDB API but is not endorsed or certified by TMDB.
 The installer includes [mpv](https://mpv.io) ([license](https://github.com/mpv-player/mpv/blob/master/Copyright),

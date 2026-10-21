@@ -105,13 +105,17 @@ export function useMpv(onEvent?: (name: string, ev: any) => void) {
     });
     // Observe only once we listen, so the initial values aren't missed.
     const ids: number[] = [];
-    un.then(() =>
+    let gone = false;
+    un.then(() => {
+      // unmounted before the listener was ready: nothing to observe (no one would unobserve it)
+      if (gone) return;
       Object.keys(keyOf).forEach((name, i) => {
         ids.push(i + 1);
         mpv("observe_property", i + 1, name);
-      }),
-    );
+      });
+    });
     return () => {
+      gone = true;
       ids.forEach((id) => mpv("unobserve_property", id));
       un.then((f) => f());
     };
@@ -125,8 +129,8 @@ export function useMpv(onEvent?: (name: string, ev: any) => void) {
 export type SubOpts = { font: string; size: number; color: string; bg: "none" | "shadow" | "box"; bold: boolean; margin: number };
 
 export const SUB_PRESETS: Record<string, { label: string; opts: SubOpts }> = {
-  netflix: { label: tt("Sinema"), opts: { font: "Netflix Sans Medium", size: 46, color: "#FFFFFF", bg: "shadow", bold: false, margin: 48 } },
-  box: { label: tt("Kutulu"), opts: { font: "Netflix Sans Medium", size: 44, color: "#FFFFFF", bg: "box", bold: false, margin: 48 } },
+  netflix: { label: tt("Sinema"), opts: { font: "Inter SemiBold", size: 46, color: "#FFFFFF", bg: "shadow", bold: false, margin: 48 } },
+  box: { label: tt("Kutulu"), opts: { font: "Inter SemiBold", size: 44, color: "#FFFFFF", bg: "box", bold: false, margin: 48 } },
   yellow: { label: tt("Klasik sarı"), opts: { font: "Inter Bold", size: 46, color: "#FFE15A", bg: "shadow", bold: false, margin: 48 } },
 };
 export const SUB_FONTS: [string, string][] = [

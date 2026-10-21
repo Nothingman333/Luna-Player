@@ -7,6 +7,8 @@ import { I, Icon } from "./Screens";
 
 export type TorrentStat = {
   id: number; name: string; state: string; error?: string | null; finished: boolean;
+  /** the torrent's info hash and its biggest video file on disk (to find it again after a restart) */
+  hash?: string; local?: string | null;
   progress_bytes: number; total_bytes: number; uploaded_bytes: number;
   live?: { download_speed?: { mbps: number; human_readable?: string }; upload_speed?: { mbps: number };
     snapshot?: { peer_stats?: { live?: number; seen?: number; connecting?: number } };
@@ -121,24 +123,39 @@ export function TorrentLoader({ phase, name, stat, onCancel }: {
 
 /** list: keep the files · files: delete files, keep the title in the library (re-downloadable) · all: delete everything. */
 export type RemoveMode = "list" | "files" | "all";
-type DlProps = { list: TorrentStat[]; onPlay: (id: number) => void; onRemoved?: (id: number, mode: RemoveMode) => void };
+type DlProps = {
+  list: TorrentStat[]; onPlay: (id: number) => void;
+  /** before the engine removes it (stop playing it, so its files can be deleted) */
+  onRemoving?: (id: number) => void;
+  /** after the engine removed it: the library follows */
+  onRemoved?: (id: number, mode: RemoveMode) => void;
+};
 
 export function Downloads(p: DlProps) {
   return <div className="page"><DownloadsSection {...p} /></div>;
 }
 
 /** The torrent list with play / pause / remove (also shown on the home screen). */
-export function DownloadsSection({ list, onPlay, onRemoved }: DlProps) {
+export function DownloadsSection({ list, onPlay, onRemoving, onRemoved }: DlProps) {
   const [confirm, setConfirm] = useState<TorrentStat | null>(null);
+  const [err, setErr] = useState("");
   const remove = async (t: TorrentStat, mode: RemoveMode) => {
     setConfirm(null);
+    setErr("");
+    onRemoving?.(t.id);
+    try {
+      await invoke("torrent_remove", { id: t.id, deleteFiles: mode !== "list" });
+    } catch (e) {
+      setErr(tt("Silinemedi: ") + String(e));
+      return;
+    }
     onRemoved?.(t.id, mode);
-    await invoke("torrent_remove", { id: t.id, deleteFiles: mode !== "list" }).catch(() => {});
   };
   return (
     <>
       <section className="row">
         <h2>{tt("İndirmeler")} <span className="muted small">{list.length}</span></h2>
+        {err && <div className="plugin-msg small err">{err}</div>}
         {!list.length && <div className="muted empty-note">{tt("Henüz torrent yok. Üstteki mıknatıs butonuyla magnet linki ya da torrent dosyası açabilirsin.")}</div>}
         <div className="dl-list">
           {list.map((t) => {

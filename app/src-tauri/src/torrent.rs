@@ -3,7 +3,7 @@
 
 use librqbit::api::Api;
 use librqbit::http_api::{HttpApi, HttpApiOptions};
-use librqbit::{AddTorrent, AddTorrentOptions, Session};
+use librqbit::{AddTorrent, AddTorrentOptions, Session, SessionOptions, SessionPersistenceConfig};
 use serde::Serialize;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -21,12 +21,19 @@ struct Engine {
 }
 
 static ENGINE: OnceCell<Engine> = OnceCell::const_new();
+/// Where the engine remembers its torrents (in Luna's data folder), so downloads carry on after a restart.
+static SESSION_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
 async fn engine(default_dir: PathBuf) -> Result<&'static Engine, String> {
     ENGINE
         .get_or_try_init(|| async move {
             std::fs::create_dir_all(&default_dir).map_err(|e| e.to_string())?;
-            let session = Session::new(default_dir).await.map_err(|e| e.to_string())?;
+            let opts = SessionOptions {
+                fastresume: SESSION_DIR.get().is_some(),
+                persistence: SESSION_DIR.get().map(|d| SessionPersistenceConfig::Json { folder: Some(d.clone()) }),
+                ..Default::default()
+            };
+            let session = Session::new_with_opts(default_dir, opts).await.map_err(|e| e.to_string())?;
             // Local-only, read-only HTTP API: mpv reads the stream from it.
             let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
             let opts = BindOpts { request_dualstack: false, ..Default::default() };
@@ -38,6 +45,19 @@ async fn engine(default_dir: PathBuf) -> Result<&'static Engine, String> {
             Ok(Engine { session, api, port })
         })
         .await
+}
+
+/// At start: the remembered torrents (if any) are loaded and carry on downloading.
+pub fn resume(session_dir: PathBuf, default_dir: PathBuf) {
+    let _ = SESSION_DIR.set(session_dir.clone());
+    let saved = std::fs::read_to_string(session_dir.join("session.json")).ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .is_some_and(|v| v["torrents"].as_object().is_some_and(|t| !t.is_empty()));
+    if saved {
+        tauri::async_runtime::spawn(async move {
+            let _ = engine(default_dir).await;
+        });
+    }
 }
 
 #[derive(Serialize)]
@@ -63,6 +83,15 @@ pub struct Added {
 
 fn is_video(name: &str) -> bool {
     name.rsplit('.').next().is_some_and(|x| VIDEO_EXT.contains(&x.to_lowercase().as_str()))
+}
+
+/// The first file a magnet asks for with BEP 53 `so=` (e.g. `so=4` or `so=4,5`).
+fn selected_file(source: &str) -> Option<usize> {
+    let query = source.strip_prefix("magnet:")?.split_once('?').map_or("", |(_, q)| q);
+    query
+        .split('&')
+        .find_map(|p| p.strip_prefix("so="))
+        .and_then(|v| v.split([',', '-']).next()?.parse().ok())
 }
 
 /// `source` is a magnet link, an http(s) .torrent URL or a local .torrent file.
@@ -104,8 +133,19 @@ pub async fn add(source: String, out_dir: String) -> Result<Added, String> {
                 .map(|(idx, f)| TFile { idx, name: f.relative_filename.to_string_lossy().into_owned(), len: f.len })
                 .collect()
         })
-        .map_err(|e| e.to_string())?;
-    let video_idx = files.iter().filter(|f| is_video(&f.name)).max_by_key(|f| f.len).map(|f| f.idx);
+        .map_err(|e| e.to_string())?;    // A file named by the link (one episode of a season pack) plays instead of the biggest video;
+    // if the torrent was already here with other files selected, that file is added to them.
+    let picked = selected_file(&source).filter(|&i| files.get(i).is_some_and(|f| is_video(&f.name)));
+    if let Some(i) = picked {
+        if let Some(mut only) = handle.only_files() {
+            if !only.contains(&i) {
+                only.push(i);
+                let set: std::collections::HashSet<usize> = only.into_iter().collect();
+                let _ = eng.session.update_only_files(&handle, &set).await;
+            }
+        }
+    }
+    let video_idx = picked.or_else(|| files.iter().filter(|f| is_video(&f.name)).max_by_key(|f| f.len).map(|f| f.idx));
     let folder = handle.output_folder().to_path_buf();
     Ok(Added {
         id,
@@ -126,6 +166,19 @@ pub fn list() -> Vec<Value> {
             if let Value::Object(o) = &mut v {
                 o.insert("id".into(), id.into());
                 o.insert("name".into(), h.name().unwrap_or_default().into());
+                // after a restart the app finds which torrent this is (and its video file) from these
+                o.insert("hash".into(), h.info_hash().as_string().into());
+                let local = h
+                    .with_metadata(|m| {
+                        m.file_infos
+                            .iter()
+                            .filter(|f| is_video(&f.relative_filename.to_string_lossy()))
+                            .max_by_key(|f| f.len)
+                            .map(|f| h.output_folder().join(&f.relative_filename).to_string_lossy().into_owned())
+                    })
+                    .ok()
+                    .flatten();
+                o.insert("local".into(), local.into());
             }
             v
         })
@@ -139,11 +192,10 @@ pub fn haves(id: usize, idx: usize) -> Result<Vec<(f64, f64)>, String> {
     let h = eng.session.get(id.into()).ok_or(tr!("Torrent bulunamadı", "Torrent not found"))?;
     let (off, len, plen) = h
         .with_metadata(|m| {
-            let f = &m.file_infos[idx];
-            (f.offset_in_torrent, f.len, m.info.lengths().default_piece_length() as u64)
+            let f = m.file_infos.get(idx).ok_or_else(|| tr!("Dosya bulunamadı", "File not found"))?;
+            Ok::<_, String>((f.offset_in_torrent, f.len, m.info.lengths().default_piece_length() as u64))
         })
-        .map_err(|e| e.to_string())?;
-    if len == 0 {
+        .map_err(|e| e.to_string())??;    if len == 0 {
         return Ok(vec![]);
     }
     let (bf, _) = eng.api.api_dump_haves(id.into()).map_err(|e| e.to_string())?;
@@ -176,6 +228,16 @@ pub async fn remove(id: usize, delete_files: bool) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn selected_file() {
+        use super::selected_file as sel;
+        assert_eq!(sel("magnet:?xt=urn:btih:abc&so=4"), Some(4));
+        assert_eq!(sel("magnet:?xt=urn:btih:abc&dn=x&so=2,3&tr=udp://t"), Some(2));
+        assert_eq!(sel("magnet:?xt=urn:btih:abc&so=7-9"), Some(7));
+        assert_eq!(sel("magnet:?xt=urn:btih:abc"), None);
+        assert_eq!(sel("https://x/a.torrent?so=1"), None);
+    }
+
     /// Streams the first bytes of Big Buck Bunny (Creative Commons) through the local HTTP API.
     #[tokio::test(flavor = "multi_thread")]
     #[ignore]

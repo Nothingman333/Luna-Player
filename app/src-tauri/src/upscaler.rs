@@ -240,22 +240,31 @@ pub fn save(values: BTreeMap<String, String>) -> Result<(), String> {
     let path = settings_path();
     let was_running = running();
     stop();
-    let mut xml = std::fs::read_to_string(&path).map_err(|_| tr!("Lossless Scaling ayar dosyası bulunamadı. Programı bir kez açıp kapat.", "Lossless Scaling's settings file wasn't found. Open and close the program once."))?;
+    // whatever happens while writing, Lossless Scaling is started again if it was running
+    let result = write_profile(&path, &values);
+    if was_running {
+        let started = start();
+        result.as_ref().ok().map(|_| started).transpose()?;
+    }
+    result
+}
+
+fn write_profile(path: &std::path::Path, values: &BTreeMap<String, String>) -> Result<(), String> {
+    let mut xml = std::fs::read_to_string(path).map_err(|_| tr!("Lossless Scaling ayar dosyası bulunamadı. Programı bir kez açıp kapat.", "Lossless Scaling's settings file wasn't found. Open and close the program once."))?;
     let (a, b) = match block_range(&xml, PROFILE) {
         Some(r) => r,
         None => {
             // First time: copy the user's default profile as the starting point.
             let (fa, fb) = first_block(&xml).ok_or(tr!("Lossless Scaling ayar dosyasında profil yok", "No profile in Lossless Scaling's settings file"))?;
-            let mut copy = xml[fa..fb].to_string();
-            let old_title = get(&copy, "Title").unwrap_or_default();
-            copy = copy.replacen(&format!("<Title>{old_title}</Title>"), &format!("<Title>{PROFILE}</Title>"), 1);
+            // (set() also handles an empty "<Title />")
+            let copy = set(&xml[fa..fb], "Title", PROFILE);
             xml.insert_str(fb, &format!("\n    {copy}"));
             let start = fb + 5;
             (start, start + copy.len())
         }
     };
     let mut block = xml[a..b].to_string();
-    for (k, v) in &values {
+    for (k, v) in values {
         if KEYS.contains(&k.as_str()) {
             block = set(&block, k, v);
         }
@@ -266,12 +275,8 @@ pub fn save(values: BTreeMap<String, String>) -> Result<(), String> {
     block = remove(&block, "Filter"); // left by an earlier Luna version, never read by Lossless Scaling
     block = set(&block, "AutoScale", "false");
     xml.replace_range(a..b, &block);
-    let _ = std::fs::copy(&path, path.with_extension("xml.luna-backup"));
-    std::fs::write(&path, xml).map_err(|e| e.to_string())?;
-    if was_running {
-        start()?;
-    }
-    Ok(())
+    let _ = std::fs::copy(path, path.with_extension("xml.luna-backup"));
+    std::fs::write(path, xml).map_err(|e| e.to_string())
 }
 
 /// Presses Lossless Scaling's hotkey (it scales the foreground window, i.e. Luna).
@@ -340,7 +345,11 @@ pub mod win {
         fn GetLastError() -> u32;
         fn SetWindowPos(h: Hwnd, after: Hwnd, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
         fn SetWindowLongPtrW(h: Hwnd, idx: i32, v: isize) -> isize;
+        fn MonitorFromWindow(h: Hwnd, flags: u32) -> isize;
+        fn GetMonitorInfoW(m: isize, info: *mut MonitorInfo) -> i32;
     }
+    #[repr(C)]
+    struct MonitorInfo { size: u32, monitor: Rect, work: Rect, flags: u32 }
 
     struct Find { pid: u32, found: Vec<Hwnd> }
 
@@ -361,12 +370,18 @@ pub mod win {
     }
 
     /// While scaling, Lossless Scaling shows a topmost window the size of the whole screen.
+    /// (measured against the screen the window is on, not the main one: a small second monitor counts too)
     pub fn scaling_window(pid: u32) -> Option<Hwnd> {
-        let (sw, sh) = unsafe { (GetSystemMetrics(0), GetSystemMetrics(1)) };
         windows_of(pid).into_iter().find(|&h| {
             let ex = unsafe { GetWindowLongW(h, -20) } as u32;
             let mut r = Rect { l: 0, t: 0, r: 0, b: 0 };
             unsafe { GetWindowRect(h, &mut r) };
+            let mut mi = MonitorInfo { size: std::mem::size_of::<MonitorInfo>() as u32, monitor: Rect { l: 0, t: 0, r: 0, b: 0 }, work: Rect { l: 0, t: 0, r: 0, b: 0 }, flags: 0 };
+            let (sw, sh) = if unsafe { GetMonitorInfoW(MonitorFromWindow(h, 2), &mut mi) } != 0 {
+                (mi.monitor.r - mi.monitor.l, mi.monitor.b - mi.monitor.t)
+            } else {
+                unsafe { (GetSystemMetrics(0), GetSystemMetrics(1)) }
+            };
             let topmost = ex & 0x8 != 0;
             topmost && (r.r - r.l) >= sw * 9 / 10 && (r.b - r.t) >= sh * 9 / 10
         })

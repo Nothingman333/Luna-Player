@@ -21,7 +21,14 @@ export default function SubTimeline({ cues, time, delay, embedded, onReset, onOt
   const strip = useRef<HTMLDivElement>(null);
   const drag = useRef<{ x: number; delay: number } | null>(null);
 
-  const nudge = (d: number) => setProp("sub-delay", Math.round((delay + d) * 1000) / 1000);
+  // quick clicks add up before mpv's sub-delay event comes back
+  const delayRef = useRef(delay);
+  const seen = useRef(delay);
+  if (seen.current !== delay) seen.current = delayRef.current = delay;
+  const nudge = (d: number) => {
+    delayRef.current = Math.round((delayRef.current + d) * 1000) / 1000;
+    setProp("sub-delay", delayRef.current);
+  };
 
   const start = time - SPAN / 2;
   const visible = cues.filter(([s, e]) => e + delay > start && s + delay < start + SPAN);
@@ -59,8 +66,8 @@ export default function SubTimeline({ cues, time, delay, embedded, onReset, onOt
         <button className="icon sm" aria-label={tt("Kapat")} title={tt("Kapat (S)")} onClick={onClose}>✕</button>
       </div>
       <div className="sync-row">
-        <button className="step big" aria-label="500 ms geri" onClick={() => nudge(-0.5)}>−500</button>
-        <button className="step" aria-label="50 ms geri" onClick={() => nudge(-0.05)}>−50</button>
+        <button className="step big" aria-label={tt("500 ms geri")} onClick={() => nudge(-0.5)}>−500</button>
+        <button className="step" aria-label={tt("50 ms geri")} onClick={() => nudge(-0.05)}>−50</button>
         <div
           className="strip"
           ref={strip}
@@ -83,8 +90,8 @@ export default function SubTimeline({ cues, time, delay, embedded, onReset, onOt
           })}
           <div className="playhead" />
         </div>
-        <button className="step" aria-label="50 ms ileri" onClick={() => nudge(0.05)}>+50</button>
-        <button className="step big" aria-label="500 ms ileri" onClick={() => nudge(0.5)}>+500</button>
+        <button className="step" aria-label={tt("50 ms ileri")} onClick={() => nudge(0.05)}>+50</button>
+        <button className="step big" aria-label={tt("500 ms ileri")} onClick={() => nudge(0.5)}>+500</button>
       </div>
       <div className="sync-foot">
         <span className="muted">{tt("Bu ayar bu dosya için kaydedilir. Kısayol: G / H (VLC gibi, 50 ms)")}</span>

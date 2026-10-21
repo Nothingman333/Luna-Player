@@ -71,7 +71,38 @@ fn query_from_name(path: &Path) -> String {
     stem.replace(['.', '_', '-'], " ")
 }
 
+/// How many times a request is tried before its error is shown (OpenSubtitles fails now and then and works on the next try).
+const TRIES: u32 = 4;
+/// A failure worth another try (the network, the server, an error page), or one that won't change (key, daily limit).
+enum Fail {
+    Again(String),
+    Stop(String),
+}
+fn msg(f: Fail) -> String {
+    match f {
+        Fail::Again(m) | Fail::Stop(m) => m,
+    }
+}
+async fn pause(attempt: u32) {
+    tokio::time::sleep(std::time::Duration::from_millis(700 * (attempt as u64 + 1))).await;
+}
+
 async fn request(http: &reqwest::Client, key: &str, params: &[(&str, String)]) -> Result<Vec<Value>, String> {
+    let mut last = String::new();
+    for attempt in 0..TRIES {
+        match request_once(http, key, params).await {
+            Ok(v) => return Ok(v),
+            Err(Fail::Stop(m)) => return Err(m),
+            Err(Fail::Again(m)) => last = m,
+        }
+        if attempt + 1 < TRIES {
+            pause(attempt).await;
+        }
+    }
+    Err(last)
+}
+
+async fn request_once(http: &reqwest::Client, key: &str, params: &[(&str, String)]) -> Result<Vec<Value>, Fail> {
     let res = http
         .get(format!("{API}/subtitles"))
         .header("Api-Key", key)
@@ -79,14 +110,14 @@ async fn request(http: &reqwest::Client, key: &str, params: &[(&str, String)]) -
         .query(params)
         .send()
         .await
-        .map_err(|e| tr!("OpenSubtitles'a ulaşılamadı: {}", "Couldn't reach OpenSubtitles: {}", e))?;
+        .map_err(|e| Fail::Again(tr!("OpenSubtitles'a ulaşılamadı: {}", "Couldn't reach OpenSubtitles: {}", e)))?;
     match res.status().as_u16() {
         200 => {}
-        401 | 403 => return Err(tr!("OpenSubtitles API anahtarı geçersiz", "The OpenSubtitles API key is invalid")),
-        429 => return Err(tr!("OpenSubtitles çok fazla istek dedi, biraz sonra tekrar dene", "OpenSubtitles says too many requests; try again a bit later")),
-        s => return Err(tr!("OpenSubtitles arama hatası ({})", "OpenSubtitles search error ({})", s)),
+        401 | 403 => return Err(Fail::Stop(tr!("OpenSubtitles API anahtarı geçersiz", "The OpenSubtitles API key is invalid"))),
+        429 => return Err(Fail::Again(tr!("OpenSubtitles çok fazla istek dedi, biraz sonra tekrar dene", "OpenSubtitles says too many requests; try again a bit later"))),
+        s => return Err(Fail::Again(tr!("OpenSubtitles arama hatası ({})", "OpenSubtitles search error ({})", s))),
     }
-    let v: Value = res.json().await.map_err(|e| e.to_string())?;
+    let v: Value = res.json().await.map_err(|e| Fail::Again(e.to_string()))?;
     Ok(v["data"].as_array().cloned().unwrap_or_default())
 }
 
@@ -130,12 +161,19 @@ pub async fn search(video: &str, key: &str, langs: &str, q: Query) -> Result<Vec
     } else if let Some(y) = q.year {
         params.push(("year", y.to_string()));
     }
-    for v in request(&http, key, &params).await.unwrap_or_default() {
-        if let Some(h) = to_hit(&v) {
-            if !hits.iter().any(|x| x.file_id == h.file_id) {
-                hits.push(h);
+    match request(&http, key, &params).await {
+        Ok(l) => {
+            for v in l {
+                if let Some(h) = to_hit(&v) {
+                    if !hits.iter().any(|x| x.file_id == h.file_id) {
+                        hits.push(h);
+                    }
+                }
             }
         }
+        // nothing from the file's hash either: say why (a wrong key, the daily limit…), not "none found"
+        Err(e) if hits.is_empty() => return Err(e),
+        Err(_) => {}
     }
 
     let order: Vec<&str> = langs.split(',').collect();
@@ -147,8 +185,34 @@ pub async fn search(video: &str, key: &str, langs: &str, q: Query) -> Result<Vec
 }
 
 /// Downloads one subtitle next to the video (or into the cache if that folder is read-only).
+fn looks_like_html(b: &[u8]) -> bool {
+    let head = String::from_utf8_lossy(&b[..b.len().min(512)]).trim_start_matches('\u{feff}').trim_start().to_ascii_lowercase();
+    b.is_empty() || head.starts_with("<!doctype html") || head.starts_with("<html") || head.starts_with("<?xml")
+}
+
 pub async fn download(video: &str, key: &str, hit_id: i64, language: &str, cache: PathBuf) -> Result<String, String> {
     let http = reqwest::Client::new();
+    let mut last = Fail::Again(String::new());
+    let mut bytes = None;
+    for attempt in 0..TRIES {
+        match fetch_once(&http, key, hit_id).await {
+            Ok(b) => {
+                bytes = Some(b);
+                break;
+            }
+            Err(Fail::Stop(m)) => return Err(m),
+            Err(f) => last = f,
+        }
+        if attempt + 1 < TRIES {
+            pause(attempt).await;
+        }
+    }
+    let Some(bytes) = bytes else { return Err(msg(last)) };
+    save(video, language, cache, &bytes)
+}
+
+/// One try at a subtitle file: the download link, then the file.
+async fn fetch_once(http: &reqwest::Client, key: &str, hit_id: i64) -> Result<Vec<u8>, Fail> {
     let res = http
         .post(format!("{API}/download"))
         .header("Api-Key", key)
@@ -156,27 +220,40 @@ pub async fn download(video: &str, key: &str, hit_id: i64, language: &str, cache
         .json(&json!({ "file_id": hit_id }))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| Fail::Again(e.to_string()))?;
     let status = res.status().as_u16();
     let dl: Value = res.json().await.unwrap_or(Value::Null);
     let Some(link) = dl["link"].as_str() else {
         return Err(match status {
-            406 | 429 => tr!("Bugünkü ücretsiz indirme hakkın doldu (OpenSubtitles sınırı)", "You've used today's free downloads (OpenSubtitles limit)"),
-            401 | 403 => tr!("OpenSubtitles API anahtarı geçersiz", "The OpenSubtitles API key is invalid"),
-            _ => dl["message"].as_str().map(str::to_string).unwrap_or_else(|| tr!("İndirme reddedildi", "Download refused")),
+            406 | 429 => Fail::Stop(tr!("Bugünkü ücretsiz indirme hakkın doldu (OpenSubtitles sınırı)", "You've used today's free downloads (OpenSubtitles limit)")),
+            401 | 403 => Fail::Stop(tr!("OpenSubtitles API anahtarı geçersiz", "The OpenSubtitles API key is invalid")),
+            _ => Fail::Again(dl["message"].as_str().map(str::to_string).unwrap_or_else(|| tr!("İndirme reddedildi", "Download refused"))),
         });
     };
     let bytes = http
         .get(link)
         .send()
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(|e| Fail::Again(e.to_string()))?
+        .error_for_status()
+        .map_err(|e| Fail::Again(tr!("Altyazı indirilemedi: {}", "Couldn't download the subtitle: {}", e)))?
         .bytes()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| Fail::Again(e.to_string()))?;
+    // an error page served with a success code is still not a subtitle
+    if looks_like_html(&bytes) {
+        return Err(Fail::Again(tr!("Altyazı yerine bir hata sayfası geldi", "Got an error page instead of a subtitle")));
+    }
+    Ok(bytes.to_vec())
+}
 
+/// The subtitle beside the video (or in Luna's cache when that folder can't be written).
+fn save(video: &str, language: &str, cache: PathBuf, bytes: &[u8]) -> Result<String, String> {
     let path = Path::new(video);
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("video");
+    // the language code comes from the server: only letters and "-" go into the file name
+    let language: String = language.chars().filter(|c| c.is_ascii_alphabetic() || *c == '-').take(8).collect();
+    let language = if language.is_empty() { "sub".to_string() } else { language };
     let mut name = format!("{stem}.{language}.srt");
     // Don't overwrite a different subtitle the user already has.
     let mut n = 2;
@@ -185,7 +262,7 @@ pub async fn download(video: &str, key: &str, hit_id: i64, language: &str, cache
         n += 1;
     }
     let beside = path.with_file_name(&name);
-    if std::fs::write(&beside, &bytes).is_ok() {
+    if std::fs::write(&beside, bytes).is_ok() {
         return Ok(beside.to_string_lossy().into_owned());
     }
     std::fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
@@ -197,7 +274,7 @@ pub async fn download(video: &str, key: &str, hit_id: i64, language: &str, cache
         h.finish()
     };
     let p = cache.join(format!("{id:016x}-{name}"));
-    std::fs::write(&p, &bytes).map_err(|e| e.to_string())?;
+    std::fs::write(&p, bytes).map_err(|e| e.to_string())?;
     Ok(p.to_string_lossy().into_owned())
 }
 
@@ -220,10 +297,23 @@ fn parse_time(s: &str) -> Option<f64> {
     Some(h * 3600.0 + m * 60.0 + sec)
 }
 
+/// A subtitle file's text: UTF-16 (with its byte order mark, as Notepad saves it) or UTF-8.
+fn decode_text(raw: &[u8]) -> String {
+    let utf16 = |b: &[u8], le: bool| {
+        let units: Vec<u16> = b.chunks_exact(2).map(|c| if le { u16::from_le_bytes([c[0], c[1]]) } else { u16::from_be_bytes([c[0], c[1]]) }).collect();
+        String::from_utf16_lossy(&units)
+    };
+    match raw {
+        [0xFF, 0xFE, rest @ ..] => utf16(rest, true),
+        [0xFE, 0xFF, rest @ ..] => utf16(rest, false),
+        _ => String::from_utf8_lossy(raw).into_owned(),
+    }
+}
+
 /// Start/end seconds of every cue in an SRT, VTT or ASS/SSA file.
 pub fn cues(file: &str) -> Result<Vec<(f64, f64)>, String> {
     let raw = std::fs::read(file).map_err(|e| e.to_string())?;
-    let text = String::from_utf8_lossy(&raw);
+    let text = decode_text(&raw);
     let mut out = Vec::new();
     for line in text.lines() {
         if let Some((a, b)) = line.split_once("-->") {
@@ -241,4 +331,17 @@ pub fn cues(file: &str) -> Result<Vec<(f64, f64)>, String> {
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn html_is_not_a_subtitle() {
+        use super::looks_like_html as h;
+        assert!(h(b"<!DOCTYPE html><html><body>403</body></html>"));
+        assert!(h(b"  <html>"));
+        assert!(h(b""));
+        assert!(!h(b"1\r\n00:00:01,000 --> 00:00:02,000\r\nHello\r\n"));
+        assert!(!h("\u{feff}1\n00:00:01,000 --> 00:00:02,000\nMerhaba\n".as_bytes()));
+    }
 }

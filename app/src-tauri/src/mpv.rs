@@ -53,14 +53,34 @@ pub fn mpv_exe(resource_dir: Option<PathBuf>) -> PathBuf {
             return p;
         }
     }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("mpv").join("mpv.exe")
+    // The source folder is only a fallback while developing; a release build doesn't carry it.
+    #[cfg(debug_assertions)]
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    // A release build: beside the exe, else the project's own mpv when the exe sits in the
+    // project folder (the copy in its root), found from the exe's place, not a built-in path.
+    #[cfg(not(debug_assertions))]
+    let dir = {
+        let here = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())).unwrap_or_default();
+        let project = here.join("app").join("src-tauri");
+        if !here.join("mpv").join("mpv.exe").exists() && project.join("mpv").join("mpv.exe").exists() { project } else { here }
+    };
+    dir.join("mpv").join("mpv.exe")
+}
+
+/// yt-dlp next to mpv: the folder build (`yt-dlp\yt-dlp.exe`, starts in ~0.4 s) when it is there,
+/// else the one-file build (unpacks itself on every start, ~1.1 s per song).
+pub fn ytdlp_exe(mpv: &std::path::Path) -> PathBuf {
+    let dir = mpv.with_file_name("yt-dlp").join("yt-dlp.exe");
+    if dir.exists() { dir } else { mpv.with_file_name("yt-dlp.exe") }
 }
 
 /// Starts mpv idle inside `hwnd` so that opening a file later is instant.
 pub fn start(app: AppHandle, exe: PathBuf, hwnd: isize, fonts: PathBuf) -> Mpv {
     let pipe = format!(r"\\.\pipe\modernplayer-{}", std::process::id());
+    let ytdlp = ytdlp_exe(&exe);
     let child = Command::new(&exe)
         .arg(format!("--sub-fonts-dir={}", fonts.display()))
+        .arg(format!("--script-opts=ytdl_hook-ytdl_path={}", ytdlp.display()))
         .args([
             format!("--wid={hwnd}"),
             format!("--input-ipc-server={pipe}"),
@@ -87,17 +107,27 @@ pub fn start(app: AppHandle, exe: PathBuf, hwnd: isize, fonts: PathBuf) -> Mpv {
             "--background-color=#000000".into(),
         ])
         .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-        .ok();
+        .spawn();
+    let spawn_err = child.as_ref().err().map(|e| e.to_string());
+    let child = child.ok();
 
     let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
 
     tauri::async_runtime::spawn(async move {
-        // mpv needs a moment to create the pipe.
+        if let Some(e) = spawn_err {
+            let _ = app.emit("mpv-error", tr!("Video motoru (mpv) başlatılamadı: {}", "The video engine (mpv) couldn't start: {}", e));
+            return;
+        }
+        // mpv needs a moment to create the pipe; if it never does (crashed at start), give up.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         let client = loop {
             match ClientOptions::new().open(&pipe) {
                 Ok(c) => break c,
-                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(15)).await,
+                Err(_) if std::time::Instant::now() < deadline => tokio::time::sleep(std::time::Duration::from_millis(15)).await,
+                Err(_) => {
+                    let _ = app.emit("mpv-error", tr!("Video motoru (mpv) yanıt vermiyor", "The video engine (mpv) isn't responding"));
+                    return;
+                }
             }
         };
         let (read, mut write) = tokio::io::split(client);

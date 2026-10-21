@@ -11,6 +11,7 @@ import App from "./App";
 import { loadedLang } from "./i18n";
 import { SubsOverlay } from "./Upscaler";
 import { invoke } from "@tauri-apps/api/core";
+import { loadSecrets, SECRET_KEYS } from "./library";
 
 // Every image fades in once it has loaded; one that fails to load is hidden instead of
 // showing the browser's broken-image icon.
@@ -23,6 +24,18 @@ document.addEventListener("error", (e) => {
   if (t instanceof HTMLImageElement) t.classList.add("broken");
 }, true);
 
+// Esc closes the window on top, as a click beside it does (every window closes that way). Registered
+// first and in the capture phase, so the page under it (the player, a reader) doesn't take the Esc too.
+window.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || e.defaultPrevented) return;
+  const bgs = document.querySelectorAll<HTMLElement>(".modal-bg");
+  const top = bgs[bgs.length - 1];
+  if (!top) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  top.click();
+}, true);
+
 const isSubs = new URLSearchParams(location.search).has("subs");
 
 // ---------- durable state ----------
@@ -31,7 +44,7 @@ const isSubs = new URLSearchParams(location.search).has("subs");
 const snapshot = () => {
   try {
     const o: Record<string, string> = {};
-    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i)!; o[k] = localStorage.getItem(k) ?? ""; }
+    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i)!; if (!SECRET_KEYS.includes(k)) o[k] = localStorage.getItem(k) ?? ""; }
     if (Object.keys(o).length > 2) invoke("state_save", { json: JSON.stringify(o) }).catch(() => {});
   } catch {}
 };
@@ -52,6 +65,8 @@ async function restore() {
 (async () => {
   if (!isSubs) {
     await restore();
+    // the API keys from Windows (an old plain copy, also one the state file just brought back, moves there)
+    await loadSecrets();
     // a restored backup can carry another language than the one the texts were loaded in
     if (localStorage.getItem("lang") === "tr" ? loadedLang !== "tr" : loadedLang !== "en") { location.reload(); return; }
     invoke("set_lang", { lang: localStorage.getItem("lang") === "tr" ? "tr" : "en" }).catch(() => {});

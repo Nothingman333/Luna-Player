@@ -1,9 +1,25 @@
-node_modules/
+.tools/
+app/node_modules/
 app/dist/
 app/src-tauri/target/
 app/src-tauri/gen/
 app/src-tauri/mpv/
+
+# built exe and personal data (never shared)
+Luna Player.exe
 dist-share/
-*.exe
-luna-restore.json*
+backups/
+luna-restore.json
+luna-restore.json.used
+murat-ilerleme.md
 .claude/
+app/.claude/
+
+*.log
+Thumbs.db
+.DS_Store
+
+# internal audit and local harness tooling (not part of the app)
+HATA-RAPORU.md
+deepseek tarafından bulunan hatalar/
+plugins/
