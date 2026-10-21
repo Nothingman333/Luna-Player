@@ -388,6 +388,17 @@ fn llm_error(status: reqwest::StatusCode, v: &Value) -> String {
     tr!("Asistan hatası ({}): {}", "Assistant error ({}): {}", status, msg)
 }
 
+/// "error sending request" alone hides why (a certificate, a timeout…): the causes are added.
+fn err_chain(e: &dyn std::error::Error) -> String {
+    let mut out = e.to_string();
+    let mut s = e.source();
+    while let Some(x) = s {
+        out += &format!(" ← {x}");
+        s = x.source();
+    }
+    out
+}
+
 #[tauri::command]
 async fn llm_post(kind: String, url: String, key: String, body: Value) -> Result<Value, String> {
     let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(180)).build().map_err(|e| e.to_string())?;
@@ -395,7 +406,7 @@ async fn llm_post(kind: String, url: String, key: String, body: Value) -> Result
         .json(&body)
         .send()
         .await
-        .map_err(|e| tr!("Asistana bağlanılamadı ({}): {}", "Couldn't reach the assistant ({}): {}", url, e))?;
+        .map_err(|e| tr!("Asistana bağlanılamadı ({}): {}", "Couldn't reach the assistant ({}): {}", url, err_chain(&e)))?;
     let status = res.status();
     let text = res.text().await.map_err(|e| e.to_string())?;
     let v: Value = serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({ "message": text.chars().take(300).collect::<String>() }));
@@ -951,6 +962,13 @@ async fn letterboxd_read(app: AppHandle, url: String, max_pages: Option<u32>, li
     letterboxd::read(&url, max_pages.unwrap_or(30).min(100), lists.unwrap_or(true), &say).await
 }
 
+/// Up to `count` Letterboxd reviews of a film, for the "Worth watching?" card.
+#[tauri::command]
+async fn letterboxd_reviews(app: AppHandle, tmdb: Option<u64>, tv: Option<bool>, title: String, year: Option<String>, count: Option<usize>) -> Result<letterboxd::Reviews, String> {
+    let say = move |m: String| { let _ = app.emit("lb-reviews-progress", m); };
+    letterboxd::reviews(tmdb, tv.unwrap_or(false), &title, year.as_deref(), count.unwrap_or(50), &say).await
+}
+
 #[tauri::command]
 fn upscaler_note(app: AppHandle, m: String) {
     upscaler_log(&app)(m);
@@ -1163,6 +1181,7 @@ pub fn run() {
             http_text_at,
             read_export,
             letterboxd_read,
+            letterboxd_reviews,
             plugins_list,
             plugins_add,
             plugins_remove,

@@ -106,6 +106,18 @@
               { name: "Watchlist", kind: "watchlist", url: "", films: [{ title: "Prisoners", year: "2013" }, { title: "Sicario", year: "2015" }] },
               ...(args.lists === false ? [] : [{ name: "Favourites", kind: "list", url: args.url + "/list/fav/", films: [{ title: "Inception", year: "2010" }, { title: "Heat", year: "1995" }, { title: "Arrival", year: "2016" }] }])];
           }
+          if (cmd === "letterboxd_reviews") {
+            window.__lbr = args;
+            for (const m of ["Looking on Letterboxd", "12 reviews read", "48 reviews read"]) { await new Promise((r) => setTimeout(r, 500)); window.__emit("lb-reviews-progress", m); }
+            if (/nothing/i.test(args.title)) throw "This title wasn't found on Letterboxd";
+            return { url: "https://letterboxd.com/film/inception", reviews: Array.from({ length: args.count }, (_, i) => ({ author: "user" + i, stars: i % 3 ? 4 + (i % 2) / 2 : null, spoiler: i % 7 === 0, text: ["The pacing is relentless and the score is huge.", "Great acting, but the story is too convoluted.", "Visuals are stunning; characters feel thin."][i % 3] + " #" + i })) };
+          }
+          if (cmd === "llm_post" && /Letterboxd/.test(JSON.stringify(args.body.messages?.[0] ?? args.body.system ?? ""))) {
+            window.__llm = args;
+            const v = { lean: "positive", summary: "İzleyiciler temponun ve müziğin gücünü öne çıkarıyor; hikâyeyi karmaşık bulanlar da var.", forYou: "Tempoya ve görselliğe önem veriyorsun; bu ikisi en çok övülen yanları.", likeIf: "Yoğun, kafa yoran gerilimleri seviyorsan.", skipIf: "Karakter derinliği arıyorsan.", praise: ["Tempo", "Müzik", "Görsellik"], criticism: ["Karmaşık hikâye", "İnce karakterler"], aspects: [{ aspect: "pace", tone: "positive", note: "Neredeyse herkes temposunu övüyor." }, { aspect: "story", tone: "mixed", note: "Kimine zekice, kimine fazla karışık." }, { aspect: "bogus", tone: "x", note: "" }] };
+            const text = "```json\n" + JSON.stringify(v) + "\n```";
+            return args.kind === "anthropic" ? { content: [{ type: "text", text }] } : { choices: [{ message: { content: text } }] };
+          }
           if (cmd === "llm_post") {
             window.__llm = args;
             const b = args.body, anth = args.kind === "anthropic";

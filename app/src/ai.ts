@@ -16,8 +16,7 @@ export const aiModel = (p = aiProvider()) => (p === "gemini" ? store.get("gemini
 /** "https://openrouter.ai/api/v1", "http://localhost:11434/v1"… (OpenAI-compatible) */
 export const aiBase = () => (store.get("aiBase") ?? "").trim().replace(/\/+$/, "").replace(/\/chat\/completions$/, "");
 /** The assistant can answer: a key for the chosen service (a local server at a base URL may need none). */
-export function aiKey(): string {
-  const p = aiProvider();
+export function aiKey(p: AiProvider = aiProvider()): string {
   const k = store.get(spec(p).keyName) ?? "";
   if (p === "custom") return aiBase() ? k || "-" : "";
   return k;
@@ -165,16 +164,40 @@ function fromAnthropic(r: any) {
 
 /** One request to the chosen non-Gemini provider, in and out in Gemini's format. Google Search
  *  (a Gemini-only tool) is left out; the caller sees no groundingMetadata and treats it as unsourced. */
-export async function otherAi(body: any): Promise<{ r: any; id: string; noSearch: boolean }> {
-  const p = aiProvider();
-  const model = aiModel(p);
+export async function otherAi(body: any, use?: { provider: AiProvider; model: string }): Promise<{ r: any; id: string; noSearch: boolean }> {
+  const p = use?.provider ?? aiProvider();
+  const model = use?.model || aiModel(p);
   if (!model) throw new Error(p === "custom" ? "Ayarlar › Hesaplar ve anahtarlar: model adını yaz" : "Model yok");
   const noSearch = (body.tools ?? []).some((t: any) => t.google_search || t.googleSearch);
-  const key = aiKey() === "-" ? "" : aiKey();
+  const key = aiKey(p) === "-" ? "" : aiKey(p);
   if (p === "claude") {
     const r = await invoke<any>("llm_post", { kind: "anthropic", url: endpoint(p) + "/messages", key, body: toAnthropic(body, model) });
     return { r: fromAnthropic(r), id: model, noSearch };
   }
   const r = await invoke<any>("llm_post", { kind: "openai", url: endpoint(p) + "/chat/completions", key, body: toOpenAi(body, model) });
   return { r: fromOpenAi(r), id: model, noSearch };
+}
+
+// ---------- The AI that reads film reviews ("Worth watching?") ----------
+/** Settings › Accounts: its own service and model ("" = the assistant's), how many Letterboxd
+ *  reviews to read and an extra instruction. The keys are the ones entered for the assistant. */
+export type ReviewAi = { provider: AiProvider; model: string; count: number; note: string };
+export function reviewAi(): ReviewAi {
+  const p = (store.get("reviewAiProvider") as AiProvider) || aiProvider();
+  const n = Number(store.get("reviewAiCount"));
+  return { provider: AI_PROVIDERS.some((x) => x.id === p) ? p : aiProvider(), model: (store.get("reviewAiModel") ?? "").trim() || aiModel(p), count: Number.isFinite(n) && n >= 10 && n <= 100 ? Math.round(n) : 50, note: (store.get("reviewAiNote") ?? "").slice(0, 1000) };
+}
+export const reviewAiName = (r = reviewAi()) => (r.provider === "custom" ? aiBase().replace(/^https?:\/\//, "").split("/")[0] || "Base URL" : spec(r.provider).name) + " · " + r.model;
+
+/** One JSON answer from the review AI: the request in Gemini's shape, sent to whichever service is chosen. */
+export async function reviewAiJson(system: string, user: string): Promise<any> {
+  const r = reviewAi();
+  if (!aiKey(r.provider)) throw new Error("nokey");
+  const body = { systemInstruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts: [{ text: user }] }], generationConfig: { responseMimeType: "application/json", temperature: 0.3 } };
+  const res = r.provider === "gemini"
+    ? await invoke<any>("gemini", { key: aiKey("gemini"), model: r.model, body })
+    : (await otherAi(body, { provider: r.provider, model: r.model })).r;
+  const text = (res?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? "").join("");
+  const json = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
+  return JSON.parse(json);
 }

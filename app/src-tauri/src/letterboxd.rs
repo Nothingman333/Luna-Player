@@ -213,8 +213,215 @@ pub async fn read(url: &str, max_pages: u32, with_lists: bool, progress: Progres
     Ok(vec![Section { name, kind: kind.into(), url: format!("{clean}/"), films }])
 }
 
+// ---------- A film's reviews (for "Worth watching?") ----------
+
+#[derive(Serialize)]
+pub struct Review {
+    pub author: String,
+    /// 0.5 – 5 stars, if the reviewer rated it
+    pub stars: Option<f32>,
+    pub spoiler: bool,
+    pub text: String,
+}
+
+#[derive(Serialize)]
+pub struct Reviews {
+    /// the film's Letterboxd page
+    pub url: String,
+    pub reviews: Vec<Review>,
+}
+
+/// "★★★★½" → 4.5
+fn stars_of(label: &str) -> Option<f32> {
+    let full = label.chars().filter(|c| *c == '★').count() as f32;
+    let half = if label.contains('½') { 0.5 } else { 0.0 };
+    let n = full + half;
+    (n > 0.0 && n <= 5.0).then_some(n)
+}
+
+/// The reviews on one page of /film/SLUG/reviews/…: author, stars, spoiler flag and the text
+/// (long reviews as the page shows them, cut where Letterboxd cuts them).
+fn parse_reviews(html: &str) -> Vec<Review> {
+    let doc = Html::parse_document(html);
+    let article = Selector::parse("article.production-viewing").unwrap();
+    let name = Selector::parse(".displayname").unwrap();
+    let rating = Selector::parse(".inline-rating svg[aria-label], svg.-rating[aria-label]").unwrap();
+    let spoiler = Selector::parse(".js-spoiler-container").unwrap();
+    let body = Selector::parse(".js-review-body").unwrap();
+    let para = Selector::parse("p").unwrap();
+    let squash = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out = vec![];
+    for a in doc.select(&article) {
+        let Some(b) = a.select(&body).next() else { continue };
+        let paras: Vec<String> = b.select(&para).map(|p| squash(p.text().collect())).filter(|t| !t.is_empty()).collect();
+        let text = if paras.is_empty() { squash(b.text().collect()) } else { paras.join("\n") };
+        let text: String = text.chars().take(3900).collect();
+        if text.trim().is_empty() {
+            continue;
+        }
+        out.push(Review {
+            author: a.select(&name).next().map(|n| n.text().collect::<String>().trim().to_string()).unwrap_or_default(),
+            stars: a.select(&rating).next().and_then(|r| r.value().attr("aria-label")).and_then(stars_of),
+            spoiler: a.select(&spoiler).next().is_some(),
+            text,
+        });
+    }
+    out
+}
+
+fn urlencoding(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// The film's page: TMDB's id first (letterboxd.com/tmdb/ID redirects to the film), else the
+/// search, preferring a result with the same year.
+async fn film_page(client: &reqwest::Client, tmdb: Option<u64>, tv: bool, title: &str, year: Option<&str>) -> Result<String, String> {
+    if let (Some(id), false) = (tmdb, tv) {
+        if let Ok(res) = client.get(format!("https://letterboxd.com/tmdb/{id}/")).send().await {
+            let u = res.url().as_str().to_string();
+            if res.status().is_success() && u.contains("letterboxd.com/film/") {
+                return Ok(u.trim_end_matches('/').to_string());
+            }
+        }
+    }
+    let year = year.filter(|y| !y.is_empty());
+    let q = match year { Some(y) => format!("{title} {y}"), None => title.to_string() };
+    let url = format!("https://letterboxd.com/s/search/films/{}/", urlencoding(&q));
+    let html = get_page(client, &url).await.map_err(|e| tr!("Letterboxd'a bağlanılamadı: {}", "Couldn't reach Letterboxd: {}", e))?;
+    let doc = Html::parse_document(&html);
+    let item = Selector::parse("[data-item-link^='/film/']").unwrap();
+    let mut pick: Option<String> = None;
+    for el in doc.select(&item) {
+        let link = el.value().attr("data-item-link").unwrap_or("").to_string();
+        let name = el.value().attr("data-item-name").or(el.value().attr("data-item-full-display-name")).unwrap_or("");
+        if pick.is_none() {
+            pick = Some(link.clone());
+        }
+        if let Some(y) = year {
+            if name.contains(&format!("({y})")) {
+                pick = Some(link);
+                break;
+            }
+        }
+    }
+    pick.map(|l| format!("https://letterboxd.com{}", l.trim_end_matches('/')))
+        .ok_or_else(|| tr!("Letterboxd'da bu eser bulunamadı", "This title wasn't found on Letterboxd"))
+}
+
+/// One page as text. Letterboxd turns away reqwest's connection on its review pages (403) but not
+/// Windows' own curl.exe (System32, since Windows 10 1803), so that is tried first; the address is
+/// always a letterboxd.com one built here.
+async fn get_page(client: &reqwest::Client, url: &str) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let curl = std::path::Path::new(&std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into())).join("System32\\curl.exe");
+        if curl.exists() {
+            let url = url.to_string();
+            let out = tokio::task::spawn_blocking(move || {
+                std::process::Command::new(&curl)
+                    .args(["-s", "-L", "--max-time", "20", "--max-filesize", "8000000", "-w", "\n%{http_code}", "-A", UA, &url])
+                    .creation_flags(0x0800_0000)
+                    .output()
+            })
+            .await;
+            if let Ok(Ok(o)) = out {
+                let body = String::from_utf8_lossy(&o.stdout).into_owned();
+                if let Some((html, code)) = body.rsplit_once('\n') {
+                    match code.trim() {
+                        "200" => return Ok(html.to_string()),
+                        "404" => return Err("404".into()),
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    let res = client.get(url).send().await.map_err(|e| e.to_string())?;
+    if !res.status().is_success() {
+        return Err(res.status().as_u16().to_string());
+    }
+    res.text().await.map_err(|e| e.to_string())
+}
+
+const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36";
+
+/// Up to `count` reviews of a film, most popular first (Letterboxd's "Review Activity" order).
+pub async fn reviews(tmdb: Option<u64>, tv: bool, title: &str, year: Option<&str>, count: usize, progress: Progress<'_>) -> Result<Reviews, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36")
+        .default_headers({
+            let mut h = reqwest::header::HeaderMap::new();
+            h.insert(reqwest::header::ACCEPT, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8".parse().unwrap());
+            h.insert(reqwest::header::ACCEPT_LANGUAGE, "en-US,en;q=0.9,tr;q=0.8".parse().unwrap());
+            h
+        })
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let count = count.clamp(1, 100);
+    progress(tr!("Letterboxd'da aranıyor", "Looking on Letterboxd"));
+    let url = film_page(&client, tmdb, tv, title, year).await?;
+    let mut out: Vec<Review> = vec![];
+    // 12 reviews a page; one page more in case some are empty or repeated
+    for page in 1..=(count / 12 + 2) {
+        let u = if page == 1 { format!("{url}/reviews/by/activity/") } else { format!("{url}/reviews/by/activity/page/{page}/") };
+        let found = match get_page(&client, &u).await {
+            Ok(html) => parse_reviews(&html),
+            Err(e) if page == 1 => return Err(tr!("Yorumlar açılamadı ({})", "Couldn't open the reviews ({})", e)),
+            Err(_) => break,
+        };
+        if found.is_empty() {
+            break;
+        }
+        for r in found {
+            if out.len() < count && !out.iter().any(|x| x.text == r.text) {
+                out.push(r);
+            }
+        }
+        progress(tr!("{} yorum alındı", "{} reviews read", out.len()));
+        if out.len() >= count {
+            break;
+        }
+        // be gentle with the site
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+    Ok(Reviews { url, reviews: out })
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn review_page() {
+        let html = r#"<article class="production-viewing -viewing"><span class="inline-rating"><svg aria-label="★★★★½"></svg></span><strong class="displayname">Ann</strong>
+          <div class="js-review-body"><p>Great pacing.</p><p>Loud   score.</p></div></article>
+          <article class="production-viewing -viewing"><strong class="displayname">Bo</strong><p class="js-spoiler-container"><em>may contain spoilers</em></p>
+          <div class="js-review-body"><p>The ending works.</p></div></article>
+          <article class="production-viewing -viewing"><strong class="displayname">Cy</strong><div class="js-review-body"> </div></article>"#;
+        let r = super::parse_reviews(html);
+        assert_eq!(r.len(), 2);
+        assert_eq!((r[0].author.as_str(), r[0].stars, r[0].spoiler, r[0].text.as_str()), ("Ann", Some(4.5), false, "Great pacing.\nLoud score."));
+        assert_eq!((r[1].stars, r[1].spoiler), (None, true));
+        assert_eq!(super::stars_of("★★"), Some(2.0));
+        assert_eq!(super::urlencoding("Dune 2021"), "Dune%202021");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn real_reviews() {
+        let r = super::reviews(Some(27205), false, "Inception", Some("2010"), 50, &|m| println!("… {m}")).await.unwrap();
+        println!("{} → {} yorum; ilk: {:?}", r.url, r.reviews.len(), r.reviews.first().map(|x| (&x.author, x.stars, x.spoiler)));
+        assert!(r.reviews.len() >= 40);
+        let s = super::reviews(None, false, "Dune", Some("1984"), 12, &|_| {}).await.unwrap();
+        println!("{} → {}", s.url, s.reviews.len());
+        assert!(s.url.contains("dune"));
+    }
+
     #[test]
     fn addresses() {
         use super::normalize;

@@ -1,3 +1,25 @@
+## 1.4.8CC — 2026-10-21 (beta)
+
+- **AI connection fixed:**
+  - OpenAI and Claude sometimes failed with "Couldn't reach the assistant … error sending request".
+  - The cause: Luna checked the servers' certificates only against the list built into the program, and those servers now also use a newer issuer that the list lacks.
+  - Luna now also trusts Windows' own, always up-to-date certificate store.
+  - The error message now shows the real cause (certificate, timeout…).
+
+## 1.4.7CC — 2026-10-21 (beta, not built yet: tried with Luna Dev.cmd)
+
+- **"Worth watching?" › Letterboxd + AI:** one button fetches the film's most popular Letterboxd reviews (50 by default) and has an AI sum them up for you:
+  - the overall feeling, a "for you" paragraph from your preferences, what is praised and criticised, "you'll like it if / skip it if", and a note per topic;
+  - the average star rating and the number of spoiler reviews;
+  - the same reviews also go to the local keyword scan.
+  The AI is told not to reveal spoilers and to use only what the reviews say.
+- **Settings › Accounts and keys › Review analysis:**
+  - its own AI (Gemini, OpenAI, Claude, a base URL, or the same as the assistant) and model;
+  - how many reviews to fetch (10–100);
+  - an extra instruction.
+  It uses the keys already entered for the assistant.
+- Letterboxd turns away Luna's own connection on review pages, so they are read with Windows' built-in curl.exe; the film is found by its TMDB id, or by title and year.
+
 ﻿## 1.4.6CC — 2026-10-21 (beta, not built yet: tried with Luna Dev.cmd)
 
 - **"Worth watching?" workspace** in film/series details (library and the assistant's film card):

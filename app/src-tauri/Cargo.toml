@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.4.6"
+version = "1.4.8"
 description = "Luna Player"
 authors = ["you"]
 edition = "2024"
@@ -27,7 +27,7 @@ librqbit-dualstack-sockets = "0.7"
 ttf-parser = "0.25"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 librqbit = { version = "9", default-features = false, features = ["http-api", "rust-tls", "tracing-subscriber-utils"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "brotli", "cookies"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "rustls-tls-native-roots", "gzip", "brotli", "cookies"] }
 serde_yaml = "0.9"
 scraper = "0.20"
 ego-tree = "0.6"

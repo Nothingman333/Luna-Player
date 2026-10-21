@@ -5,6 +5,7 @@ import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { tt, locale } from "./i18n";
 import { ASPECTS, addAnalysis, cleanProfile, cleanWorkspace, filmKey, parseReviews, personalFit } from "./filmReviewModel";
 import type { Aspect, FilmTarget, Mood, Profile, Workspace } from "./filmReviewModel";
+import { ReviewAiCard } from "./FilmReviewAi";
 import "./FilmDecision.css";
 
 const labels: Record<Aspect, string> = { story: "Hikâye", pace: "Tempo", acting: "Oyunculuk", visuals: "Görsellik", emotion: "Karakter ve duygu", sound: "Müzik ve ses" };
@@ -42,11 +43,11 @@ function DecisionWorkspace({ film }: { film: FilmTarget }) {
     if (!store.set(pk, JSON.stringify(next))) { setStatus(tt("Tercihler kaydedilemedi.")); return; }
     setProfile(next); window.dispatchEvent(new CustomEvent("film-decision-changed", { detail: { key: pk, origin: uid } }));
   };
-  const analyze = (raw: string, json = false) => {
+  const analyze = (raw: string, json = false, done = tt("Yerel tarama kaydedildi. Yorumlar bir sunucuya gönderilmedi.")) => {
     try {
       // Read the latest copy before writing, including changes from another open panel.
       const latest = cleanWorkspace(store.json(key, null));
-      if (save(addAnalysis(latest, parseReviews(raw, json)))) { setSelected(0); setStatus(tt("Yerel tarama kaydedildi. Yorumlar bir sunucuya gönderilmedi.")); }
+      if (save(addAnalysis(latest, parseReviews(raw, json)))) { setSelected(0); setStatus(done); }
     } catch { setStatus(tt("Yorumlar okunamadı. En fazla 200 yorum, yorum başına 4000 karakter ve toplam 120000 karakter kullan. JSON biçimi: reviews içinde text ve isteğe bağlı source.")); }
   };
   const analysis = work.history[Math.min(selected, Math.max(0, work.history.length - 1))];
@@ -81,6 +82,7 @@ function DecisionWorkspace({ film }: { film: FilmTarget }) {
       <div><label htmlFor={uid + "mood"}>{tt("Bugün ne istersin?")}</label><select id={uid + "mood"} value={mood} onChange={e => setMood(e.target.value as Mood)}><option value="any">{tt("Genel değerlendirme")}</option><option value="easy">{tt("Tempo öncelikli")}</option><option value="deep">{tt("Hikâye ve karakter")}</option><option value="visual">{tt("Görsel bir yolculuk")}</option></select><small>{tt("Seçim yalnız konu ağırlıklarını değiştirir")}</small></div>
     </div>
     <p className="fd-method">{tt("Bu bir yapay zekâ değerlendirmesi değil; Türkçe ve İngilizce anahtar sözcük taraması. İroniyi ve bağlamı kaçırabilir. Sinyal, film puanı veya beğenme olasılığı değildir. En az iki konuda açık işaret yoksa hesaplanmaz.")}</p>
+    <ReviewAiCard film={film} profile={learnedProfile} mood={mood} label={label} onReviews={(json) => analyze(json, true, tt("Letterboxd yorumları yerel taramaya da eklendi."))} />
     {analysis && <div className="fd-takeaways"><div><span>{tt("Övgüde öne çıkan konular")}</span><p>{analysis.aspects.filter(r => r.positive > r.negative).map(r => label(r.aspect)).join(" · ") || tt("Yeterli işaret yok")}</p></div><div><span>{tt("Eleştiride öne çıkan konular")}</span><p>{analysis.aspects.filter(r => r.negative > r.positive).map(r => label(r.aspect)).join(" · ") || tt("Yeterli işaret yok")}</p></div></div>}
     {fit.caution.length > 0 && <div className="fd-caution">{tt("Çekincelerine dokunan eleştiriler:")} {fit.caution.map(label).join(", ")}</div>}
     <details className="fd-section"><summary>{tt("Tercihlerim")} <span>{film.kind === "tv" ? tt("Diziler için") : tt("Filmler için")}</span></summary>

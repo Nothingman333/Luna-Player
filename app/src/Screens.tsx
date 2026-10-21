@@ -991,6 +991,11 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
   const [models, setModels] = useState<[string, string][]>([]);
   // the assistant's service: Gemini, OpenAI, Claude or any OpenAI-compatible base URL
   const [prov, setProv] = useState<AiProvider>(aiProvider);
+  // the AI that reads Letterboxd reviews ("Worth watching?"): "" = the assistant's
+  const [rvProv, setRvProv] = useState<string>(store.get("reviewAiProvider") ?? "");
+  const [rvModel, setRvModel] = useState(store.get("reviewAiModel") ?? "");
+  const [rvCount, setRvCount] = useState(() => { const n = Number(store.get("reviewAiCount")); return n >= 10 && n <= 100 ? n : 50; });
+  const [rvNote, setRvNote] = useState(store.get("reviewAiNote") ?? "");
   const [aiKeys, setAiKeys] = useState<Record<string, string>>(() => Object.fromEntries(AI_PROVIDERS.filter((x) => x.id !== "gemini").map((x) => [x.keyName, store.get(x.keyName) ?? ""])));
   const [aiModelsBy, setAiModelsBy] = useState<Record<string, string>>(() => Object.fromEntries(AI_PROVIDERS.filter((x) => x.id !== "gemini").map((x) => [x.id, store.get("aiModel:" + x.id) ?? x.model])));
   const [base, setBase] = useState(store.get("aiBase") ?? "");
@@ -1054,6 +1059,10 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
     for (const [k, v] of Object.entries(aiKeys)) store.set(k, v.trim());
     for (const [id, m] of Object.entries(aiModelsBy)) store.set("aiModel:" + id, m.trim());
     store.set("aiBase", base.trim());
+    store.set("reviewAiProvider", rvProv);
+    store.set("reviewAiModel", rvModel.trim());
+    store.set("reviewAiCount", String(rvCount));
+    store.set("reviewAiNote", rvNote.trim().slice(0, 1000));
     store.set("geminiModel", gemModel.trim() || "gemini-flash-latest");
     await flushSecrets();
   };
@@ -1211,6 +1220,26 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                         {gemKey.trim() && <div className="set-hint">{tt("Gemini anahtarın duruyor; Gemini'ye geri dönersen o kullanılır.")}</div>}
                       </>
                     )}
+                  </div>
+                  <div className="set-card">
+                    <div className="field">
+                      <span>{tt("Yorum analizi (İzlemeye değer mi?)")}</span>
+                      <div className="seg-row">
+                        <button className={"seg" + (rvProv === "" ? " on" : "")} onClick={() => { setRvProv(""); setRvModel(""); }}>{tt("Asistanla aynı")}</button>
+                        {AI_PROVIDERS.map((x) => <button key={x.id} className={"seg" + (rvProv === x.id ? " on" : "")} onClick={() => { setRvProv(x.id); setRvModel(""); }}>{x.id === "custom" ? tt("Başka (base URL)") : x.name}</button>)}
+                      </div>
+                      <div className="set-hint">{tt("Film ayrıntılarındaki \"İzlemeye değer mi?\" kartı Letterboxd yorumlarını bu yapay zekâyla özetler. Anahtarlar yukarıdakiler; seçtiğin servisin anahtarı girilmiş olmalı.")}</div>
+                    </div>
+                    <label className="set-sub">{tt("Model")}
+                      <input value={rvModel} onChange={(e) => setRvModel(e.target.value)} placeholder={rvProv === "" ? tt("Asistanın modeli") : rvProv === "gemini" ? gemModel || "gemini-3.1-flash-lite" : aiModelsBy[rvProv] || tt("model adını yaz")} spellCheck={false} />
+                    </label>
+                    <div className="set-hint">{tt("Boş bırakırsan o servis için yukarıda seçili model kullanılır.")}</div>
+                    <label className="set-sub">{tt("Çekilecek yorum sayısı: {0}", rvCount)}
+                      <input type="range" min={10} max={100} step={10} value={rvCount} onChange={(e) => setRvCount(Number(e.target.value))} />
+                    </label>
+                    <label className="set-sub">{tt("Ek talimat (isteğe bağlı)")}
+                      <textarea value={rvNote} maxLength={1000} rows={2} onChange={(e) => setRvNote(e.target.value)} placeholder={tt("Örn. Oyunculuğa ve senaryoya daha çok dikkat et, kısa yaz.")} />
+                    </label>
                   </div>
                 </>
               )}
