@@ -195,6 +195,8 @@ const E = {
   following: false,
   heard: 0,
   lastTick: 0,
+  winTick: 0,
+  waitingChapter: false,
   sleepT: undefined as ReturnType<typeof setTimeout> | undefined,
 };
 
@@ -206,9 +208,13 @@ export function attachTts(host: TtsHost | null, book?: { path: string; title: st
   if (!T.active) set({ note: "" });
 }
 /** Seconds listened since the last call (for the reading history). */
-export function takeHeard() { const s = E.heard; E.heard = 0; return s; }
+export function takeHeard() { accountWin(); const s = E.heard; E.heard = 0; return s; }
 
+function accountWin() {
+  if (E.winTick) { const now = performance.now(); E.heard += Math.max(0, now - E.winTick) / 1000; E.winTick = T.playing ? now : 0; }
+}
 function cancel() {
+  accountWin(); E.winTick = 0; E.lastTick = 0;
   E.gen++;
   cancelAnimationFrame(E.raf);
   const d = E.done;
@@ -232,6 +238,7 @@ export async function ttsStart(fromCfi?: string) {
   const h = E.host;
   if (!h) return;
   cancel();
+  E.waitingChapter = false;
   const docs = h.docs();
   const resolve = (cfi?: string) => {
     if (!cfi) return null;
@@ -272,16 +279,24 @@ export async function ttsStart(fromCfi?: string) {
 }
 export function ttsPause() {
   if (!T.active) return;
+  accountWin(); E.winTick = 0;
   set({ playing: false });
   E.audio?.pause();
   try { if (E.mode === "win") speechSynthesis.pause(); } catch {}
 }
 export function ttsResume() {
   if (!T.active) { ttsStart(); return; }
+  if (T.playing) return;
   if (musicPlaying()) setProp("pause", true);
   set({ playing: true, note: T.note === "privacy" ? T.note : "" });
-  if (E.mode === "win") { try { speechSynthesis.resume(); } catch {} }
-  else if (E.audio?.src && E.done) { E.audio.playbackRate = T.rate; E.audio.play().catch(() => {}); tick(); }
+  if (E.waitingChapter) { E.waitingChapter = false; loop(E.gen); return; }
+  if (E.mode === "win") { E.winTick = E.done ? performance.now() : 0; try { speechSynthesis.resume(); } catch {} }
+  else if (E.audio?.src && E.done) {
+    const gen = E.gen, done = E.done;
+    E.audio.playbackRate = T.rate;
+    E.audio.play().catch(() => { if (E.gen === gen && E.done === done) audioFailure(); });
+    tick();
+  }
 }
 export function ttsToggle() { if (!T.active) ttsStart(); else if (T.playing) ttsPause(); else ttsResume(); }
 export function ttsStop() {
@@ -290,6 +305,7 @@ export function ttsStop() {
   clearMarks();
   dropCache();
   setSleep(0);
+  E.waitingChapter = false;
   media(false);
   set({ active: false, playing: false, loading: false, note: "" });
 }
@@ -302,8 +318,11 @@ export function ttsSkip(dir: 1 | -1) {
 /** The note in the bar was read (the privacy one is shown only the first time). */
 export const ttsNoted = () => { if (T.note === "privacy") store.set("ttsNoted", "1"); set({ note: "" }); };
 function restart() {
+  const playing = T.playing;
   cancel();
-  set({ playing: true });
+  E.waitingChapter = false;
+  set({ playing });
+  if (playing) { try { speechSynthesis.resume(); } catch {} }
   loop(E.gen);
 }
 
@@ -350,7 +369,7 @@ async function loop(g: number) {
   while (g === E.gen && E.host) {
     if (E.qi >= E.queue.length) {
       // the chapter is over: on to the next one
-      if (T.sleep === "chapter") { setSleep(0); ttsPause(); set({ note: tt("Bölüm bitti; okuma durduruldu.") }); return; }
+      if (T.sleep === "chapter") { E.waitingChapter = true; setSleep(0); ttsPause(); set({ note: tt("Bölüm bitti; okuma durduruldu.") }); return; }
       const cur = E.doc?.index ?? -1;
       set({ loading: true });
       const ok = await E.host.nextSection(cur).catch(() => false);
@@ -427,6 +446,11 @@ function tick() {
   E.raf = requestAnimationFrame(step);
 }
 
+function audioFailure() {
+  // A rejected play promise need not fire an audio error event. Stop cleanly rather than hang.
+  ttsStop();
+  set({ note: tt("Ses başlatılamadı. Yeniden okumayı deneyin.") });
+}
 function playEdge(c: Chunk, s: Synth, done: () => void) {
   E.mode = "edge";
   const a = (E.audio ??= new Audio());
@@ -443,7 +467,8 @@ function playEdge(c: Chunk, s: Synth, done: () => void) {
   a.playbackRate = T.rate;
   (a as any).preservesPitch = true;
   if (!s.words.length) mark(c, c.a, c.a);
-  if (T.playing) a.play().catch(() => {});
+  const gen = E.gen;
+  if (T.playing) a.play().catch(() => { if (E.gen === gen && E.done === done) audioFailure(); });
 }
 
 function playWin(c: Chunk, done: () => void) {
@@ -456,18 +481,18 @@ function playWin(c: Chunk, done: () => void) {
   if (v) u.voice = v;
   u.lang = v?.lang ?? T.lang;
   u.rate = T.rate;
-  let started = 0;
-  u.onstart = () => { started = performance.now(); mark(c, c.a, c.a); };
+  u.onstart = () => { if (E.done !== done) return; E.winTick = T.playing ? performance.now() : 0; mark(c, c.a, c.a); };
   u.onboundary = (e) => {
-    if (e.name && e.name !== "word") return;
+    if (E.done !== done || (e.name && e.name !== "word")) return;
     const s = c.a + e.charIndex;
     let end = s + (e.charLength || 0);
     if (end <= s) { const m = /^[^\s]+/.exec(c.p.text.slice(s)); end = s + (m ? m[0].length : 1); }
     mark(c, s, end);
   };
-  const fin = () => { if (started) E.heard += (performance.now() - started) / 1000; if (E.done === done) { E.done = null; done(); } };
+  const fin = () => { if (E.done === done) { accountWin(); E.winTick = 0; E.done = null; done(); } };
   u.onend = fin;
   u.onerror = fin;
+  if (T.playing) speechSynthesis.resume();
   speechSynthesis.speak(u);
   if (!T.playing) speechSynthesis.pause();
 }

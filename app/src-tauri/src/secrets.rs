@@ -57,7 +57,10 @@ pub fn get(name: &str) -> Option<String> {
 pub fn set(name: &str, value: &str) -> Result<(), String> {
     let mut t = target(name);
     if value.is_empty() {
-        unsafe { CredDeleteW(t.as_ptr(), CRED_TYPE_GENERIC, 0) };
+        if unsafe { CredDeleteW(t.as_ptr(), CRED_TYPE_GENERIC, 0) } == 0 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() != Some(1168) { return Err(error.to_string()); }
+        }
         return Ok(());
     }
     let mut user = wide("Luna Player");

@@ -236,6 +236,7 @@ listen<any>("mpv", ({ payload }) => {
   if (!directFor) { if (failedToStart) skipFailed(); return; }
   const failed = directFor;
   direct.delete(failed);
+  findFailed.add(failed); // try the original page once, never resolve the same broken direct URL forever
   // after the other listeners have seen musicRetrying()
   setTimeout(() => {
     directFor = null;

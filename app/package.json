@@ -1,11 +1,12 @@
 {
   "name": "app",
   "private": true,
-  "version": "1.4.3",
+  "version": "1.4.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test:regression": "node scripts/package-regression.cjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },

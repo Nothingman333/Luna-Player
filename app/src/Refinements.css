@@ -1,0 +1,17 @@
+/* Scoped to catalog surfaces: keep mpv's transparent video overlay untouched. */
+.library-tools { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:14px; margin:18px 0 24px; padding:16px 18px; border:1px solid var(--line); border-radius:16px; background:linear-gradient(135deg, rgba(var(--acc-rgb),.08), rgba(255,255,255,.025)); }
+.library-summary, .library-filters { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.library-summary { color:var(--muted); font-size:13px; }
+.library-summary span + span::before { content:"·"; padding-right:10px; color:var(--accent-soft); }
+.library-filters select, .plv-tools select { border:1px solid var(--line); border-radius:10px; min-height:36px; padding:7px 10px; color:var(--text); background:var(--panel); font:inherit; max-width:100%; }
+.library-filters select:hover, .plv-tools select:hover { border-color:var(--accent-soft); }
+.library-empty { padding:32px 20px; border:1px dashed var(--line); border-radius:16px; text-align:center; }
+.mine-search { display:flex; align-items:center; gap:10px; margin:0 0 20px; }
+.mine-search input { width:min(100%,460px); border:1px solid var(--line); border-radius:12px; padding:11px 14px; background:var(--panel); color:var(--text); font:inherit; }
+.plv-tools { flex-wrap:wrap; }
+.plv-tools .plv-search { min-width:140px; }
+.plv-result-count { color:var(--muted); font-size:12px; padding:2px 4px; }
+:is(.library-tools,.mine-search,.plv-tools,.plg,.mine-layer,.set-ws) :is(button,input,select,[tabindex]):focus-visible { outline:2px solid var(--accent-soft); outline-offset:3px; }
+.plg-card:focus-visible { outline:2px solid var(--accent-soft); outline-offset:4px; border-radius:12px; }
+@media(max-width:760px) { .library-tools { padding:12px; } .library-filters { width:100%; } .library-filters select { flex:1 1 140px; min-width:0; } .plv-tools { gap:8px; } .mine-search { flex-wrap:wrap; } }
+@media(prefers-reduced-motion:reduce) { :is(.plg,.mine-layer,.library-tools,.grid) *, :is(.plg,.mine-layer,.library-tools,.grid) *::before, :is(.plg,.mine-layer,.library-tools,.grid) *::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }

@@ -14,10 +14,12 @@ import { UpscalerSettings } from "./Upscaler";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { fmtTime } from "./mpv";
 import { SubAppearance } from "./PlayerMenu";
+import { LibraryToolbar } from "./LibraryToolbar";
+import { libraryStats, selectLibrary, LibrarySort, LibraryFilter } from "./libraryTools";
 import { BackupSettings } from "./Backup";
 import { AI_PROVIDERS, AiProvider, aiModels, aiProvider } from "./ai";
 import {
-  besideCopies, Episode, FolderKind, fmtSize, IMG, Item, qualityBadges, Recent, renameVideo, SearchHit, searchTmdb, seasonEpisodes, sidecarSubs, store,
+  besideCopies, Episode, FolderKind, fmtSize, IMG, Item, qualityBadges, Recent, renameVideo, SearchHit, searchTmdb, seasonEpisodes, sidecarSubs, store, flushSecrets,
   useMediaInfo, useThumb,
   isRemote, isFinished, setFinished,
 } from "./library";
@@ -457,17 +459,22 @@ function PosterRow({ title, items, a }: { title: string; items: Item[]; a: Actio
 
 export function Browse({ title, items, query, a }: { title: string; items: Item[]; query: string; a: Actions }) {
   const q = query.trim().toLocaleLowerCase(lang() === "tr" ? "tr" : "en");
-  const list = items
-    .filter((i) => !q || (i.meta?.title ?? i.parsed.title).toLocaleLowerCase(lang() === "tr" ? "tr" : "en").includes(q) ||
-      i.parsed.title.toLowerCase().includes(q) || i.meta?.cast.some((c) => c.name.toLowerCase().includes(q)))
-    .sort((x, y) => (x.meta?.title ?? x.parsed.title).localeCompare(y.meta?.title ?? y.parsed.title, "tr"));
+  const [sort, setSort] = useState<LibrarySort>("az");
+  const [filter, setFilter] = useState<LibraryFilter>("all");
+  const [genre, setGenre] = useState("");
+  useEffect(() => { setGenre(""); setFilter("all"); setSort("az"); }, [title]);
+  const stats = libraryStats(items);
+  const genres = [...new Set(items.flatMap((i) => i.meta?.genres ?? []))].sort((a, b) => a.localeCompare(b, lang()));
+  const list = selectLibrary(items, query, sort, filter, genre, lang());
   const shown = besideCopies(list);
   return (
     <div className="page">
       <section className="row">
         <h2>{q ? tt("Yerel dosyalar · “{0}”", query) : title} <span className="muted small">{list.length}</span></h2>
+        <LibraryToolbar files={stats.files} unmatched={stats.unmatched} versions={stats.versions.size} genres={genres}
+          sort={sort} filter={filter} genre={genre} setSort={setSort} setFilter={setFilter} setGenre={setGenre} />
         {list.length ? <div className="grid">{shown.map((it) => <Poster key={it.key} it={it} a={a} />)}</div>
-          : <div className="muted empty-note">{q ? tt("Kütüphanende bulunamadı.") : tt("Bir şey bulunamadı. Klasörler sekmesinden kütüphaneye klasör ekleyebilirsin.")}</div>}
+          : <div className="muted empty-note library-empty">{q || filter !== "all" || genre ? tt("Eşleşen film yok.") : tt("Bir şey bulunamadı. Klasörler sekmesinden kütüphaneye klasör ekleyebilirsin.")}</div>}
       </section>
     </div>
   );
@@ -1026,7 +1033,7 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
     if (typeof d === "string") setDlDir(d);
   };
   // everything on the form, without closing (also used before the language switch reloads the app)
-  const persist = () => {
+  const persist = async () => {
     const keyChanged = tmdbKey.trim() !== (store.get("tmdbKey") ?? "");
     if (keyChanged) {
       // Forget earlier "not found" results so everything is looked up again with the new key.
@@ -1045,12 +1052,11 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
     for (const [id, m] of Object.entries(aiModelsBy)) store.set("aiModel:" + id, m.trim());
     store.set("aiBase", base.trim());
     store.set("geminiModel", gemModel.trim() || "gemini-flash-latest");
+    await flushSecrets();
   };
-  const save = () => {
-    persist();
-    onClose();
-    // Reload so the library, posters and details pick up the new settings right away.
-    window.location.reload();
+  const save = async () => {
+    try { await persist(); onClose(); window.location.reload(); }
+    catch (error) { alert(tt("Ayarlar kaydedilemedi: {0}", String(error))); }
   };
   const secs: [SetSec, string, string][] = [
     ["general", tt("Genel"), tt("Dil, tam ekran, tanıtım")],
@@ -1103,8 +1109,8 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                     <div className="field">
                       <span>{tt("Dil")}</span>
                       <div className="seg-row">
-                        <button className={"seg" + (lang() === "en" ? " on" : "")} onClick={() => { if (lang() !== "en") { persist(); setLang("en"); } }}>English</button>
-                        <button className={"seg" + (lang() === "tr" ? " on" : "")} onClick={() => { if (lang() !== "tr") { persist(); setLang("tr"); } }}>Türkçe</button>
+                        <button className={"seg" + (lang() === "en" ? " on" : "")} onClick={async () => { if (lang() !== "en") { try { await persist(); setLang("en"); } catch (error) { alert(tt("Ayarlar kaydedilemedi: {0}", String(error))); } } }}>English</button>
+                        <button className={"seg" + (lang() === "tr" ? " on" : "")} onClick={async () => { if (lang() !== "tr") { try { await persist(); setLang("tr"); } catch (error) { alert(tt("Ayarlar kaydedilemedi: {0}", String(error))); } } }}>Türkçe</button>
                       </div>
                       <div className="set-hint">{tt("Dil değişince uygulama yeniden yüklenir; diğer ayarların kaydedilir.")}</div>
                     </div>

@@ -1,6 +1,6 @@
 // Collections (a theme across films, music and books: "everything Dune") and one history of
 // what was watched, listened to and read. Both open from the top bar in every part of Luna.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { lang, tt } from "./i18n";
 import { IMG, Item, store } from "./library";
@@ -11,6 +11,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Book, fetchBook, loadBookLibrary, loadReadHistory, requestOpenBook } from "./Books";
 
+import { identityText, matchCollectionBook, sameCollectionItem, uniqueCollectionItems } from "./safety";
+
 // ---------- collections ----------
 export type CKind = "film" | "music" | "book";
 export type CItem = { kind: CKind; title: string; by?: string; year?: string; note?: string; path?: string; src?: string; cover?: string | null;
@@ -20,25 +22,26 @@ export type Collection = { id: string; name: string; about?: string; at: number;
 
 const subs = new Set<() => void>();
 export const loadCollections = () => store.json<Collection[]>("collections", []);
-export function saveCollections(l: Collection[]) { store.set("collections", JSON.stringify(l)); subs.forEach((f) => f()); }
+export function saveCollections(l: Collection[]) { if (!store.set("collections", JSON.stringify(l))) throw new Error(tt("Depolama dolu: son değişiklikler kaydedilemedi.")); subs.forEach((f) => f()); }
 /** Tells the open pages that something changed outside them (the assistant, an undo). */
 export const collectionsChanged = () => subs.forEach((f) => f());
 function useTick() {
   const [, bump] = useState(0);
   useEffect(() => { const f = () => bump((n) => n + 1); subs.add(f); return () => { subs.delete(f); }; }, []);
 }
-const same = (a: CItem, b: CItem) => a.kind === b.kind && a.title.toLocaleLowerCase() === b.title.toLocaleLowerCase() && (a.by ?? "").toLocaleLowerCase() === (b.by ?? "").toLocaleLowerCase();
+const same = sameCollectionItem;
 
 /** Adds to the collection with this name (made if missing); returns how many were new. */
 /** Where "take me there" goes: the assistant closes and Luna shows the place (App listens). */
 export const goPlace = (place: string, id?: string) => window.dispatchEvent(new CustomEvent("luna-go", { detail: { place, id } }));
 export const collectionId = (name: string) => loadCollections().find((x) => x.name.toLocaleLowerCase() === name.trim().toLocaleLowerCase())?.id;
 export function addToCollection(name: string, items: CItem[], about?: string): number {
+  if (!name.trim()) return 0;
   const l = loadCollections();
   let c = l.find((x) => x.name.toLocaleLowerCase() === name.trim().toLocaleLowerCase());
-  if (!c) { c = { id: "c" + Date.now().toString(36), name: name.trim(), about, at: Date.now(), items: [] }; l.unshift(c); }
+  if (!c) { c = { id: "c" + crypto.randomUUID(), name: name.trim(), about, at: Date.now(), items: [] }; l.unshift(c); }
   else if (about && !c.about) c.about = about;
-  const fresh = items.filter((x) => x.title?.trim() && !c!.items.some((y) => same(x, y)));
+  const fresh = uniqueCollectionItems(c.items, items);
   c.items.push(...fresh);
   saveCollections(l);
   return fresh.length;
@@ -115,6 +118,8 @@ const ASK_FOR = (x: CItem) => x.kind === "film" ? tt("“{0}”{1} filmini küt�
 export type MineTab = "collections" | "history";
 export function MinePage({ tab, setTab, items, play, onClose, openId }: { tab: MineTab; setTab: (t: MineTab) => void; items: Item[]; play: (path: string) => void; onClose: () => void; openId?: string | null }) {
   useTick();
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   // the music bar shows over this page while something plays: the page makes room for it
   const playingMusic = !!useMusic().now;
   const [open, setOpen] = useState<string | null>(openId ?? null);
@@ -129,7 +134,10 @@ export function MinePage({ tab, setTab, items, play, onClose, openId }: { tab: M
     window.addEventListener("keydown", k, true);
     return () => window.removeEventListener("keydown", k, true);
   }, [open, onClose]);
+  const [query, setQuery] = useState("");
+  const matches = (text: string) => identityText(text).includes(identityText(query));
   const cols = loadCollections();
+  const visibleCols = cols.filter((c) => matches([c.name, c.about, ...c.items.map((x) => [x.title, x.by, x.year].join(" "))].join(" ")));
   const cur = cols.find((c) => c.id === open);
   const close = () => onClose();
   // the assistant opens over this page (closing it comes back here)
@@ -138,16 +146,16 @@ export function MinePage({ tab, setTab, items, play, onClose, openId }: { tab: M
   const local = (x: CItem): (() => void) | null => {
     if (x.kind === "film") {
       const it = (x.path && items.find((i) => i.files.some((f) => f.path === x.path))) || libMatch(items, { title: x.title, year: x.year });
-      return it ? () => { close(); play(it.files[0].path); } : null;
+      return it ? () => { close(); play(x.path && it.files.some((f) => f.path === x.path) ? x.path : it.files[0].path); } : null;
     }
     if (x.kind === "book") {
-      const b = books.find((b) => (x.path && b.path === x.path) || b.title.toLocaleLowerCase() === x.title.toLocaleLowerCase());
+      const b = matchCollectionBook(books, x);
       return b ? () => { close(); requestOpenBook(b); } : null;
     }
     // a song plays with the collection's other songs after it; the page stays, the bar below shows it
     if (!x.src) return null;
     const songs = (cur?.items ?? [x]).filter((y) => y.kind === "music" && y.src);
-    const q = songs.map((y) => ({ src: y.src!, title: y.title, artist: y.by, cover: y.cover }) as QItem);
+    const q = songs.map((y) => ({ src: y.src!, title: y.title, artist: y.by, cover: y.cover, yt: /^(ytdl:\/\/|https?:\/\/(?:www\.|m\.|music\.)?(?:youtube\.com|youtu\.be)\/)/i.test(y.src!) }) as QItem);
     return () => playQueue(q, Math.max(0, songs.findIndex((y) => same(y, x))));
   };
   const [getting, setGetting] = useState("");
@@ -157,8 +165,9 @@ export function MinePage({ tab, setTab, items, play, onClose, openId }: { tab: M
     try {
       const b = await fetchBook(x.url!, x.title, x.by ?? "", "epub");
       setCols((l) => l.map((y) => (y.id === c.id ? { ...y, items: y.items.map((z) => (same(z, x) ? { ...z, path: b.path } : z)) } : y)));
+      if (!alive.current) return;
       setBooks(await loadBookLibrary());
-      close(); requestOpenBook(b);
+      if (alive.current) { close(); requestOpenBook(b); }
     } catch (e) { alert(tt("İndirilemedi: {0}", String(e))); }
     setGetting("");
   };
@@ -169,7 +178,7 @@ export function MinePage({ tab, setTab, items, play, onClose, openId }: { tab: M
   const [saving, setSaving] = useState(false);
   const addByHand = async () => {
     const t = form.title.trim(), e = form.extra.trim();
-    if (!t || !cur) return;
+    if (!t || !cur || saving) return;
     setSaving(true);
     const it: CItem = { kind: form.kind, title: t, note: form.note.trim() || undefined };
     if (form.kind === "film" && /^\d{4}$/.test(e)) it.year = e; else if (e) it.by = e;
@@ -177,19 +186,23 @@ export function MinePage({ tab, setTab, items, play, onClose, openId }: { tab: M
     if (form.kind === "book") {
       // a book already on the shelf: it opens from the collection, with its cover and author
       const lo = (x: string) => x.toLocaleLowerCase().trim();
-      const m = books.find((b) => lo(b.title) === lo(t)) ?? (t.length >= 3 ? books.find((b) => lo(b.title).includes(lo(t)) && (!e || lo(b.author ?? "").includes(lo(e)))) : undefined);
+      const candidates = t.length >= 3 ? books.filter((b) => lo(b.title).includes(lo(t)) && (!e || lo(b.author ?? "").includes(lo(e)))) : [];
+      const m = matchCollectionBook(books, { title: t, by: e || undefined }) ?? (candidates.length === 1 ? candidates[0] : undefined);
       if (m) { it.title = m.title; it.path = m.path; it.cover = m.cover; it.by ??= m.author; }
     }
     if (form.kind === "music") {
       try { const h = (await invoke<{ url: string; thumb?: string }[]>("yt_search", { query: `${e} ${t}`.trim(), n: 1 }))[0]; if (h) { it.src = h.url; it.cover = h.thumb; } } catch {}
     }
-    addToCollection(cur.name, [it]);
+    const current = loadCollections().find((c) => c.id === cur.id);
+    if (!alive.current || !current) { setSaving(false); return; }
+    try { addToCollection(current.name, [it]); }
+    catch (e) { alert(String(e)); setSaving(false); return; }
     setForm((f) => ({ ...f, title: "", extra: "", note: "" }));
     setSaving(false);
   };
   const setCols = (f: (l: Collection[]) => Collection[]) => saveCollections(f(loadCollections()));
   const removeItem = (c: Collection, x: CItem) => setCols((l) => l.map((y) => (y.id === c.id ? { ...y, items: y.items.filter((z) => !same(z, x)) } : y)));
-  const rename = (c: Collection) => { const n = prompt(tt("Koleksiyonun yeni adı"), c.name); if (n?.trim()) setCols((l) => l.map((y) => (y.id === c.id ? { ...y, name: n.trim() } : y))); };
+  const rename = (c: Collection) => { const n = prompt(tt("Koleksiyonun yeni adı"), c.name); if (n?.trim()) { if (loadCollections().some((x) => x.id !== c.id && identityText(x.name) === identityText(n))) { alert(tt("Bu adla bir koleksiyon zaten var.")); return; } setCols((l) => l.map((y) => (y.id === c.id ? { ...y, name: n.trim() } : y))); } };
   const del = (c: Collection) => { if (confirm(tt("“{0}” koleksiyonu silinsin mi? (İçindeki film, şarkı ve kitaplar yerinde kalır.)", c.name))) { setCols((l) => l.filter((y) => y.id !== c.id)); setOpen(null); } };
   const colMenu = (c: Collection): MenuEntry[] => [
     { label: tt("Aç"), act: () => setOpen(c.id) },
@@ -236,6 +249,7 @@ export function MinePage({ tab, setTab, items, play, onClose, openId }: { tab: M
               <button className="round" aria-label={tt("Kapat")} title={tt("Kapat")} onClick={onClose}><Icon d={I.x} size={18} /></button>
             </div>
             <div className="set-body mine-body" key={tab + (open ?? "")}>
+              {tab === "collections" && <div className="mine-search"><input aria-label={tt("Koleksiyonlarda ara")} placeholder={tt("Koleksiyonlarda ara")} value={query} onChange={(e) => setQuery(e.target.value)} />{query && <button className="chip" onClick={() => setQuery("")}>{tt("Temizle")}</button>}</div>}
               {tab === "history" ? <History items={items} play={(p) => { close(); play(p); }} />
                 : cur ? (<>
                   {adding && (
@@ -258,11 +272,12 @@ export function MinePage({ tab, setTab, items, play, onClose, openId }: { tab: M
                       </div>
                     </form>
                   )}
+                  {cur.items.length > 0 && !cur.items.some((x) => matches([x.title, x.by, x.year, x.note].join(" "))) && <div className="muted library-empty">{tt("Eşleşen film yok.")}</div>}
                   {cur.items.length ? (["film", "music", "book"] as CKind[]).filter((k) => cur.items.some((x) => x.kind === k)).map((k) => (
                     <section key={k} className="mine-sec">
                       <h3><Icon d={KIND_ICON[k]} size={15} />  {KIND_LABEL()[k]}</h3>
                       <div className="mine-items">
-                        {cur.items.filter((x) => x.kind === k).map((x) => {
+                        {cur.items.filter((x) => x.kind === k && matches([x.title, x.by, x.year, x.note].join(" "))).map((x) => {
                           const here = !!local(x);
                           return (
                             <div role="button" tabIndex={0} key={x.title + (x.by ?? "")} className={"mine-item" + (getting === x.title ? " busy" : "")} onClick={() => getting !== x.title && go(x, cur)}
@@ -296,9 +311,10 @@ export function MinePage({ tab, setTab, items, play, onClose, openId }: { tab: M
                       <button className="primary sm" onClick={() => ask(tt("Zevkime göre bir konu seç ve film, müzik ve kitaplarla bir koleksiyon yap"))}>✦  {tt("Asistana yaptır")}</button>
                       <button className="chip" onClick={() => { const n = prompt(tt("Koleksiyonun adı")); if (n?.trim()) { addToCollection(n, []); const id = collectionId(n); if (id) { setOpen(id); setAdding(true); } } }}>{tt("Boş koleksiyon")}</button>
                     </div>
+                    {cols.length > 0 && !visibleCols.length && <div className="muted library-empty">{tt("Eşleşen film yok.")}</div>}
                     {cols.length ? (
                       <div className="mine-grid">
-                        {cols.map((c) => (
+                        {visibleCols.map((c) => (
                           <button key={c.id} className="mine-col" onClick={() => setOpen(c.id)} onContextMenu={(e) => openMenu(e, colMenu(c))}>
                             <b className="ellipsis">{c.name}</b>
                             <span className="muted small">{(["film", "music", "book"] as CKind[]).map((k) => [k, c.items.filter((x) => x.kind === k).length] as const).filter(([, n]) => n).map(([k, n]) => `${n} ${k === "film" ? tt("film") : k === "music" ? tt("şarkı") : tt("kitap")}`).join(" · ") || tt("boş")}</span>

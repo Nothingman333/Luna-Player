@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { SECRET_KEYS, store } from "./library";
+import { backupData, replaceStorage, storageSnapshot } from "./safety";
 import { VERSION_LABEL } from "./version";
 
 const CLOUDS: [string, string][] = [
@@ -15,14 +16,7 @@ const CLOUDS: [string, string][] = [
   ["Dropbox", "https://www.dropbox.com/home"],
 ];
 
-function snapshot(): Record<string, string> {
-  const o: Record<string, string> = {};
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i)!;
-    if (!SECRET_KEYS.includes(k)) o[k] = localStorage.getItem(k) ?? "";
-  }
-  return o;
-}
+const snapshot = () => storageSnapshot(localStorage, SECRET_KEYS);
 
 export function BackupSettings() {
   const [file, setFile] = useState<string | null>(null);
@@ -33,31 +27,30 @@ export function BackupSettings() {
   const make = async () => {
     setMsg("");
     const day = new Date().toISOString().slice(0, 10);
-    const path = await save({ defaultPath: `Luna ${tt("yedek")} ${day}.json`, filters: [{ name: tt("Luna yedeği"), extensions: ["json"] }] });
-    if (!path) return;
     setBusy(true);
     try {
-      store.set("backupAt", String(Date.now()));
+      const path = await save({ defaultPath: `Luna ${tt("yedek")} ${day}.json`, filters: [{ name: tt("Luna yedeği"), extensions: ["json"] }] });
+      if (!path) return;
+      const at = Date.now();
       const json = JSON.stringify({ luna: "backup", version: VERSION_LABEL, at: new Date().toISOString(), data: snapshot() });
       await invoke("backup_write", { path, json });
+      store.set("backupAt", String(at));
       setFile(path);
     } catch (e) { setMsg(String(e)); } finally { setBusy(false); }
   };
 
   const restore = async () => {
     setMsg("");
-    const path = await open({ multiple: false, filters: [{ name: tt("Luna yedeği"), extensions: ["json"] }] });
-    if (typeof path !== "string") return;
     setBusy(true);
     try {
+      const path = await open({ multiple: false, filters: [{ name: tt("Luna yedeği"), extensions: ["json"] }] });
+      if (typeof path !== "string") return;
       const o = JSON.parse(await invoke<string>("backup_read", { path }));
-      if (o?.luna !== "backup" || typeof o.data !== "object") throw new Error(tt("Bu bir Luna yedek dosyası değil"));
+      const data = backupData(o, SECRET_KEYS);
+      data.lunaMark = "1";
       const when = o.at ? new Date(o.at).toLocaleString() : "?";
       if (!confirm(tt("{0} tarihli yedek geri yüklensin mi? Luna'daki şu anki kayıtların yerini alır (API anahtarların yerinde kalır).", when))) return;
-      localStorage.clear();
-      for (const [k, v] of Object.entries(o.data as Record<string, string>)) if (!SECRET_KEYS.includes(k)) localStorage.setItem(k, String(v));
-      // the copy Luna restores from after a crash gets the backup too
-      await invoke("state_save", { json: JSON.stringify(snapshot()) }).catch(() => {});
+      await replaceStorage(localStorage, data, (next) => invoke("state_save", { json: JSON.stringify(next) }));
       location.reload();
     } catch (e) { setMsg(String(e).replace(/^(Error|SyntaxError): /, "")); } finally { setBusy(false); }
   };

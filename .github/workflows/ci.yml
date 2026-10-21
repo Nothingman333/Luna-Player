@@ -34,6 +34,9 @@ jobs:
         run: npm run build
       - name: Every text has English
         run: node app/scripts/i18n-check.cjs
+      - name: Storage, playback and catalog regressions
+        working-directory: app
+        run: npm run test:regression
 
   rust:
     name: Rust (build, tests)

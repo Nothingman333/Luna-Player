@@ -7,6 +7,25 @@ import { useEffect, useMemo, useState } from "react";
  *  state file or a backup. */
 export const SECRET_KEYS = ["geminiKey", "tmdbKey", "osKey", "openaiKey", "claudeKey", "customAiKey"];
 const secrets = new Map<string, string>();
+const secretWrites = new Map<string, Promise<void>>();
+function queueSecret(key: string, value: string) {
+  const previous = secretWrites.get(key) ?? Promise.resolve();
+  const task = previous.catch(() => {}).then(async () => {
+    await invoke("secret_set", { name: key, value });
+    if (value) secrets.set(key, value); else secrets.delete(key);
+  });
+  secretWrites.set(key, task);
+  // Observed here to avoid unhandled rejection; flushSecrets still propagates the failure.
+  void task.catch((error) => window.dispatchEvent(new CustomEvent("luna-secret-error", { detail: String(error) })));
+}
+/** Settings must not reload until every Credential Manager write has completed. */
+export async function flushSecrets(): Promise<void> {
+  const pending = [...secretWrites];
+  const results = await Promise.allSettled(pending.map(([, task]) => task));
+  const failed = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+  if (failed) throw failed.reason;
+  for (const [key, task] of pending) if (secretWrites.get(key) === task) secretWrites.delete(key);
+}
 /** At start, before anything reads a key; an old plain-text key is moved into Windows and removed. */
 export async function loadSecrets() {
   try {
@@ -34,8 +53,7 @@ export const store = {
   },
   set: (k: string, v: string) => {
     if (isSecret(k)) {
-      if (v) secrets.set(k, v); else secrets.delete(k);
-      invoke("secret_set", { name: k, value: v }).catch(() => {});
+      queueSecret(k, v);
       return true;
     }
     try { localStorage.setItem(k, v); return true; } catch {

@@ -2,7 +2,7 @@ import { defaultSubLangs, lang, locale, tt } from "./i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { groupKey, parseName, store } from "./library";
+import { groupKey, parseName, store, flushSecrets } from "./library";
 
 export type SubHit = {
   fileId: number; language: string; release: string; fileName: string; downloads: number; rating: number;
@@ -50,10 +50,11 @@ export function SubtitleDialog({ path, onAttach, onClose }: {
   };
   useEffect(() => { run(); }, []);
 
-  const saveKey = () => {
+  const saveKey = async () => {
     const k = keyDraft.trim();
     if (!k) return;
     store.set("osKey", k);
+    try { await flushSecrets(); } catch (e) { setErr(String(e)); return; }
     setKey(k);
     run(k);
   };

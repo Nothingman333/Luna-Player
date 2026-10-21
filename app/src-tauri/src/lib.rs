@@ -1048,13 +1048,15 @@ async fn rename_video(path: String, name: String) -> Result<String, String> {
 }
 
 /// Keeps the window inside the space the taskbar leaves (a restored window can be taller than the
-/// screen) and zooms the page out on screens narrower than Luna's layout (off: `fit_zoom` false).
+/// screen; at start only) and zooms the page out on screens narrower than Luna's layout (off: `fit_zoom` false).
 #[tauri::command]
-fn fit_window(window: tauri::WebviewWindow, fit_zoom: bool) -> Result<f64, String> {
+fn fit_window(window: tauri::WebviewWindow, fit_zoom: bool, keep_inside: bool) -> Result<f64, String> {
     let m = window.current_monitor().map_err(|e| e.to_string())?.ok_or("no screen")?;
     let zoom = if fit_zoom { screen::zoom_for(m.size().width as f64 / m.scale_factor()) } else { 1.0 };
     window.set_zoom(zoom).map_err(|e| e.to_string())?;
-    if !window.is_fullscreen().unwrap_or(false) && !window.is_maximized().unwrap_or(false) && !window.is_minimized().unwrap_or(false) {
+    // only when Luna starts: leaving full screen briefly reports a screen-sized window, and moving or
+    // resizing is the user's own doing
+    if keep_inside && !window.is_fullscreen().unwrap_or(false) && !window.is_maximized().unwrap_or(false) && !window.is_minimized().unwrap_or(false) {
         let a = m.work_area();
         if let (Ok(p), Ok(sz)) = (window.outer_position(), window.outer_size()) {
             let area = (a.position.x, a.position.y, a.size.width as i32, a.size.height as i32);

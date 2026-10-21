@@ -291,7 +291,7 @@ fn percent(s: &str) -> String {
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'%' && i + 2 < b.len() {
-            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+            if let Ok(v) = u8::from_str_radix(std::str::from_utf8(&b[i + 1..i + 3]).unwrap_or(""), 16) {
                 out.push(v);
                 i += 3;
                 continue;
@@ -331,8 +331,8 @@ fn split(blocks: Vec<(Option<(u8, String)>, String)>, book: &str) -> Vec<Chapter
         }
         let mut n = 1;
         let mut cur = String::new();
-        for p in c.body.split_inclusive("</p>") {
-            cur.push_str(p);
+        for p in balanced_blocks(&c.body) {
+            cur.push_str(&p);
             if cur.len() > PART {
                 parts.push(Chapter { title: format!("{} · {n}", c.title), body: std::mem::take(&mut cur) });
                 n += 1;
@@ -343,6 +343,24 @@ fn split(blocks: Vec<(Option<(u8, String)>, String)>, book: &str) -> Vec<Chapter
         }
     }
     parts
+}
+
+fn balanced_blocks(body: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut depth = 0usize;
+    let mut at = 0;
+    while let Some(open) = body[at..].find('<') {
+        let open = at + open;
+        let Some(close) = body[open..].find('>') else { break };
+        at = open + close + 1;
+        let tag = &body[open..at];
+        if tag.starts_with("</") { depth = depth.saturating_sub(1); }
+        else if !tag.ends_with("/>") && !tag.starts_with("<!") && !tag.starts_with("<?") { depth += 1; }
+        if depth == 0 { out.push(body[start..at].to_string()); start = at; }
+    }
+    if start < body.len() { out.push(body[start..].to_string()); }
+    out
 }
 
 fn xhtml(lang: &str, title: &str, body: &str) -> String {
@@ -400,7 +418,7 @@ fn write_epub(path: &Path, lang: &str, title: &str, author: &str, source: &str, 
 
 /// The chapters behind a table of contents, eight pages at a time, kept in its order. A chapter
 /// that is itself a contents page (parts of parts) is followed one level further.
-fn gather<'a>(lang: &'a str, links: &'a [String], depth: u8) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<Chapter>> + Send + 'a>> {
+fn gather<'a>(lang: &'a str, links: &'a [String], depth: u8) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Chapter>, String>> + Send + 'a>> {
     Box::pin(async move {
         let mut out = Vec::new();
         for group in links.chunks(8) {
@@ -412,7 +430,7 @@ fn gather<'a>(lang: &'a str, links: &'a [String], depth: u8) -> std::pin::Pin<Bo
                 })
                 .collect();
             for (t, task) in group.iter().zip(tasks) {
-                let Ok(Ok(h)) = task.await else { continue };
+                let h = task.await.map_err(|e| e.to_string())??;
                 let name = t.rsplit('/').next().unwrap_or(t).to_string();
                 let body: String = blocks(&h).into_iter().map(|(_, h)| h).collect();
                 let sub = if depth > 0 { chapter_links(&h, t) } else { Vec::new() };
@@ -420,13 +438,13 @@ fn gather<'a>(lang: &'a str, links: &'a [String], depth: u8) -> std::pin::Pin<Bo
                     if body.len() > 2000 {
                         out.push(Chapter { title: name, body });
                     }
-                    out.extend(gather(lang, &sub, depth - 1).await);
+                    out.extend(gather(lang, &sub, depth - 1).await?);
                 } else if !body.trim().is_empty() {
                     out.push(Chapter { title: name, body });
                 }
             }
         }
-        out
+        Ok(out)
     })
 }
 
@@ -443,7 +461,7 @@ pub async fn book(lang: &str, title: &str, dir: &Path) -> Result<Downloaded, Str
         if !intro.trim().is_empty() && intro.len() > 400 {
             chapters.push(Chapter { title: shown.clone(), body: intro });
         }
-        chapters.extend(gather(lang, &links, 1).await);
+        chapters.extend(gather(lang, &links, 1).await?);
     } else {
         chapters = split(blocks(&main), &shown);
     }
@@ -463,6 +481,26 @@ pub async fn book(lang: &str, title: &str, dir: &Path) -> Result<Downloaded, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn malformed_percent_sequences_do_not_panic() {
+        assert_eq!(percent("%€"), "%€");
+        assert_eq!(percent("%"), "%");
+        assert_eq!(percent("%GG"), "%GG");
+        assert_eq!(percent("b%C3%B6l%C3%BCm"), "bölüm");
+    }
+
+    #[test]
+    fn long_nested_blocks_stay_balanced() {
+        let body = format!("<blockquote><p>{}</p><p>{}</p></blockquote><p>son</p>", "a".repeat(46_000), "b".repeat(46_000));
+        let blocks = balanced_blocks(&body);
+        assert_eq!(blocks.len(), 2);
+        assert!(blocks[0].starts_with("<blockquote>"));
+        assert!(blocks[0].ends_with("</blockquote>"));
+        assert_eq!(blocks.concat(), body);
+        let chapters = split(vec![(None, body)], "Uzun kitap");
+        assert!(chapters[0].body.ends_with("</blockquote>"));
+    }
 
     #[test]
     fn cleans_and_splits() {

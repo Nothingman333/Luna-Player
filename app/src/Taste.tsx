@@ -17,6 +17,8 @@ import { ttsActive, ttsPause, ttsReady, ttsResume, ttsStart, ttsStop } from "./R
 import { aiKey, aiName, aiProvider, otherAi } from "./ai";
 import { addToCollection, CItem, Collection, collectionId, collectionsChanged, goPlace, loadCollections, mineContext } from "./Mine";
 
+import { isLetterboxdUrl, sameTitleYear, validStars } from "./safety";
+
 // ---------- taste store ----------
 export type Vote = "like" | "dislike";
 export type TasteEntry = { title: string; year?: string; kind: "movie" | "tv"; vote?: Vote; want?: boolean; at: number };
@@ -64,6 +66,7 @@ export function libMatch(items: Item[], t: { title: string; year?: string | numb
   if (byId) return byId;
   const name = seenKey(t.title.replace(/\s*\(\d{4}\)\s*$/, ""));
   return items.find((i) => {
+    if (t.kind && (i.meta?.kind ?? i.parsed.kind) !== t.kind) return false;
     if (seenKey(i.meta?.title ?? i.parsed.title) !== name) return false;
     const iy = i.meta?.year || (i.parsed.year ? String(i.parsed.year) : "");
     return !t.year || !iy || String(t.year) === iy;
@@ -154,7 +157,7 @@ export function lbFlatten(secs: LbSection[]): TaggedFilm[] {
   }
   return [...map.values()];
 }
-export const isLetterboxd = (u: string) => /letterboxd\.com\/|boxd\.it\//i.test(u);
+export const isLetterboxd = isLetterboxdUrl;
 export const readLetterboxd = (url: string, pages = 30, lists = true) => invoke<LbSection[]>("letterboxd_read", { url, maxPages: pages, lists });
 
 /** The user's own Letterboxd: what they watched (with their stars), liked and want to watch goes into
@@ -187,7 +190,7 @@ export async function linkMyLetterboxd(url: string): Promise<string> {
   const wl = secs.find((s) => s.kind === "watchlist")?.films ?? [];
   if (wl.length) {
     const cur = loadLater();
-    const add = wl.filter((f) => !cur.some((x) => seenKey(x.replace(/\s*\(\d{4}\)\s*$/, "")) === seenKey(f.title)) && !d[keyOf(f)]?.watched)
+    const add = wl.filter((f) => !cur.some((x) => sameTitleYear(x, f.title, f.year)) && !d[keyOf(f)]?.watched)
       .map((f) => (f.year ? `${f.title} (${f.year})` : f.title));
     later = add.length;
     store.set("laterList", JSON.stringify([...cur, ...add]));
@@ -199,7 +202,7 @@ export async function linkMyLetterboxd(url: string): Promise<string> {
   return tt("Senin Letterboxd'un bağlandı: {0} izlediğin film ({1} yeni), {2} beğeni, izleme listenden {3} film “Sonra izle”ye eklendi.", total, watched, liked, later);
 }
 /** Watched by the user: in the diary (ticked, rated, from their Letterboxd) or on the old "seen" list. */
-export const iWatched = (t: { title: string; year?: string }) => !!diaryGet(t.title, t.year)?.watched || has(loadSeen(), t.title);
+export const iWatched = (t: { title: string; year?: string }) => !!diaryGet(t.title, t.year)?.watched || loadSeen().some((saved) => sameTitleYear(saved, t.title, t.year));
 /** "Hide what I watched" on friends' recommendations and lists (one switch for all of them). */
 export function useHideWatched(): [boolean, () => void] {
   const [on, setOn] = useState(() => store.get("hideWatched") === "1");
@@ -263,9 +266,10 @@ export async function fillPosters<T extends { title: string; year?: string; post
           if (++n % 8 === 0) save();
           return;
         }
+        return;
       }
       // prefer a hit with a poster (and the right year); episode titles like "Show: Episode" fall back to the show
-      const good = (l: SearchHit[]) => l.find((x) => x.poster && (!it.year || x.year === it.year)) ?? l.find((x) => x.poster);
+      const good = (l: SearchHit[]) => l.find((x) => x.poster && (!it.year || x.year === it.year) && (!it.kind || x.kind === it.kind));
       const tries: [string, "movie" | "tv", number?][] = [[it.title, "movie", y], [it.title, "movie"], [it.title, "tv"]];
       if (it.title.includes(":")) tries.push([it.title.split(":")[0], "tv"], [it.title.split(":")[0], "movie"]);
       let h: SearchHit | undefined;
@@ -331,8 +335,8 @@ function lbCsv(text: string): { films: LbFilm[]; listName?: string } {
   const listName = first >= 0 && first < h ? rows[first + 1]?.[low[first].indexOf("name")]?.trim() : undefined;
   const ni = low[h].indexOf("name"), yi = low[h].indexOf("year"), ri = low[h].indexOf("rating");
   const films = rows.slice(h + 1).filter((r) => r[ni]?.trim()).map((r) => {
-    const stars = ri >= 0 ? parseFloat(r[ri]) : NaN;
-    return { title: r[ni].trim(), year: r[yi]?.trim() || undefined, stars: isNaN(stars) ? undefined : stars };
+    const stars = ri >= 0 ? validStars(r[ri] ?? "") : undefined;
+    return { title: r[ni].trim(), year: r[yi]?.trim() || undefined, stars };
   });
   return { films, listName };
 }
@@ -1144,11 +1148,13 @@ function PlaylistView({ pl, owner, items, onPlay, onOpen, onClose }: {
   pl: Playlist; owner?: string; items: Item[]; onPlay?: (path: string) => void; onOpen?: (t: DetailTarget) => void; onClose?: () => void;
 }) {
   const [sort, setSort] = useState<PlSort>("order");
+  const [minStars, setMinStars] = useState(0);
   const [q, setQ] = useState("");
   const [onlyLib, setOnlyLib] = useState(false);
   const [hideSeen] = useHideWatched();
   const [shown, setShown] = useState(60);
   const [drag, setDrag] = useState<number | null>(null);
+  useEffect(() => { setShown(60); }, [pl.id, q, onlyLib, sort, hideSeen, minStars]);
   // the search as it settles (the posters aren't looked up on every key press)
   const [dq, setDq] = useState("");
   useEffect(() => { const t = setTimeout(() => setDq(q), 400); return () => clearTimeout(t); }, [q]);
@@ -1161,6 +1167,7 @@ function PlaylistView({ pl, owner, items, onPlay, onOpen, onClose }: {
     if (dq.trim()) list = list.filter((t) => seenKey(t.title).includes(seenKey(dq)));
     if (onlyLib) list = list.filter((t) => libMatch(items, t));
     if (hideSeen) list = list.filter((t) => !iWatched(t));
+    if (minStars) list = list.filter((t) => (t.stars ?? 0) >= minStars);
     // a sorted wall can put any film on top, so all of them are looked up then
     const work = sort === "order" ? list.slice(0, shown) : list;
     if (!work.some((x) => (!x.poster || x.rating == null) && !x.noPoster)) return;
@@ -1171,7 +1178,7 @@ function PlaylistView({ pl, owner, items, onPlay, onOpen, onClose }: {
       for (const x of p.items) { const w = work.find((y) => y.title === x.title && y.year === x.year); if (w) posterInfo(x, w); }
       savePlaylists(fresh);
     }, sort === "order" ? shown : work.length);
-  }, [pl.id, shown, dq, onlyLib, sort, hideSeen]);
+  }, [pl.id, shown, dq, onlyLib, sort, hideSeen, minStars]);
   const inLib = (t: PlItem) => libMatch(items, t);
   const edit = (f: (p: Playlist) => void) => { const all = loadPlaylists(); const p = all.find((x) => x.id === pl.id); if (p) { f(p); savePlaylists(all); } };
   const removeItem = (t: PlItem) => edit((p) => { p.items = p.items.filter((x) => !(x.title === t.title && x.year === t.year)); });
@@ -1182,6 +1189,7 @@ function PlaylistView({ pl, owner, items, onPlay, onOpen, onClose }: {
   let view = all.map((t, i) => ({ t, i }));
   if (q.trim()) view = view.filter(({ t }) => seenKey(t.title).includes(seenKey(q)));
   if (onlyLib) view = view.filter(({ t }) => inLib(t));
+  if (minStars) view = view.filter(({ t }) => (t.stars ?? 0) >= minStars);
   const before = view.length;
   if (hideSeen) view = view.filter(({ t }) => !iWatched(t));
   const hiddenN = before - view.length;
@@ -1220,6 +1228,11 @@ function PlaylistView({ pl, owner, items, onPlay, onOpen, onClose }: {
           <select value={sort} onChange={(e) => setSort(e.target.value as PlSort)}>{PL_SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
           <button className={"chip" + (onlyLib ? " on" : "")} onClick={() => setOnlyLib((v) => !v)}>{tt("Kütüphanemdekiler")}</button>
           <HideWatched hidden={hiddenN} />
+          <select aria-label={tt("En düşük arkadaş puanı")} value={minStars} onChange={(e) => setMinStars(Number(e.target.value))}>
+            <option value={0}>{tt("Tüm arkadaş puanları")}</option><option value={3}>3★+</option><option value={3.5}>3½★+</option><option value={4}>4★+</option><option value={4.5}>4½★+</option>
+          </select>
+          {pl.source?.url && <button className="chip" onClick={() => openUrl(pl.source!.url)}>{tt("Letterboxd'da aç")}</button>}
+          <span className="plv-result-count" role="status">{tt("{0} / {1} film", view.length, all.length)}</span>
           <button className="chip" onClick={del}>{tt("Listeyi sil")}</button>
         </div>
       </div>
@@ -1228,8 +1241,8 @@ function PlaylistView({ pl, owner, items, onPlay, onOpen, onClose }: {
           const lib = inLib(t);
           const d = diaryGet(t.title, t.year);
           return (
-            <div key={t.title + (t.year ?? "") + i} className={"plg-card" + (drag === i ? " dragging" : "")}
-              draggable={sort === "order" && !q && !onlyLib && !hideSeen}
+            <div role="button" tabIndex={0} onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onOpen?.(target(t)); } }} key={t.title + (t.year ?? "") + i} className={"plg-card" + (drag === i ? " dragging" : "")}
+              draggable={sort === "order" && !q && !onlyLib && !hideSeen && !minStars}
               onDragStart={() => setDrag(i)} onDragEnd={() => setDrag(null)}
               onDragOver={(e) => { if (drag != null) e.preventDefault(); }}
               onDrop={() => { if (drag != null) moveTo(drag, i); setDrag(null); }}>

@@ -30,6 +30,7 @@ import { Setup, setupSeen } from "./Setup";
 import { startUpdateChecks, UpdateBanner } from "./Update";
 import { collectEntry, endFilmSitting, MinePage, MineTab, noteFilm } from "./Mine";
 import "./App.css";
+import "./Refinements.css";
 
 // (the same list the library scan accepts)
 const VIDEO_EXT = ["mkv", "mp4", "avi", "mov", "wmv", "webm", "m4v", "ts", "m2ts", "flv", "mpg", "mpeg"];
@@ -49,8 +50,10 @@ export default function App() {
 
   useEffect(() => {
     const f = () => flash(tt("Depolama dolu: son değişiklikler kaydedilemedi."), "warn", 8000);
+    const secretError = (e: Event) => flash(tt("Anahtar kaydedilemedi: {0}", (e as CustomEvent<string>).detail), "warn", 8000);
     window.addEventListener("luna-storage-full", f);
-    return () => window.removeEventListener("luna-storage-full", f);
+    window.addEventListener("luna-secret-error", secretError);
+    return () => { window.removeEventListener("luna-storage-full", f); window.removeEventListener("luna-secret-error", secretError); };
   }, []);  const [toast, setToast] = useState<Toast>(null);
   const [showSync, setShowSync] = useState(false);
   const [showTracks, setShowTracks] = useState(false);
@@ -305,10 +308,13 @@ export default function App() {
     setTorrentDlg(false);
     setTLoad({ phase: "meta", name: "" });
     try {
-      const known = new Set(Object.keys(tSrcRef.current).map(Number));
       const r = await invoke<Added>("torrent_add", { source: src, outDir: await downloadDir() });
       if (token !== tCancel.current) {
-        if (!known.has(r.id) && !tSrcRef.current[r.id]) invoke("torrent_remove", { id: r.id, deleteFiles: true }).catch(() => {});
+        // add can return a torrent restored by the native engine. Never delete its files
+        // based on an incomplete UI map. Keep the transfer visible for an explicit removal.
+        setTSources((m) => ({ ...m, [r.id]: src }));
+        if (r.localPath) setTLocal((m) => ({ ...m, [r.id]: r.localPath! }));
+        flash(tt("Oynatma iptal edildi; torrent İndirmeler bölümünde yönetilebilir."), "info", 6000);
         return;
       }
       setTSources((m) => ({ ...m, [r.id]: src }));
@@ -596,7 +602,7 @@ export default function App() {
     const w = getCurrentWindow();
     // the window stays above the taskbar, and a narrower screen gets the same layout, zoomed out (Rust: fit_window)
     let fitT = 0;
-    const fit = () => { clearTimeout(fitT); fitT = window.setTimeout(() => invoke("fit_window", { fitZoom: store.get("uiFit") !== "0" }).catch(() => {}), 250); };
+    const fit = (keepInside = false) => { clearTimeout(fitT); fitT = window.setTimeout(() => invoke("fit_window", { fitZoom: store.get("uiFit") !== "0", keepInside }).catch(() => {}), 250); };
     const sync = async () => {
       if (await w.isMaximized()) { await w.unmaximize(); await w.setFullscreen(true); }
       setIsFull(await w.isFullscreen());
@@ -604,11 +610,12 @@ export default function App() {
     };
     // Luna opens full screen once on a machine (afterwards the window keeps how it was left)
     if (!store.get("fullOnce")) { store.set("fullOnce", "1"); w.setFullscreen(true).catch(() => {}); }
-    sync();
+    sync().then(() => fit(true)); // a window restored taller than the screen is brought back above the taskbar, once
     const un = w.onResized(() => { sync(); });
     const unMove = w.onMoved(() => fit());
-    window.addEventListener("luna-fit", fit);
-    return () => { un.then((f) => f()); unMove.then((f) => f()); window.removeEventListener("luna-fit", fit); clearTimeout(fitT); };
+    const refit = () => fit();
+    window.addEventListener("luna-fit", refit);
+    return () => { un.then((f) => f()); unMove.then((f) => f()); window.removeEventListener("luna-fit", refit); clearTimeout(fitT); };
   }, []);
   // While a video plays with the Upscaler on: subtitles move to the capture-proof window and
   // Lossless Scaling scales Luna. Leaving the player undoes both.

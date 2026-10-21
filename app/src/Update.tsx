@@ -29,8 +29,10 @@ export const updBeta = () => store.get("updBeta") === "1";
 export async function checkUpdate(quiet = false) {
   if (S.checking || S.installing) return;
   set({ checking: true, err: "" });
+  const beta = updBeta();
   try {
-    const f = await invoke<Info | null>("update_check", { beta: updBeta() });
+    const f = await invoke<Info | null>("update_check", { beta });
+    if (beta !== updBeta() || (quiet && !updAuto())) return;
     const now = Date.now();
     store.set("updChecked", String(now));
     const skipped = quiet && f && store.get("updSkip") === f.version;
@@ -38,25 +40,29 @@ export async function checkUpdate(quiet = false) {
   } catch (e) {
     set({ err: quiet ? "" : String(e) });
   }
-  set({ checking: false });
+  finally { set({ checking: false }); }
 }
 
 /** At start: a look a little after opening, at most twice a day. */
 export function startUpdateChecks() {
   if (!updAuto()) return;
   const due = Date.now() - S.checkedAt > 12 * 3600_000;
-  if (due) setTimeout(() => checkUpdate(true), 15_000);
+  if (due) setTimeout(() => { if (updAuto()) checkUpdate(true); }, 15_000);
 }
 
 async function install() {
+  if (S.installing || S.checking || !S.found) return;
   set({ installing: true, err: "", got: 0, total: 0 });
-  const un = await listen<[number, number | null]>("update-progress", (e) => set({ got: e.payload[0], total: e.payload[1] ?? 0 }));
+  let un: (() => void) | undefined;
   try {
-    await invoke("update_install"); // closes Luna and opens the new one
-  } catch (e) {
-    set({ err: String(e), installing: false });
-  }
-  un();
+    un = await listen<[number, number | null]>("update-progress", (e) => set({ got: e.payload[0], total: e.payload[1] ?? 0 }));
+    // Recheck also repopulates native Pending after a failed download consumed it.
+    const f = await invoke<Info | null>("update_check", { beta: updBeta() });
+    if (!f || (f.beta && !updBeta())) { set({ found: null }); return; }
+    set({ found: f });
+    await invoke("update_install");
+  } catch (e) { set({ err: String(e) }); }
+  finally { un?.(); set({ installing: false }); }
 }
 
 const mb = (n: number) => (n / 1048576).toFixed(1);
@@ -105,7 +111,8 @@ export function UpdateSettings({ onBackup }: { onBackup: () => void }) {
   const f = s.found;
   const betaOn = (on: boolean) => {
     if (on) { setWarn(true); return; }
-    store.set("updBeta", "0"); setBeta(false); set({ found: null });
+    if (S.installing) return;
+    setWarn(false); store.set("updBeta", "0"); setBeta(false); set({ found: null });
   };
   const confirmBeta = () => { store.set("updBeta", "1"); setBeta(true); setWarn(false); checkUpdate(); };
   return (
@@ -131,7 +138,7 @@ export function UpdateSettings({ onBackup }: { onBackup: () => void }) {
         {tt("Yeni sürüm çıkınca haber ver")}
       </label>
       <label className="look-check">
-        <input type="checkbox" checked={beta || warn} onChange={(e) => betaOn(e.target.checked)} />
+        <input type="checkbox" checked={beta || warn} disabled={s.installing} onChange={(e) => betaOn(e.target.checked)} />
         {tt("Beta sürümlerini de al")}
       </label>
       {warn && (

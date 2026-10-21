@@ -1,3 +1,25 @@
+﻿## 1.4.5CC — 2026-10-21 (beta, not built yet: tried with Luna Dev.cmd)
+
+- **Fixes package (B01–B36):**
+  - Backup and restore: a wrong-shaped backup, a full storage or a failed save no longer wipes or half-restores data.
+  - API keys: saving and deleting a key now waits and shows an error when it fails.
+  - Collections: same title in two years, the chosen episode, the right book, YouTube songs, renames and a slow search after a delete.
+  - Updates: beta and auto-check switches respected; a retry after a failed download works.
+  - Read aloud: pause, speed, voice, stop at chapter end and resume; only listened time counted.
+  - YouTube: a broken direct link falls back instead of looping.
+  - Letterboxd: real addresses only; remakes kept apart; star values checked; posters not mixed up.
+  - Torrents: cancelling no longer deletes files.
+  - Wikisource: safe decoding, valid long chapters, and a failed chapter stops the save.
+- **Library:**
+  - Sort by A–Z, year or rating; filter by genre, unmatched or several copies.
+  - Collection search.
+  - Letterboxd lists: friend-rating filter and a link to the list.
+- **Checks:** 37 regression tests (`npm run test:regression`), also run by CI.
+
+## 1.4.4CC — 2026-10-21 (beta, not built yet: tried with Luna Dev.cmd)
+
+- **Small window:** leaving full screen (or playing in a small window) no longer blows the window back up to the size of the screen. 1.4.3 checked "is the window inside the screen?" on every resize, and leaving full screen briefly reports a screen-sized window; the check now runs once, when Luna starts.
+
 ## 1.4.3CC — 2026-10-21 (beta, not built yet: tried with Luna Dev.cmd)
 
 - **Same look on every screen:** on screens narrower than 1920 points (e.g. Windows scaling 125% or 150%) Luna zooms out a little, so text, spacing and the top bar sit as on a 1920-wide screen (Settings › "Fit the layout to the screen"). The top bar's labels fold away step by step only when the tabs don't fit.

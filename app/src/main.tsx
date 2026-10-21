@@ -12,6 +12,7 @@ import { loadedLang } from "./i18n";
 import { SubsOverlay } from "./Upscaler";
 import { invoke } from "@tauri-apps/api/core";
 import { loadSecrets, SECRET_KEYS } from "./library";
+import { storageRestoreInProgress } from "./safety";
 
 // Every image fades in once it has loaded; one that fails to load is hidden instead of
 // showing the browser's broken-image icon.
@@ -42,6 +43,7 @@ const isSubs = new URLSearchParams(location.search).has("subs");
 // WebView2 keeps localStorage in a database it may throw away after a crash. Luna mirrors it to
 // luna-state.json and restores from there when the webview's copy is gone.
 const snapshot = () => {
+  if (storageRestoreInProgress()) return;
   try {
     const o: Record<string, string> = {};
     for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i)!; if (!SECRET_KEYS.includes(k)) o[k] = localStorage.getItem(k) ?? ""; }
