@@ -1,3 +1,4 @@
+import { naturalPath } from "./playbackModel";
 import { locale, DEC } from "./i18n";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { useEffect, useMemo, useState } from "react";
@@ -155,7 +156,12 @@ export function parseInSeries(path: string, root: string): Parsed {
   // the episode: the last 1–3 digit number that isn't a year, a resolution or a codec
   const name = base(path).replace(/\b(19|20)\d{2}\b|\b\d{3,4}p\b|\b[xh]\.?26[45]\b/gi, " ");
   const nums = [...name.matchAll(/(?<![\d.])(\d{1,3})(?![\d.])/g)].map((m) => +m[1]);
-  return { kind: "tv", title: show ? clean(show) : p.title, season: sm ? +(sm[1] ?? sm[2]) : 1, ...(nums.length ? { episode: nums[nums.length - 1] } : {}) };
+  // An explicit marker wins ("Bölüm 5 - Part 2" is episode 5, "Episode 12 - The 100 Days" is 12), then a leading
+  // number ("05 - Chapter 12"); only without either is the last number taken.
+  const marked = name.match(/(?<![\p{L}\d])(?:bölüm|bolum|episode|ep|e|b)[\s._-]*(\d{1,3})(?!\d)/iu);
+  const lead = name.match(/^\s*(\d{1,3})\s*[-._)\]]/);
+  const episode = marked ? +marked[1] : lead ? +lead[1] : nums.length ? nums[nums.length - 1] : undefined;
+  return { kind: "tv", title: show ? clean(show) : p.title, season: sm ? +(sm[1] ?? sm[2]) : 1, ...(episode != null ? { episode } : {}) };
 }
 export const groupKey = (p: Parsed) =>
   p.kind === "tv" ? "tv:" + p.title.toLowerCase() + (p.year ? ":" + p.year : "") : "movie:" + p.title.toLowerCase() + ":" + (p.year ?? "");
@@ -425,7 +431,7 @@ export function useLibrary(opened: string[] = []) {
   const [missing, setMissing] = useState<Set<string>>(new Set());
   const [, bump] = useState(0);
   useEffect(() => {
-    const f = () => { setPinned(loadPinned()); setFiles(store.json("files", [])); bump((n) => n + 1); };
+    const f = () => { setPinned(loadPinned()); setFiles(store.json("files", [])); setFoldersState(store.json("folders", [])); setKinds(loadFolderKinds()); bump((n) => n + 1); };
     window.addEventListener("luna-library", f);
     return () => window.removeEventListener("luna-library", f);
   }, []);
@@ -479,8 +485,9 @@ export function useLibrary(opened: string[] = []) {
     for (const it of map.values()) {
       if (it.meta && it.meta.kind !== it.parsed.kind) it.parsed = { ...it.parsed, kind: it.meta.kind };
     }
+    // ties (two copies of an episode, files without a number) in natural name order, not in scan order
     for (const it of map.values())
-      it.files.sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? 0) - (b.episode ?? 0));
+      it.files.sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? 0) - (b.episode ?? 0) || naturalPath(a.path, b.path));
     return [...map.values()];
   }, [files, pinned, meta, opened.join("\n"), folders, kinds]);
 
@@ -614,7 +621,7 @@ export function useThumb(path: string, enabled: boolean) {
   const src = state.path === path ? state.src : store.get("thumb:" + path);
   const setSrc = (u: string | null) => setState({ path, src: u });
   useEffect(() => {
-    if (!enabled || src || isUrl(path)) return;
+    if (!enabled || !path || src || isUrl(path)) return;
     let alive = true;
     if (!thumbMem.has(path))
       thumbMem.set(path, queued(() => invoke<string>("video_thumbnail", { path }))
@@ -667,3 +674,12 @@ export async function tmdbKeywords(kind: "movie" | "tv", id: number): Promise<st
 
 /** Raw TMDB GET for the assistant's media tools. */
 export const tmdbGet = (path: string, params: Record<string, string> = {}) => tmdb(path, params);
+
+/** Metadata-only series lookup, initiated by the user; no AI and no automatic list changes. */
+export async function seriesById(id: number): Promise<{id:number;name:string;parts:{id:number;title:string;year:string;release:string;poster:string|null}[]}> {
+  if (!Number.isInteger(id) || id <= 0 || !store.get("tmdbKey")) throw Error("TMDB anahtarı gerekli.");
+  const c = await tmdb(`/collection/${id}`, { language: locale() });
+  if (!c || c.id!==id || !Array.isArray(c.parts)) throw Error("Invalid collection metadata");
+  return { id, name: String(c.name || "Collection").slice(0,300), parts: c.parts.filter((p:any)=>Number.isInteger(p.id)&&p.id>0&&typeof p.title==="string").map((p:any)=>({ id:p.id as number,title:p.title as string,year:String(p.release_date||"").slice(0,4),release:String(p.release_date||""),poster:typeof p.poster_path==="string"?p.poster_path:null })).sort((a:{release:string},b:{release:string})=>a.release.localeCompare(b.release)) };
+}
+export async function seriesForMovie(id:number) { const film=await tmdb(`/movie/${id}`,{language:locale()}); return film.belongs_to_collection?.id ? seriesById(film.belongs_to_collection.id) : null; }

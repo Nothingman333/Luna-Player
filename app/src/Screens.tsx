@@ -1,8 +1,9 @@
+import { GeneralExtras, BulkRelink, PlaybackPreferences, SeriesTracker, MediaNotebook, extraText } from "./Extras";
 import { defaultSubLangs, lang, setLang, tt, DEC } from "./i18n";
 import { BUILD_AGENT, BUILD_AGENT_NAMES, VERSION_LABEL } from "./version";
 import { UpdateSettings } from "./Update";
 import { STACK } from "./Mine";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -16,10 +17,13 @@ import { UpscalerSettings } from "./Upscaler";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { fmtTime } from "./mpv";
 import { SubAppearance } from "./PlayerMenu";
-import { LibraryToolbar } from "./LibraryToolbar";
-import { libraryStats, selectLibrary, LibrarySort, LibraryFilter } from "./libraryTools";
+import { FilmCatalogView, reasonText, remainingLabel } from "./FilmCatalog";
+import type { PosterProps } from "./FilmCatalog";
+import { arrangeMenu, formatRuntime, posterFailures, posterRetry, safeMeta, scanState } from "./filmCatalogModel";
+import type { MenuLike } from "./filmCatalogModel";
+import { itemFacts } from "./libraryTools";
 import { BackupSettings } from "./Backup";
-import { AI_PROVIDERS, AiProvider, AiProfile, aiModels, aiProfiles, saveAiProfiles, profileKeyName, PROFILE_SLOTS } from "./ai";
+import { AI_PROVIDERS, AiProvider, AiProfile, aiModels, aiProfiles, commitAiProfiles, profileKeyName, PROFILE_SLOTS } from "./ai";
 import {
   besideCopies, Episode, FolderKind, fmtSize, IMG, Item, qualityBadges, Recent, renameVideo, SearchHit, searchTmdb, seasonEpisodes, sidecarSubs, store, flushSecrets,
   useMediaInfo, useThumb,
@@ -116,7 +120,7 @@ export function Badges({ path, big, compact }: { path?: string; big?: boolean; c
   return (
     <div className={"badges" + (big ? " big" : "")}>
       {list.map((b) => (
-        <span key={b} className={"qb" + (/HDR|HLG|Dolby/.test(b) ? " hdr" : b === "4K" ? " uhd" : b === "SRT" ? " srt" : "")} title={b === "SRT" ? tt("Altyazı dosyası var") : undefined}>{b}</span>
+        <span key={b} className={"qb" + (/HDR|HLG|Dolby/.test(b) ? " hdr" : b === "4K" ? " uhd" : b === "SRT" ? " srt" : "") + (!info && b !== "SRT" ? " guess" : "")} title={b === "SRT" ? tt("Altyazı dosyası var") : !info ? extraText("Dosya adından tahmin; dosya henüz okunmadı", "Guessed from the file name; the file has not been read yet") : undefined}>{b}</span>
       ))}
     </div>
   );
@@ -133,27 +137,32 @@ const MODE_ICON: Record<Mode, string> = {
   books: "M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5",
 };
 /** Film · Müzik · Kitap: each part of Luna has its own colour. */
-export function ModeSwitch({ mode, setMode }: { mode: Mode; setMode: (m: Mode) => void }) {
+export function ModeSwitch({ mode, setMode, browserOpen, onBrowser }: { mode: Mode; setMode: (m: Mode) => void; browserOpen?: boolean; onBrowser?: () => void }) {
   const modes: [Mode, string, boolean][] = [["film", tt("Film"), true], ["music", tt("Müzik"), true], ["books", tt("Kitap"), true]];
   return (
     <nav className="mode-switch" aria-label={tt("Mod")}>
       {modes.map(([m, label, ready]) => (
-        <button key={m} className={"mode-btn" + (m === mode ? " on" : "")} disabled={!ready} title={ready ? label : tt("Yakında")}
-          onClick={() => setMode(m)} aria-pressed={m === mode}>
+        <button key={m} className={"mode-btn" + (m === mode && !browserOpen ? " on" : "")} disabled={!ready} title={ready ? label : tt("Yakında")}
+          onClick={() => setMode(m)} aria-pressed={m === mode && !browserOpen}>
           <Icon d={MODE_ICON[m]} size={15} /><span className="lbl">{label}</span>
         </button>
       ))}
+      {onBrowser && <button className={"mode-btn" + (browserOpen ? " on" : "")} aria-pressed={browserOpen} onClick={onBrowser} title="Luna Web"><Icon d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM3 12h18M12 3a18 18 0 0 1 0 18 18 18 0 0 1 0-18Z" size={16} /><span className="lbl">Web</span></button>}
     </nav>
   );
 }
 
-export function Header({ mode, setMode, tabs: modeTabs, view, setView, query, setQuery, scanning, onOpen, onSettings, onTorrent, downloading, onMine }: {
+export function Header({ browserOpen, onBrowser, mode, setMode, tabs: modeTabs, view, setView, query, setQuery, scanning, onOpen, onSettings, onTorrent, downloading, onMine }: {
+  browserOpen?: boolean; onBrowser?: () => void;
   mode: Mode; setMode: (m: Mode) => void; tabs?: [string, string][];
   view: string; setView: (v: any) => void; query: string; setQuery: (q: string) => void;
   scanning: boolean; onOpen: () => void; onSettings: () => void; onTorrent: () => void; downloading: number; onMine: () => void;
 }) {
   const film = mode === "film";
-  const tabs: [string, string][] = modeTabs ?? [["home", tt("Ana sayfa")], ["discover", tt("Keşfet")], ["movies", tt("Filmler")], ["shows", tt("Diziler")], ["recs", tt("Öneriler")], ["folders", tt("Klasörler")], ["downloads", tt("İndirmeler")]];
+  // the catalog says what the scan is really doing, and the "clear search" buttons of the catalog reach this box
+  useEffect(() => { scanState.set(film && !!scanning); return () => scanState.set(false); }, [film, scanning]);
+  useEffect(() => { const f = () => setQuery(""); window.addEventListener("luna-clear-search", f); return () => window.removeEventListener("luna-clear-search", f); }, [setQuery]);
+  const tabs: [string, string][] = browserOpen ? [] : modeTabs ?? [["home", tt("Ana sayfa")], ["discover", tt("Keşfet")], ["movies", tt("Filmler")], ["shows", tt("Diziler")], ["recs", tt("Öneriler")], ["folders", tt("Klasörler")], ["downloads", tt("İndirmeler")]];
   // On a narrow window the tabs scroll sideways: the wheel scrolls them, the edges fade where more tabs wait,
   // and the open tab is brought into view
   const nav = useRef<HTMLElement>(null);
@@ -173,7 +182,7 @@ export function Header({ mode, setMode, tabs: modeTabs, view, setView, query, se
     const ro = new ResizeObserver(look);
     ro.observe(n);
     return () => { n.removeEventListener("scroll", look); n.removeEventListener("wheel", wheel); ro.disconnect(); };
-  }, [mode]);
+  }, [mode, browserOpen]);
   useEffect(() => { nav.current?.querySelector<HTMLElement>(".tab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" }); }, [view, mode]);
   // The labels fold away one step at a time only while the tabs don't fit (any screen width, any
   // language): the buttons' words first, then the other parts' names, then "Dosya aç"'s.
@@ -195,9 +204,9 @@ export function Header({ mode, setMode, tabs: modeTabs, view, setView, query, se
     return () => ro.disconnect();
   }, [mode, tabs.length, downloading > 0, scanning]);
   return (
-    <header className="app-header" ref={head}>
+    <header className={"app-header" + (browserOpen ? " browser-app-header" : "")} ref={head}>
       <div className="brand"><LunaMark /></div>
-      <ModeSwitch mode={mode} setMode={setMode} />
+      <ModeSwitch mode={mode} setMode={setMode} browserOpen={browserOpen} onBrowser={onBrowser} />
       <nav className={"tabs" + edges} ref={nav}>
         {tabs.map(([v, l]) => (
           <button key={v} className={"tab" + (v === view ? " on" : "")} onClick={() => setView(v)}>
@@ -206,49 +215,90 @@ export function Header({ mode, setMode, tabs: modeTabs, view, setView, query, se
         ))}
       </nav>
       <span className="grow" />
-      {scanning && <span className="muted small pulse">{tt("Taranıyor…")}</span>}
-      <label className="search">
+      {browserOpen && <span className="browser-header-label"><span />Luna Web</span>}
+      {!browserOpen && scanning && <span className="muted small pulse">{tt("Taranıyor…")}</span>}
+      {!browserOpen && <label className="search">
         <Icon d={I.search} size={18} />
         <input value={query} placeholder={film ? tt("Ara") : mode === "music" ? tt("Müzikte ara") : tt("Kitaplarda ara")} aria-label={film ? tt("Kütüphanede ara") : mode === "music" ? tt("Müzikte ara") : tt("Kitaplarda ara")}
-          onChange={(e) => { setQuery(e.target.value); if (e.target.value && view === "home") setView(film ? "movies" : "library"); }} />
-      </label>
-      <button className="ghost sm hdr-btn" onClick={onTorrent} title={tt("Bağlantı aç: magnet, torrent ya da video adresi (Ctrl+N)")} aria-label={tt("Bağlantı aç")}>
+          onChange={(e) => { setQuery(e.target.value); if (e.target.value && view === "home") setView(film ? "movies" : "library"); }}
+          onKeyDown={(e) => { if (e.key === "Escape" && query) { e.preventDefault(); e.stopPropagation(); setQuery(""); } }} />
+        {query && <button type="button" className="search-clear" aria-label={extraText("Aramayı temizle", "Clear search")} title={extraText("Aramayı temizle (Esc)", "Clear search (Esc)")} onClick={() => setQuery("")}>×</button>}
+      </label>}
+      {!browserOpen && <button className="ghost sm hdr-btn" onClick={onTorrent} title={tt("Bağlantı aç: magnet, torrent ya da video adresi (Ctrl+N)")} aria-label={tt("Bağlantı aç")}>
         <Icon d={film ? I.magnet : LINK} size={18} /><span className="lbl">{tt("Bağlantı")}</span>
-      </button>
+      </button>}
       <button className="ghost sm hdr-btn" onClick={onMine} title={tt("Koleksiyonlar ve geçmiş: film, müzik, kitap bir arada")} aria-label={tt("Koleksiyonlar")}>
         <Icon d={STACK} size={18} /><span className="lbl">{tt("Koleksiyonlar")}</span>
       </button>
       <button className="round gear" aria-label={tt("Ayarlar")} title={tt("Ayarlar")} onClick={onSettings}><Icon d={I.gear} /></button>
-      <button className="primary hdr-open" onClick={onOpen} title={film ? tt("Dosya aç (Ctrl+O)") : mode === "music" ? tt("Müzik dosyası aç") : tt("Kitap dosyası aç (EPUB, PDF, CBZ)")}><Icon d={I.folder} size={18} /><span className="lbl">{tt("Dosya aç")}</span></button>
+      {!browserOpen && <button className="primary hdr-open" onClick={onOpen} title={film ? tt("Dosya aç (Ctrl+O)") : mode === "music" ? tt("Müzik dosyası aç") : tt("Kitap dosyası aç (EPUB, PDF, CBZ)")}><Icon d={I.folder} size={18} /><span className="lbl">{tt("Dosya aç")}</span></button>}
     </header>
   );
 }
 
 // ---------- cards ----------
-function Poster({ it, a }: { it: Item; a: Actions }) {
-  const m = it.meta;
-  const n = it.parsed.kind === "tv" ? 0 : (a.copies?.(it) ?? it.files.map((f) => f.path)).length;
-  const thumb = useThumb(it.files[0].path, !m?.poster);
+const STAR = "M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z";
+function PosterBase({ it, a, copyCount, episodes, resume, reason, watched, stamp }: PosterProps) {
+  void stamp; // a change of the library (finished, downloaded, relinked…) re-renders the card
+  const m = it.meta, facts = itemFacts(it);
+  const files = Array.isArray(it.files) ? it.files.filter((f) => f && typeof f.path === "string" && f.path.trim()) : [], first = files[0];
+  // A cover that fails to load (offline, removed on TMDB) falls back like a missing one. The failure is remembered for a few
+  // minutes and tried again when the network is back, so a filter change does not re-request every broken cover.
+  useSyncExternalStore(posterRetry.subscribe, posterRetry.get);
+  const [, again] = useState(0);
+  const [badThumb, setBadThumb] = useState<string | null>(null);
+  const posterUrl = typeof m?.poster === "string" && m.poster ? IMG + "w342" + m.poster : "";
+  const poster = posterUrl && !posterFailures.blocked(posterUrl) ? posterUrl : null;
+  const tv = it.parsed.kind === "tv";
+  const n = tv ? 0 : copyCount ?? (a.copies?.(it) ?? files.map((f) => f.path)).length;
+  const thumb = useThumb(first?.path || "", !!first && !poster);
+  const done = watched ?? (files.length > 0 && files.every((f) => isFinished(f.path)));
+  const goneAll = files.length > 0 && files.every((f) => a.missing.has(f.path));
+  const remoteAll = files.length > 0 && files.every((f) => isRemote(f.path));
+  // not on disk: moved or deleted (missing) is a different thing from a link that was never downloaded (remote)
+  const status = files.length > 0 && files.every((f) => isRemote(f.path) || a.missing.has(f.path)) ? (goneAll || !remoteAll ? "missing" : "remote") : "";
+  const mine = !!resume && !!resume.path && resume.itemKey === it.key && files.some((f) => f.path === resume.path);
+  const target = mine ? resume!.path! : first?.path;
+  const title = facts.title || it.parsed.title, year = facts.year || "";
+  const left = !done && resume?.path ? (mine ? (tv ? epLabel(resume.episode?.season, resume.episode?.episode) + " · " : "") + tt("{0} kaldı", remainingLabel(resume)) : extraText("Başka kopyada devam ediyor", "Continues in another copy")) : "";
+  const seen = tv && !done && resume && !resume.path && resume.watched > 0 ? extraText(`${resume.watched}/${resume.total} bölüm izlendi`, `${resume.watched}/${resume.total} episodes watched`) : "";
+  const fraction = mine && !done ? Math.max(0, Math.min(1, resume!.fraction)) : 0;
   return (
     <button className="poster" onClick={() => a.details(it.key)}
-      onContextMenu={(e) => a.menu(e, { path: it.files[0].path, item: it })}>
-      <div className={"poster-img" + (it.files.every((f) => isRemote(f.path) || a.missing.has(f.path)) ? " remote" : "")}
-        title={it.files.every((f) => isRemote(f.path)) ? tt("İndirilmeli · detaylardan indirebilirsin")
-          : it.files.every((f) => a.missing.has(f.path)) ? tt("Dosya bulunamadı · detaylardan yeniden bağlayabilirsin") : undefined}>
-        {it.files.every((f) => isFinished(f.path)) && <span className="done-badge" title={tt("Bitirdin")}>✓</span>}
-        {m?.poster ? <img src={IMG + "w342" + m.poster} alt="" loading="lazy" />
-          : thumb ? <img src={thumb} alt="" />
-          : <span>{it.parsed.title}</span>}
-        <div className="poster-badges"><Badges path={it.files[0].path} compact /></div>
+      onContextMenu={(e) => { if (target) a.menu(e, { path: target, item: it }); }}>
+      <div className={"poster-img" + (status ? " remote" : "")}
+        title={status === "remote" ? tt("İndirilmeli · detaylardan indirebilirsin") : status === "missing" ? tt("Dosya bulunamadı · detaylardan yeniden bağlayabilirsin") : undefined}>
+        {(done || facts.rating > 0) && <div className="library-corner">
+          {facts.rating > 0 && <span className="library-rating-badge" title={extraText("TMDB topluluk puanı (senin puanın değil)", "TMDB community rating (not your own)")} aria-label={extraText(`TMDB puanı ${facts.rating.toFixed(1)}`, `TMDB rating ${facts.rating.toFixed(1)}`)}><small>TMDB</small>★ {facts.rating.toFixed(1)}</span>}
+          {done && <span className="done-badge" title={tt("Bitirdin")}>✓</span>}
+        </div>}
+        {poster ? <img src={poster} alt="" loading="lazy" onLoad={(e) => e.currentTarget.classList.add("loaded")} onError={() => { posterFailures.fail(poster); again((x) => x + 1); }} />
+          : thumb && thumb !== badThumb ? <img src={thumb} alt="" onLoad={(e) => e.currentTarget.classList.add("loaded")} onError={() => { setBadThumb(thumb); if (first) store.remove("thumb:" + first.path); }} />
+          : <span className="poster-fallback">{title}</span>}
+        {first && <div className="poster-badges"><Badges path={first.path} compact /></div>}
+        {status && <span className="library-state-chip">{status === "remote" ? extraText("İndirilmedi", "Not downloaded") : extraText("Dosya yok", "File missing")}</span>}
+        {fraction > 0 && <div className="progress library-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(fraction * 100)} aria-label={extraText("Kaldığın yer", "Where you stopped")}><div style={{ width: fraction * 100 + "%" }} /></div>}
       </div>
-      <div className="card-title">{m?.title ?? it.parsed.title}</div>
+      <div className="card-title" title={title}>{title}</div>
       <div className="muted small">
-        {it.parsed.kind === "tv" ? tt("{0} bölüm", it.files.length) : m?.year ?? it.parsed.year ?? ""}
-        {it.parsed.kind !== "tv" && n > 1 && <span className="copies-n" title={tt("Bu filmden {0} kopya var; detaylarda hangisini izleyeceğini seçersin", n)}>{m?.year || it.parsed.year ? " · " : ""}{tt("{0} kopya", n)}</span>}
+        {tv ? <span title={files.length > (episodes || 0) && episodes ? extraText(`${files.length} dosya; bazı bölümlerin birden çok kopyası var`, `${files.length} files; some episodes have more than one copy`) : undefined}>{tt("{0} bölüm", episodes || it.files.length)}</span> : year}
+        {!tv && facts.runtime > 0 && <span className="library-card-runtime"> · {Math.round(facts.runtime)} {extraText("dk", "min")}</span>}
+        {!tv && n > 1 && <span className="copies-n" title={tt("Bu filmden {0} kopya var; detaylarda hangisini izleyeceğini seçersin", n)}>{year ? " · " : ""}{tt("{0} kopya", n)}</span>}
       </div>
+      {(left || seen) && <div className={"library-resume" + (left && !mine ? " is-other" : "")} title={tv && resume && resume.total ? extraText(`${resume.watched}/${resume.total} bölüm izlendi`, `${resume.watched}/${resume.total} episodes watched`) : undefined}>{left || seen}</div>}
+      {reason && <div className="library-match-reason" title={reasonText(reason)}>{reasonText(reason)}</div>}
     </button>
   );
 }
+/** Poster for plain rows (home): re-renders with its parent, as before. */
+export const Poster = PosterBase;
+const samePoster = (p: PosterProps, n: PosterProps) =>
+  p.it === n.it && p.a.missing === n.a.missing && p.copyCount === n.copyCount && p.episodes === n.episodes && p.watched === n.watched && p.stamp === n.stamp
+  && p.reason?.kind === n.reason?.kind && p.reason?.text === n.reason?.text
+  && p.resume?.path === n.resume?.path && p.resume?.itemKey === n.resume?.itemKey && p.resume?.watched === n.resume?.watched && p.resume?.total === n.resume?.total
+  && Math.round((p.resume?.fraction ?? 0) * 100) === Math.round((n.resume?.fraction ?? 0) * 100) && Math.round((p.resume?.remaining ?? 0) / 60) === Math.round((n.resume?.remaining ?? 0) / 60);
+/** The catalog's card: re-renders only when something it shows changed, so typing in the search box does not redraw every poster. */
+const CatalogPoster = memo(PosterBase, samePoster);
 
 /** Ready questions about a film or series: the top of its right-click menu. */
 export const filmAsks = (it: Item): MenuEntry[] => titleAsks(it.meta?.title ?? it.parsed.title, it.meta?.year ?? it.parsed.year, it.parsed.kind);
@@ -287,7 +337,7 @@ function WideCard({ path, item, title, sub, progress, a, still }: {
         {item && <InfoBtn onClick={() => a.details(item.key)} />}
         {progress != null && <div className="progress"><div style={{ width: progress + "%" }} /></div>}
       </div>
-      <div className="card-title">{title}</div>
+      <div className="card-title" title={title}>{title}</div>
       {sub && <div className="muted small">{sub}</div>}
     </button>
   );
@@ -457,26 +507,7 @@ function PosterRow({ title, items, a }: { title: string; items: Item[]; a: Actio
 }
 
 export function Browse({ title, items, query, a }: { title: string; items: Item[]; query: string; a: Actions }) {
-  const q = query.trim().toLocaleLowerCase(lang() === "tr" ? "tr" : "en");
-  const [sort, setSort] = useState<LibrarySort>("az");
-  const [filter, setFilter] = useState<LibraryFilter>("all");
-  const [genre, setGenre] = useState("");
-  useEffect(() => { setGenre(""); setFilter("all"); setSort("az"); }, [title]);
-  const stats = libraryStats(items);
-  const genres = [...new Set(items.flatMap((i) => i.meta?.genres ?? []))].sort((a, b) => a.localeCompare(b, lang()));
-  const list = selectLibrary(items, query, sort, filter, genre, lang());
-  const shown = besideCopies(list);
-  return (
-    <div className="page">
-      <section className="row">
-        <h2>{q ? tt("Yerel dosyalar · “{0}”", query) : title} <span className="muted small">{list.length}</span></h2>
-        <LibraryToolbar files={stats.files} unmatched={stats.unmatched} versions={stats.versions.size} genres={genres}
-          sort={sort} filter={filter} genre={genre} setSort={setSort} setFilter={setFilter} setGenre={setGenre} />
-        {list.length ? <div className="grid">{shown.map((it) => <Poster key={it.key} it={it} a={a} />)}</div>
-          : <div className="muted empty-note library-empty">{q || filter !== "all" || genre ? tt("Eşleşen film yok.") : tt("Bir şey bulunamadı. Klasörler sekmesinden kütüphaneye klasör ekleyebilirsin.")}</div>}
-      </section>
-    </div>
-  );
+  return <FilmCatalogView title={title} items={items} query={query} a={a} Poster={CatalogPoster} />;
 }
 
 // ---------- folders ----------
@@ -625,20 +656,29 @@ function FileCard({ e, it, season, episode, rec, a }: {
         <div className="thumb-badges"><Badges path={e.path} compact /></div>
         {rec && <div className="progress"><div style={{ width: pct(rec) + "%" }} /></div>}
       </div>
-      <div className="card-title">{it?.meta ? it.meta.title + (season != null ? " · " + epLabel(season, episode) : "") : e.name}</div>
+      <div className="card-title" title={it?.meta ? it.meta.title + (season != null ? " · " + epLabel(season, episode) : "") : e.name}>{it?.meta ? it.meta.title + (season != null ? " · " + epLabel(season, episode) : "") : e.name}</div>
       <div className="muted small ellipsis">{it?.meta ? e.name + " · " : ""}{fmtSize(e.size)}</div>
     </button>
   );
 }
 
 // ---------- details ----------
-/** One copy of a film on the details page: its quality, subtitles, size and file name. */
+/** One copy of a film on the details page: what is known about the file, and what is only a guess from its name. */
 function CopyChip({ path, on, gone, onPick, onMenu }: { path: string; on: boolean; gone: boolean; onPick: () => void; onMenu: (e: React.MouseEvent) => void }) {
   const info = useMediaInfo(path);
+  const [, bump] = useState(0);
+  useEffect(() => { const f = () => bump((n) => n + 1); window.addEventListener("luna-subs", f); return () => window.removeEventListener("luna-subs", f); }, []);
+  const remote = isRemote(path);
+  const subs = sidecarSubs(path) + (store.get("extSub:" + path) ? 1 : 0);
   return (
     <button className={"copy" + (on ? " on" : "") + (gone ? " gone" : "")} role="radio" aria-checked={on} onClick={onPick} onContextMenu={onMenu} title={path}>
       <span className="copy-top"><Badges path={path} compact />{info?.size ? <span className="muted small">{fmtSize(info.size)}</span> : null}</span>
-      <span className="copy-name ellipsis">{gone ? tt("Dosya yok · ") : ""}{fileName(path)}</span>
+      <span className="copy-name ellipsis">{gone ? tt("Dosya yok · ") : remote ? extraText("İndirilmedi · ", "Not downloaded · ") : ""}{fileName(path)}</span>
+      <span className="copy-facts">
+        {info?.audioCodec ? <span>{extraText("Ses", "Audio")}: {info.audioCodec.toUpperCase()}</span> : null}
+        <span>{subs > 0 ? extraText(`Altyazı: ${subs} yan dosya`, `Subtitles: ${subs} side file${subs === 1 ? "" : "s"}`) : extraText("Altyazı: yan dosya yok", "Subtitles: no side file")}</span>
+        {!info && !gone ? <span className="copy-note">{extraText("Dosya henüz okunmadı", "File not read yet")}</span> : null}
+      </span>
     </button>
   );
 }
@@ -648,12 +688,14 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
   onAsk?: () => void; missingPanel?: React.ReactNode;
 }) {
   const [, rerender] = useState(0);
-  const allDone = it.files.every((f) => isFinished(f.path));
-  const m = it.meta;
+  const m = safeMeta(it.meta, it.parsed.kind);
   const isTv = it.parsed.kind === "tv";
   const seasons = [...new Set(it.files.map((f) => f.season ?? 1))].sort((x, y) => x - y);
   // a film found more than once: the user picks which copy to watch (last watched one first)
   const copies = isTv ? [] : a.copies?.(it) ?? it.files.map((f) => f.path);
+  // "finished" is a fact about the film: one finished copy makes it watched (the catalog filters agree), and marking toggles every copy
+  const filmPaths = isTv ? it.files.map((f) => f.path) : copies.length ? copies : it.files.map((f) => f.path);
+  const allDone = isTv ? it.files.every((f) => isFinished(f.path)) : filmPaths.some((p) => isFinished(p));
   const [pick, setPick] = useState<string | null>(null);
   const chosen = copies.length > 1 ? pick ?? recent.find((r) => copies.includes(r.path))?.path ?? copies[0] : null;
   const { file, rec } = chosen ? { file: { path: chosen }, rec: recent.find((r) => r.path === chosen) } as { file: { path: string; season?: number; episode?: number }; rec?: Recent } : resumeTarget(it, recent);
@@ -686,17 +728,18 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
           <div className="brand"><LunaMark />  {tt("Luna Player")}</div>
         </header>
         <div className="d-body">
-          <h1>{m?.title ?? it.parsed.title}</h1>
+          <h1>{m?.title || it.parsed.title}</h1>
           <div className="d-meta">
             {m && m.rating > 0 && (
-              <button className="rating" title={tt("TMDB sayfasını aç")}
+              <button className="rating" title={extraText("TMDB topluluk puanı (senin puanın değil) · TMDB sayfasını aç", "TMDB community rating (not your own) · open the TMDB page")}
+                aria-label={extraText(`TMDB topluluk puanı ${m.rating.toFixed(1)}; TMDB sayfasını aç`, `TMDB community rating ${m.rating.toFixed(1)}; open the TMDB page`)}
                 onClick={() => openUrl(m.id > 0 ? `https://www.themoviedb.org/${m.kind}/${m.id}?language=${lang()}` : `https://www.themoviedb.org/search?query=${encodeURIComponent(m.title)}`)}>
-                ★ {String(m.rating).replace(".", DEC)}
+                <span className="rating-src">TMDB</span>★ {m.rating.toFixed(1).replace(".", DEC)}
               </button>
             )}
-            {m?.year && <span>{m.year}</span>}
-            {m?.seasons && <span>{m.seasons}  {tt("sezon")}</span>}
-            {m?.runtime ? <span>{Math.floor(m.runtime / 60)}  {tt("sa")} {m.runtime % 60}  {tt("dk")}</span> : null}
+            {m && m.year ? <span>{m.year}</span> : null}
+            {m && m.seasons > 0 ? <span>{m.seasons}  {tt("sezon")}</span> : null}
+            {m && m.runtime > 0 ? <span>{formatRuntime(m.runtime, tt("sa"), tt("dk"))}</span> : null}
             {m?.genres?.length ? <span>{m.genres.slice(0, 3).join(", ")}</span> : null}
           </div>
           <Badges path={file.path} big />
@@ -706,6 +749,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
               <div className="copy-list" role="radiogroup" aria-label={tt("Kopyalar")}>
                 {copies.map((p) => <CopyChip key={p} path={p} on={p === file.path} gone={a.missing.has(p)} onPick={() => setPick(p)} onMenu={(e) => a.menu(e, { path: p, item: it })} />)}
               </div>
+              <div className="copy-help">{extraText("Hangi kopyayı izleyeceğini sen seçersin. Ses ve altyazı dili oynatırken seçilir; dosyanın içindeki parçalar burada okunmaz. Kesik çerçeveli etiketler dosya adından tahmindir, dosya okununca gerçek değerle değişir.", "You choose which copy to watch. Audio and subtitle language are chosen while playing; the tracks inside a file are not read here. Dashed labels are guessed from the file name and are replaced by the real values once the file is read.")}</div>
             </div>
           )}
           {m?.overview ? (
@@ -726,15 +770,20 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
             <button className={"act" + (allDone || (isTv && isFinished(file.path)) ? " on good" : "")}
               data-tip={isTv ? (isFinished(file.path) ? tt("Bölümü izlemedim") : tt("Bölümü bitirdim")) : allDone ? tt("Bitirmedim") : tt("Bitirdim")}
               aria-label={isTv ? tt("Bölümü bitirdim") : tt("Bitirdim")}
-              onClick={() => { setFinished(isTv ? [file.path] : it.files.map((f) => f.path), !allDone && !(isTv && isFinished(file.path))); rerender((n) => n + 1); }}>
+              onClick={() => { setFinished(isTv ? [file.path] : filmPaths, !allDone && !(isTv && isFinished(file.path))); rerender((n) => n + 1); }}>
               <Icon d={I.check} size={20} />
             </button>
             <TasteButtons it={it} />
+            <span className="d-quick"><MediaNotebook buttonClass="act" path={file.path} title={m?.title || it.parsed.title} time={rec?.time || 0} subtitle="" seek={(time, path) => window.dispatchEvent(new CustomEvent("luna-open-note", { detail: { path, time } }))} /></span>
+            <button className="act" data-tip={extraText("Film değerlendirmesi", "Film review")} aria-label={extraText("Film değerlendirmesine git", "Go to the film review")}
+              onClick={() => { const el = document.getElementById("film-decision"); if (!el) return; el.scrollIntoView({ block: "start", behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); el.focus({ preventScroll: true }); }}>
+              <Icon d={STAR} size={20} />
+            </button>
             <button className="act" data-tip={tt("Altyazı ekle")} aria-label={tt("Altyazı ekle")} onClick={() => onAddSub(file.path)}>
               <Icon d={I.subs} size={20} />
             </button>
             <button className="act" data-tip={tt("YouTube'da Türkçe fragman")} aria-label={tt("Fragman")}
-              onClick={() => { const t = m?.title ?? it.parsed.title; const y = m?.year ?? it.parsed.year; openUrl(youtubeTrailer(y ? `${t} (${y})` : t)); }}>
+              onClick={() => { const t = m?.title || it.parsed.title; const y = m?.year || it.parsed.year; openUrl(youtubeTrailer(y ? `${t} (${y})` : t)); }}>
               <Icon d={I.play} fill size={16} />
             </button>
             {onAsk && (
@@ -747,6 +796,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
             </button>
           </div>
           {missingPanel}
+
           {download}
           <div className="muted small">
             {extSub ? tt("Altyazı: {0}", fileName(extSub)) : hasSub ? tt("Altyazı mevcut") : tt("Altyazı yok · oynatınca internetten aranır")}
@@ -755,7 +805,10 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
         </div>
       </section>
 
-      <FilmDecisionPanel key={it.key} film={{ title: m?.title ?? it.parsed.title, year: m?.year ?? it.parsed.year, kind: m?.kind ?? it.parsed.kind, id: m?.id, rating: m?.rating }} />
+      <MediaNotebook buttonClass="chip" path={file.path} title={m?.title||it.parsed.title} time={rec?.time||0} subtitle="" seek={(time,path)=>window.dispatchEvent(new CustomEvent("luna-open-note",{detail:{path,time}}))}/>
+      <PlaybackPreferences path={file.path}/>
+      {!isTv && m && m.id > 0 && <SeriesTracker movieId={m.id}/>}
+      <div id="film-decision" tabIndex={-1}><FilmDecisionPanel key={it.key} film={{ title: m?.title || it.parsed.title, year: m?.year || it.parsed.year, kind: m?.kind ?? it.parsed.kind, id: m?.id, rating: m?.rating }} /></div>
 
       {m?.cast?.length ? (
         <section className="row">
@@ -825,16 +878,54 @@ export function MenuHost() {
   return <CardMenu x={menuState.x} y={menuState.y} entries={menuState.entries} onClose={() => { menuState = null; menuSubs.forEach((f) => f()); }} />;
 }
 
+/** A film card's menu in a readable order: playback, collection and assistant, library state, matching and file names, file location, and last the destructive one.
+ *  The six ready questions become one "Ask the assistant…" entry that opens them. Other menus are left as they are. */
+function arrangeFilmMenu(entries: MenuEntry[]): MenuEntry[] {
+  const real = entries.filter((e): e is Exclude<MenuEntry, "sep"> => e !== "sep");
+  const asks = real.filter((e) => e.label.startsWith("✦"));
+  if (asks.length < 3 || !real.some((e) => e.label === tt("Dosya adını değiştir…") || e.label === tt("Adını değiştir / eşleştir…"))) return entries;
+  const ask: MenuEntry = { label: "✦  " + extraText("Asistana sor…", "Ask the assistant…"), act: () => menuAgain(asks) };
+  const rest = entries.filter((e) => e === "sep" || !e.label.startsWith("✦"));
+  return arrangeMenu<MenuEntry & MenuLike>([...rest, ask], [
+    [tt("Devam et"), tt("Oynat"), tt("Baştan oynat"), tt("Detaylar")],
+    [tt("Koleksiyona ekle…"), (ask as { label: string }).label],
+    [tt("İzlendi olarak işaretle"), tt("İzlenmedi olarak işaretle"), tt("İzlemeye devam et listesinden kaldır"), tt("Altyazı ekle…")],
+    [tt("Adını değiştir / eşleştir…"), tt("Dosya adını değiştir…")],
+    [tt("Adını kopyala"), tt("Dosya konumunu aç"), tt("Dosya yolunu kopyala")],
+    [tt("Sil…"), tt("Kütüphaneden kaldır")],
+  ]);
+}
+
 export function CardMenu({ x, y, entries, onClose }: { x: number; y: number; entries: MenuEntry[]; onClose: () => void }) {
   const W = 260;
-  const left = Math.min(x, window.innerWidth - W - 8);
-  const top = Math.min(y, window.innerHeight - entries.length * 36 - 16);
+  const arranged = useMemo(() => arrangeFilmMenu(entries), [entries]);
+  const box = useRef<HTMLDivElement>(null);
+  const left = Math.max(8, Math.min(x, window.innerWidth - W - 8));
+  const [top, setTop] = useState(y);
+  // keep the menu inside the window (it scrolls when it is taller), remember where it opened for a second menu, and take the keyboard
+  useLayoutEffect(() => {
+    lastMenuAt = { x, y };
+    const before = document.activeElement as HTMLElement | null;
+    const h = box.current?.offsetHeight ?? 0;
+    setTop(Math.max(8, Math.min(y, window.innerHeight - h - 8)));
+    box.current?.querySelector<HTMLElement>(".cm-item")?.focus({ preventScroll: true });
+    return () => { try { if (before && document.contains(before)) before.focus({ preventScroll: true }); } catch {} };
+  }, [x, y, arranged.length]);
+  const onKey = (ev: React.KeyboardEvent) => {
+    if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); onClose(); return; }
+    const items = [...(box.current?.querySelectorAll<HTMLElement>(".cm-item") ?? [])];
+    if (!items.length || !["ArrowDown", "ArrowUp", "Home", "End"].includes(ev.key)) return;
+    ev.preventDefault();
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const next = ev.key === "Home" ? 0 : ev.key === "End" ? items.length - 1 : ev.key === "ArrowDown" ? (at + 1) % items.length : (at <= 0 ? items.length - 1 : at - 1);
+    items[next].focus();
+  };
   // on body, outside #root: when a workspace blurs the app, the menu must stay sharp and on top
   return createPortal(
     <div className="cm-bg" onMouseDown={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }}>
-      <div className="cm" style={{ left, top, width: W }} onMouseDown={(e) => e.stopPropagation()}>
-        {entries.map((e, i) => e === "sep" ? <div key={i} className="cm-sep" /> : (
-          <button key={i} className={"cm-item" + (e.danger ? " danger" : "")} onClick={() => { onClose(); e.act(); }}>
+      <div className="cm" role="menu" ref={box} onKeyDown={onKey} style={{ left, top, width: W }} onMouseDown={(e) => e.stopPropagation()}>
+        {arranged.map((e, i) => e === "sep" ? <div key={i} className="cm-sep" role="separator" /> : (
+          <button key={i} role="menuitem" className={"cm-item" + (e.danger ? " danger" : "")} onClick={() => { onClose(); e.act(); }}>
             <span className="cm-check" /><span className="grow">{e.label}</span>
           </button>
         ))}
@@ -930,8 +1021,8 @@ export function Rematch({ it, onPick, onCustom, onClose }: {
           {hits?.length === 0 && <div className="muted">{q.trim() && store.get("tmdbKey") ? tt("Bulamadık; bu bir film olmayabilir ya da adını doğru yazdığından emin ol. Yine de Kaydet ile bu adı kullanabilirsin.") : tt("Sonuç yok.")}</div>}
           {hits?.map((h) => (
             <button key={h.id} className="poster" onClick={() => onPick(h)}>
-              <div className="poster-img">{h.poster ? <img src={IMG + "w185" + h.poster} alt="" /> : <span>{h.title}</span>}</div>
-              <div className="card-title">{h.title}</div>
+              <div className="poster-img">{h.poster ? <img src={IMG + "w185" + h.poster} alt="" /> : <span className="poster-fallback">{h.title}</span>}</div>
+              <div className="card-title" title={h.title}>{h.title}</div>
               <div className="muted small">{h.year}</div>
             </button>
           ))}
@@ -1002,15 +1093,24 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
   const [aiKeys, setAiKeys] = useState<Record<string, string>>(() => Object.fromEntries(AI_PROVIDERS.filter((x) => x.id !== "gemini").map((x) => [x.keyName, store.get(x.keyName) ?? ""])));
   const [aiModelsBy, setAiModelsBy] = useState<Record<string, string>>(() => Object.fromEntries(AI_PROVIDERS.filter((x) => x.id !== "gemini").map((x) => [x.id, store.get("aiModel:" + x.id) ?? x.model])));
   const [base, setBase] = useState(store.get("aiBase") ?? "");
+  const [profileName,setProfileName]=useState("");
+  const [profileMsg,setProfileMsg]=useState("");
+  const [profileBusy,setProfileBusy]=useState(false);
+  useEffect(()=>{const sync=()=>setActProf(store.get("aiProfile")||"");window.addEventListener("luna-ai-profile",sync);return()=>window.removeEventListener("luna-ai-profile",sync);},[]);
+  const saveProfilesNow=async(next=profs,keys=profKeys,active=actProf)=>{setProfileBusy(true);setProfileMsg("");try{await commitAiProfiles(next,keys,active);setProfs(aiProfiles());setActProf(store.get("aiProfile")||"");setProfileMsg(extraText("Profiller kaydedildi. Asistanın üstünden geçiş yapabilirsin.","Profiles saved. Switch from the assistant header."));return true;}catch(e){setProfileMsg(String(e));return false;}finally{setProfileBusy(false);}};
+  const saveCurrentProfile=async()=>{const slot=Array.from({length:PROFILE_SLOTS},(_,i)=>i+1).find(i=>!profs.some(p=>p.slot===i));if(!slot){setProfileMsg(extraText("En fazla 8 profil. Mevcut bir profili düzenleyebilirsin.","Up to 8 profiles. Edit an existing profile."));return;}const next=[...profs,{slot,name:profileName.trim()||prov,provider:prov,model:prov==="gemini"?gemModel:aiModelsBy[prov]||"",base:prov==="custom"?base:""}];const keys={...profKeys,[slot]:prov==="gemini"?gemKey:aiKeys[provSpec.keyName]||""};if(await saveProfilesNow(next,keys,String(slot))){setProfKeys(keys);setProfileName("");}};
+
   const [otherList, setOtherList] = useState<string[]>([]);
   const [otherMsg, setOtherMsg] = useState("");
   const provSpec = AI_PROVIDERS.find((x) => x.id === prov)!;
+  const modelGeneration=useRef(0);
   const loadOther = () => {
+    const token=++modelGeneration.current;
     const k = aiKeys[provSpec.keyName]?.trim() ?? "";
     if (prov === "gemini" || (prov !== "custom" && !k) || (prov === "custom" && !base.trim())) { setOtherList([]); setOtherMsg(prov === "custom" ? tt("Önce base URL'yi yaz") : tt("Önce API anahtarını gir")); return; }
     setOtherMsg(tt("Modeller yükleniyor…"));
-    aiModels(prov, k || "-", base).then((l) => { setOtherList(l); setOtherMsg(l.length ? "" : tt("Model bulunamadı")); })
-      .catch((e) => { setOtherList([]); setOtherMsg(String(e).slice(0, 120)); });
+    aiModels(prov, k || "-", base).then((l) => { if(token!==modelGeneration.current)return;setOtherList(l); setOtherMsg(l.length ? "" : tt("Model bulunamadı")); })
+      .catch((e) => { if(token!==modelGeneration.current)return;setOtherList([]); setOtherMsg(String(e).slice(0, 120)); });
   };
   // the model list follows the service, its key and the base URL (after typing settles)
   const otherKey = aiKeys[provSpec.keyName] ?? "";
@@ -1018,7 +1118,7 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
     setOtherList([]); setOtherMsg("");
     if (prov === "gemini") return;
     const id = setTimeout(loadOther, 700);
-    return () => clearTimeout(id);
+    return () => {clearTimeout(id);modelGeneration.current++;};
   }, [prov, base, otherKey]);
   const [modelsMsg, setModelsMsg] = useState(tt("Önce API anahtarını gir"));
   const [sec, setSecState] = useState<SetSec>(() => (store.get("setSec") as SetSec) || "general");
@@ -1063,9 +1163,7 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
     for (const [id, m] of Object.entries(aiModelsBy)) store.set("aiModel:" + id, m.trim());
     store.set("aiBase", base.trim());
     const keep = profs.map((x) => ({ ...x, name: x.name.trim() || tt("Profil {0}", x.slot), model: x.model.trim(), base: x.base.trim() }));
-    saveAiProfiles(keep);
-    for (let i = 1; i <= PROFILE_SLOTS; i++) store.set(profileKeyName(i), keep.some((x) => x.slot === i) ? (profKeys[i] ?? "").trim() : "");
-    store.set("aiProfile", keep.some((x) => String(x.slot) === actProf) ? actProf : "");
+    await commitAiProfiles(keep,profKeys,actProf);
     store.set("reviewAiProvider", rvProv.startsWith("profile:") && !keep.some((x) => "profile:" + x.slot === rvProv) ? "" : rvProv);
     store.set("reviewAiModel", rvModel.trim());
     store.set("reviewAiCount", String(rvCount));
@@ -1145,6 +1243,7 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                     </div>
                   </div>
                   <UpdateSettings onBackup={() => setSec("backup")} />
+                  <GeneralExtras/>
                   <div className="set-card">
                     <label className="look-check">
                       <input type="checkbox" checked={autoFull} onChange={(e) => setAutoFull(e.target.checked)} />
@@ -1183,6 +1282,8 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                       <span>{tt("API profilleri")}</span>
                       <div className="set-hint">{tt("Birden fazla anahtar ve model kaydet (ör. iş OpenAI'si, ev Gemini'si, yerel Ollama). Asistan ve yorum analizi ayrı ayrı bir profil kullanabilir.")}</div>
                     </div>
+                    <div className="set-profile-save"><select aria-label={extraText("Kaydedilmiş sağlayıcı","Saved provider")} value={actProf} onChange={e=>setActProf(e.target.value)}><option value="">{extraText("Varsayılan ayar","Default settings")}</option>{profs.map(p=><option key={p.slot} value={p.slot}>{p.name||tt("Profil {0}",p.slot)}</option>)}</select><button className="chip" disabled={profileBusy} onClick={()=>void saveProfilesNow()}>{extraText("Profilleri kaydet ve seçileni kullan","Save profiles and use selected")}</button></div>
+                    {profileMsg&&<div className="set-hint" role="status">{profileMsg}</div>}
                     {profs.map((x) => {
                       const sp = AI_PROVIDERS.find((a) => a.id === x.provider)!;
                       const edit = (c: Partial<AiProfile>) => setProfs((l) => l.map((y) => (y.slot === x.slot ? { ...y, ...c } : y)));
@@ -1259,6 +1360,7 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                       </>
                     )}
                   </div>
+                  <div className="set-card"><div className="field"><span>{extraText("Geçerli sağlayıcıyı profil olarak kaydet","Save current provider as a profile")}</span><div className="set-hint">{extraText("Yukarıdaki servis, Base URL, anahtar ve model birlikte saklanır. Sonradan API profillerinden düzenleyebilirsin.","Saves the service, Base URL, key and model above together. Edit later under API profiles.")}</div><div className="set-profile-save"><input aria-label={extraText("Sağlayıcı adı","Provider name")} placeholder={extraText("Örn. Ev sunucusu, İş API","e.g. Home server, Work API")} maxLength={60} value={profileName} onChange={e=>setProfileName(e.target.value)}/><button className="primary" disabled={profileBusy||!profileName.trim()} onClick={()=>void saveCurrentProfile()}>{extraText("Kaydet ve kullan","Save and use")}</button></div>{profileMsg&&<div className="set-hint" role="status">{profileMsg}</div>}</div></div>
                   <div className="set-card">
                     <div className="field">
                       <span>{tt("Luna Analiz")}</span>
@@ -1311,7 +1413,7 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                   <div className="set-card"><SourceSettings /></div>
                 </>
               )}
-              {sec === "backup" && <BackupSettings />}
+              {sec === "backup" && <><BackupSettings /><BulkRelink /></>}
               {sec === "downloads" && (
                 <div className="set-card">
                   <div className="field">

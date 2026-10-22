@@ -4,11 +4,16 @@
 use serde::Serialize;
 use serde_json::Value;
 use std::os::windows::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_link_is_never_read_as_an_option() {
+        assert_eq!(super::with_url(&["-f", "x"], "--exec=calc"), vec!["-f", "x", "--", "--exec=calc"]);
+        assert_eq!(super::with_url(&[], "-o"), vec!["--", "-o"]);
+    }
     #[test]
     fn clock_reads_lengths() {
         assert_eq!(super::clock("5:08"), Some(308.0));
@@ -38,6 +43,14 @@ pub struct Hit {
     pub thumb: Option<String>,
 }
 
+/// `url` goes after `--`: a link that begins with a dash must never be read as a yt-dlp option (`--exec=…`, `-o`…).
+fn with_url<'a>(opts: &[&'a str], url: &'a str) -> Vec<&'a str> {
+    let mut v = opts.to_vec();
+    v.push("--");
+    v.push(url);
+    v
+}
+
 fn run(ytdlp: &Path, args: &[&str]) -> Result<Value, String> {
     if !ytdlp.exists() {
         return Err(tr!("yt-dlp bulunamadı", "yt-dlp is missing"));
@@ -54,6 +67,42 @@ fn run(ytdlp: &Path, args: &[&str]) -> Result<Value, String> {
         return Err(if line.is_empty() { tr!("Bağlantı okunamadı", "Couldn't read the link") } else { line });
     }
     serde_json::from_slice(&out.stdout).map_err(|e| e.to_string())
+}
+
+/// A video's subtitles as plain text (Turkish, English, else the spoken language; made-up auto captions too),
+/// so the assistant can summarise a YouTube page from what is said rather than from the page around it.
+pub fn transcript(ytdlp: &Path, url: &str) -> Result<String, String> {
+    if !ytdlp.exists() {
+        return Err(tr!("yt-dlp bulunamadı", "yt-dlp is missing"));
+    }
+    let dir = std::env::temp_dir().join(format!("luna-subs-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)));
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let out_tpl = dir.join("t.%(ext)s").to_string_lossy().to_string();
+    let args = with_url(&["--no-warnings", "--socket-timeout", "10", "--ignore-errors", "--skip-download", "--no-playlist", "--write-subs", "--write-auto-subs",
+        "--sub-langs", "tr,en,.*-orig", "--sub-format", "vtt", "-o", &out_tpl], url);
+    let _ = Command::new(ytdlp).args(&args).creation_flags(CREATE_NO_WINDOW).output().map_err(|e| e.to_string());
+    let files: Vec<PathBuf> = std::fs::read_dir(&dir).map(|r| r.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "vtt")).collect()).unwrap_or_default();
+    let rank = |p: &PathBuf| { let n = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(); if n.ends_with(".tr.vtt") { 0 } else if n.ends_with(".en.vtt") { 1 } else { 2 } };
+    let best = files.iter().min_by_key(|p| rank(p)).cloned();
+    let raw = best.and_then(|p| std::fs::read_to_string(p).ok());
+    let _ = std::fs::remove_dir_all(&dir);
+    let raw = raw.ok_or_else(|| tr!("Bu videonun altyazısı yok", "This video has no subtitles"))?;
+    let mut text = String::new();
+    let mut last = String::new();
+    for line in raw.lines() {
+        let l = line.trim();
+        if l.is_empty() || l.starts_with("WEBVTT") || l.starts_with("Kind:") || l.starts_with("Language:") || l.starts_with("NOTE") || l.contains("-->") || l.chars().all(|c| c.is_ascii_digit()) { continue; }
+        // auto captions carry word timings in <...> tags and repeat each line while it scrolls
+        let mut clean = String::new(); let mut tag = false;
+        for c in l.chars() { match c { '<' => tag = true, '>' => tag = false, _ if !tag => clean.push(c), _ => {} } }
+        let clean = clean.replace("&amp;", "&").replace("&nbsp;", " ").replace("&gt;", ">").replace("&lt;", "<").trim().to_string();
+        if clean.is_empty() || clean == last { continue; }
+        text.push_str(&clean); text.push('\n');
+        last = clean;
+        if text.len() > 60_000 { break; }
+    }
+    if text.trim().is_empty() { return Err(tr!("Bu videonun altyazısı yok", "This video has no subtitles")); }
+    Ok(text)
 }
 
 fn hit(e: &Value) -> Option<Hit> {
@@ -174,7 +223,7 @@ pub struct Stream {
 /// The audio's own address for a link (or "ytsearch1:…"), found ahead of time so the song starts
 /// at once when its turn comes (mpv would otherwise start yt-dlp then, a few seconds).
 pub fn stream(ytdlp: &Path, url: &str) -> Result<Stream, String> {
-    let v = run(ytdlp, &["-f", "bestaudio/best", "--no-playlist", url])?;
+    let v = run(ytdlp, &with_url(&["-f", "bestaudio/best", "--no-playlist"], url))?;
     // a search gives a list of one
     let v = v["entries"].as_array().and_then(|l| l.first()).unwrap_or(&v);
     let url = v["url"].as_str().filter(|u| u.starts_with("http")).ok_or(tr!("Ses adresi bulunamadı", "No audio address found"))?;
@@ -189,7 +238,7 @@ pub fn search(ytdlp: &Path, query: &str, n: u32) -> Result<Vec<Hit>, String> {
 
 /// What a link is: one video, or the videos of a playlist.
 pub fn info(ytdlp: &Path, url: &str) -> Result<Vec<Hit>, String> {
-    let v = run(ytdlp, &["--flat-playlist", "--playlist-end", "200", url])?;
+    let v = run(ytdlp, &with_url(&["--flat-playlist", "--playlist-end", "200"], url))?;
     match v["entries"].as_array() {
         Some(l) => Ok(l.iter().filter_map(hit).collect()),
         None => Ok(hit(&v).into_iter().collect()),

@@ -59,15 +59,13 @@ The portable build keeps its data in the same folder and can be moved or deleted
 
 ## 5. Release with GitHub Actions
 
-`.github/workflows/release.yml` builds both packages on a Windows runner when a `v*` tag is pushed:
+`.github/workflows/release.yml` is started manually from **Actions → Release → Run workflow**. Pushing code or a tag does not publish a release.
 
-```powershell
-git tag v0.3.0
-git push origin v0.3.0
-```
+Enter the target version, e.g. `1.6.1`. `scripts/release-version.cjs` synchronizes the frontend/config/Cargo versions and lock files for this build. The workflow uses `scripts/build-release.ps1` to produce the installer, its `.sig`, `latest.json`, the portable ZIP and SHA-256 checksums. Configure the existing updater key as `TAURI_SIGNING_PRIVATE_KEY` and its password as `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` in repository secrets. Never generate a replacement key for existing installations. A missing key or updater artifact fails the release build.
 
-The workflow fetches mpv, builds the NSIS setup, makes the portable zip and attaches both to the GitHub release.
-It can also be started manually from the Actions tab with a version input.
+Artifacts are uploaded for download. The optional **publish** checkbox creates a **draft** release tagged `v<version>` at the checked-out commit; review it and publish manually. The public key and production application identifier remain unchanged. Release health fails if updater metadata/signatures are missing or the manifest version disagrees with the tag.
+
+For a local build, synchronize the version with `node scripts/release-version.cjs 1.6.1` and use `./scripts/build-release.ps1 -Tag v1.6.1 -RequireUpdater` for a signed updater build. Omit `-RequireUpdater` only for a local build that will not be offered as an update.
 
 ## How it fits together
 

@@ -282,12 +282,28 @@ pub fn rename(file: &str, new_name: &str) -> Result<String, String> {
     if to.exists() && to.to_string_lossy().to_lowercase() != p.to_string_lossy().to_lowercase() {
         return Err(tr!("Bu klasörde aynı adda bir dosya var", "A file with that name is already in this folder"));
     }
-    let subs = own_subs(p);
-    std::fs::rename(p, &to).map_err(|e| e.to_string())?;
-    for s in subs {
-        let n = s.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        let tail = &n[old_stem.len().min(n.len())..];
-        let _ = std::fs::rename(&s, dir.join(format!("{stem}{tail}")));
+    // Match the ORIGINAL UTF-8 prefix, rather than slicing it by the video's byte length.
+    // Unicode lowercasing can expand a character (İ), so those byte lengths need not agree.
+    let mut moves = vec![(p.to_path_buf(), to.clone())];
+    for sub in own_subs(p) {
+        let name = sub.file_name().and_then(|n| n.to_str()).ok_or("Invalid subtitle filename")?;
+        let boundary = name.char_indices().find_map(|(i, c)|
+            (c == '.' && name[..i].to_lowercase() == old_stem.to_lowercase()).then_some(i))
+            .ok_or("Subtitle prefix could not be matched")?;
+        let target = dir.join(format!("{stem}{}", &name[boundary..]));
+        if target.exists() && target.to_string_lossy().to_lowercase() != sub.to_string_lossy().to_lowercase() {
+            return Err(tr!("Altyazının hedef adı zaten var; hiçbir dosya değiştirilmedi", "A subtitle destination already exists; no files were changed"));
+        }
+        moves.push((sub, target));
+    }
+    for (index, (from, target)) in moves.iter().enumerate() {
+        if let Err(error) = std::fs::rename(from, target) {
+            let mut rollback_failed = Vec::new();
+            for (original, moved) in moves[..index].iter().rev() {
+                if std::fs::rename(moved, original).is_err() { rollback_failed.push(moved.display().to_string()); }
+            }
+            return Err(format!("{error}; rollback failures: {}", rollback_failed.join(", ")));
+        }
     }
     Ok(to.to_string_lossy().to_string())
 }
@@ -322,6 +338,22 @@ mod tests {
 #[cfg(test)]
 mod probe_tests {
     use super::{rename, subs_beside};
+
+    #[test]
+    fn rename_handles_expanding_unicode_prefixes_and_collisions() {
+        let d = std::env::temp_dir().join(format!("luna-unicode-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("İ.mkv"), b"video").unwrap();
+        std::fs::write(d.join("i\u{307}.tr.srt"), b"subtitle").unwrap();
+        std::fs::write(d.join("New.tr.srt"), b"existing").unwrap();
+        assert!(rename(d.join("İ.mkv").to_str().unwrap(), "New").is_err());
+        assert!(d.join("İ.mkv").exists());
+        assert_eq!(std::fs::read(d.join("New.tr.srt")).unwrap(), b"existing");
+        std::fs::remove_file(d.join("New.tr.srt")).unwrap();
+        rename(d.join("İ.mkv").to_str().unwrap(), "New").unwrap();
+        assert_eq!(std::fs::read(d.join("New.tr.srt")).unwrap(), b"subtitle");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
 
     #[test]
     fn rename_takes_subtitles_along() {

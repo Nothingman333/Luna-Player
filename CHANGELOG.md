@@ -1,3 +1,19 @@
+## Unreleased — assistant and browser review (bug fixes and small improvements, not yet released)
+- Assistant (Web part): a question or a refusal about the page ("do not translate this page", "is the translation right?", "what is the original price?") no longer translates the page or undoes a translation; only plain commands do, with the right language direction ("from German into English") and the interface language as the default.
+- New exact commands `/çevir [language]` and `/orijinal` (listed first in the Web part and in `/help`); slash commands also work with Caps Lock ("/SETTINGS").
+- Page reading: a list of articles, an article before the main content, a page wrapped in one form, a huge menu or inline tags no longer give wrong, empty or fragmented text; headings, list items and table rows are marked. Form values stay unread.
+- The assistant also sees what the user selected on the page (never from a field), the page language and whether the page was still loading; page data passes a whitelist, and the end of the page block carries a one-time token.
+- Native page-read errors are explained in the interface language; the translate tool's default target follows the interface language.
+
+## Unreleased — review pass (bug fixes and small improvements, not yet released)
+- Bulk relink: a root folder containing Turkish "İ" no longer produces a broken new path; the preview also finds records whose path lives only in a storage key (book positions, playback preferences); summary line plus "Select found" / "Clear selection".
+- Books: saving details without a cover (or picking a candidate with none) keeps the book's own cover; the cover field is only an override with a "use the book's own cover" button; "Select books on this shelf" in the shelf editor; quotation count; the quotation export no longer fails on a damaged tag record.
+- Web translation: status and error texts follow the interface language; a page that rejects the finished translation no longer offers a retry that cannot succeed.
+- Letterboxd changes: a title without a year matches the same title with a year, like the list merge does.
+- Notebook: entries are validated before they are written; search box in the scene / word notebook.
+- Settings: the panel no longer slides sideways in narrow windows; relink rows keep their checkbox beside the path.
+- Every interface text has English again (`node scripts/i18n-check.cjs` passes).
+
 ## 1.6.0CC — 2026-10-22 (beta)
 - Books and music get the films' full taste profile in a "My taste" tab (taste map, weights, genres/authors/artists, rating spread or listening hours, most played, gaps).
 - Songs: thumbs-up / thumbs-down on every row and "out of 10?" after a vote; the points feed the music taste.

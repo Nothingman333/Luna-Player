@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { tt } from "./i18n";
 import { store } from "./library";
+import { matchKey } from "./textMatch";
 
 /** .m3u / .m3u8: an HLS stream (#EXT-X-…) plays as it is; an IPTV-style list (#EXTINF lines, each
  *  followed by an address) opens as a channel list to pick from, like VLC's playlist. */
@@ -10,7 +11,37 @@ export type Channel = { name: string; url: string; group: string; logo?: string 
 export type M3uList = { name: string; src: string; channels: Channel[] };
 export const isM3u = (p: string) => /\.m3u8?([?#]|$)/i.test(p);
 
-export function parseM3u(text: string, base?: string): Channel[] | "stream" {
+/** The title after the first comma that is not inside quotes: `#EXTINF:-1 group-title="A, B",Dune, Part Two`
+ *  gives "Dune, Part Two". null when the line has no title part. */
+export function extinfTitle(line: string): string | null {
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') quoted = !quoted;
+    else if (c === "," && !quoted) return line.slice(i + 1).trim();
+  }
+  return null;
+}
+/** A list entry that is a path relative to the list's folder (no scheme, not rooted: "a.mkv", "..\\Movies\\a.mkv"). */
+export const isRelativeLocal = (u: string) => !/^[a-z][a-z0-9+.-]*:/i.test(u) && !/^[\\/]/.test(u);
+/** `dir` plus a relative path: "." and ".." are resolved and the drive is never popped. */
+export function joinLocal(dir: string, rel: string): string {
+  const sep = dir.includes("\\") || !dir.includes("/") ? "\\" : "/";
+  const parts = dir.split(/[\\/]/).filter((p, i) => p || i === 0);
+  for (const seg of rel.split(/[\\/]/)) {
+    if (!seg || seg === ".") continue;
+    if (seg === "..") { if (parts.length > 1) parts.pop(); } else parts.push(seg);
+  }
+  return parts.join(sep);
+}
+/** The channels shown for a group and a search text (case, accents and Turkish I/ı do not matter). */
+export function filterChannels(channels: Channel[], group: string, query: string): Channel[] {
+  const needle = matchKey(query.trim());
+  return channels.filter((c) => (!group || c.group === group) && (!needle || matchKey(c.name).includes(needle)));
+}
+
+export function parseM3u(text: string, base?: string, dir?: string): Channel[] | "stream" {
+  text = text.replace(/^\uFEFF/, "");
   if (/#EXT-X-(TARGETDURATION|STREAM-INF|MEDIA-SEQUENCE|VERSION|PLAYLIST-TYPE|ENDLIST)/i.test(text)) return "stream";
   const out: Channel[] = [];
   let info: { name: string; group: string; logo?: string } | null = null;
@@ -20,12 +51,15 @@ export function parseM3u(text: string, base?: string): Channel[] | "stream" {
     if (!line) continue;
     if (/^#EXTINF/i.test(line)) {
       const attr = (k: string) => line.match(new RegExp(k + '="([^"]*)"', "i"))?.[1];
-      const name = line.slice(line.lastIndexOf(",") + 1).trim() || attr("tvg-name") || "";
-      info = { name, group: attr("group-title") ?? group, logo: attr("tvg-logo") || undefined };
+      // the title is what follows the first comma outside quotes (it may hold commas itself); a line without
+      // one has no title, so tvg-name is used rather than the whole line
+      const name = extinfTitle(line) || attr("tvg-name") || "";
+      info = { name, group: attr("group-title") || group, logo: attr("tvg-logo") || undefined };
     } else if (/^#EXTGRP:/i.test(line)) group = line.slice(8).trim();
     else if (!line.startsWith("#")) {
       let url = line;
       if (base && !/^[a-z][a-z0-9+.-]*:/i.test(url)) { try { url = new URL(url, base).href; } catch {} }
+      else if (dir && isRelativeLocal(url)) url = joinLocal(dir, url);
       out.push({ name: info?.name || url.split(/[\\/]/).pop() || url, url, group: info?.group || group, logo: info?.logo });
       info = null;
     }
@@ -37,7 +71,8 @@ export function parseM3u(text: string, base?: string): Channel[] | "stream" {
 export async function readM3u(src: string): Promise<M3uList | "stream"> {
   const web = /^https?:\/\//i.test(src);
   const text = web ? await invoke<string>("http_text", { url: src }) : await invoke<string>("text_file_read", { path: src });
-  const got = parseM3u(text, web ? src : undefined);
+  // a list on disk resolves its relative entries against its own folder (mpv would use the working folder)
+  const got = parseM3u(text, web ? src : undefined, !web && /[\\/]/.test(src) ? src.replace(/[\\/][^\\/]*$/, "") : undefined);
   if (got === "stream") return "stream";
   if (!got.length) throw new Error(tt("Bu listede oynatılacak bir adres yok"));
   const name = decodeURIComponent(src.split(/[\\/]/).pop() ?? src).replace(/[?#].*$/, "").replace(/\.m3u8?$/i, "") || tt("Liste");
@@ -51,8 +86,7 @@ export function M3uDialog({ list, onPlay, onClose, onOpen }: { list: M3uList; on
   const [q, setQ] = useState("");
   const [group, setGroup] = useState<string>("");
   const groups = useMemo(() => [...new Set(list.channels.map((c) => c.group).filter(Boolean))], [list]);
-  const needle = q.trim().toLocaleLowerCase("tr");
-  const shown = list.channels.filter((c) => (!group || c.group === group) && (!needle || c.name.toLocaleLowerCase("tr").includes(needle)));
+  const shown = filterChannels(list.channels, group, q);
   const recent = store.json<{ name: string; src: string }[]>("m3uRecent", []).filter((x) => x.src !== list.src);
   return createPortal(
     <div className="modal-bg" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -70,7 +104,7 @@ export function M3uDialog({ list, onPlay, onClose, onOpen }: { list: M3uList; on
         <div className="m3u-list">
           {shown.slice(0, 600).map((c, i) => (
             <button key={i + c.url} className="m3u-ch" onClick={() => onPlay(c)} title={c.url}>
-              {c.logo ? <img src={c.logo} alt="" loading="lazy" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} /> : <span className="m3u-ph">{c.name[0]?.toUpperCase()}</span>}
+              {c.logo ? <img src={c.logo} alt="" loading="lazy" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} /> : <span className="m3u-ph">{Array.from(c.name)[0]?.toUpperCase()}</span>}
               <span className="m3u-ch-t"><b className="ellipsis">{c.name}</b>{c.group && <span className="muted small ellipsis">{c.group}</span>}</span>
               <span className="m3u-play" aria-hidden>▶</span>
             </button>

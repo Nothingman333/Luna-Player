@@ -1,4 +1,5 @@
 import { store } from "./library";
+import { matchKey } from "./textMatch";
 import { reviewAi, reviewAiJson } from "./ai";
 import { ASPECTS } from "./filmReviewModel";
 import type { Aspect } from "./filmReviewModel";
@@ -20,14 +21,14 @@ export const pendingCount = (kind: Kind) => pending(kind).length;
 function pending(kind: Kind): Work[] {
   const have = loadAspectScores(kind);
   // scored ones, and ones the AI was asked about once but didn't know (not asked again)
-  const known = new Set([...Object.values(have).map((e) => e.title), ...store.json<string[]>("tasteTried:" + kind, [])].map((t) => t.toLocaleLowerCase("tr")));
+  const known = new Set([...Object.values(have).map((e) => e.title), ...store.json<string[]>("tasteTried:" + kind, [])].map((t) => matchKey(t)));
   const out: Work[] = [];
   if (kind === "music") {
     const l = [...store.json<{ q: { title: string; artist?: string; podcast?: boolean } }[]>("musicLikes", []), ...store.json<{ q: { title: string; artist?: string } }[]>("musicDislikes", [])];
-    for (const x of l) if (!(x.q as any).podcast && !known.has(musicTitle(x.q).toLocaleLowerCase("tr"))) out.push({ title: musicTitle(x.q), by: x.q.artist });
+    for (const x of l) if (!(x.q as any).podcast && !known.has(matchKey(musicTitle(x.q)))) out.push({ title: musicTitle(x.q), by: x.q.artist });
   } else {
     for (const e of Object.values(store.json<Record<string, { title: string; author?: string; vote?: string; rating?: number }>>("bookDiary", {})))
-      if ((e.vote || e.rating) && !known.has(e.title.toLocaleLowerCase("tr"))) out.push({ title: e.title, by: e.author });
+      if ((e.vote || e.rating) && !known.has(matchKey(e.title))) out.push({ title: e.title, by: e.author });
   }
   return out;
 }

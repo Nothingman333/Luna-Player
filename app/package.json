@@ -1,7 +1,7 @@
 {
   "name": "app",
   "private": true,
-  "version": "1.6.0",
+  "version": "1.6.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,27 @@
     "test:regression": "node scripts/package-regression.cjs",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test:next": "node scripts/next-regression.cjs"
+    "test:next": "node scripts/next-regression.cjs",
+    "preview:web": "vite --host 127.0.0.1 --port 1422 --open /browser-preview.html",
+    "test:browser": "node scripts/browser-regression.cjs",
+    "test:translation": "node scripts/translation-regression.cjs",
+    "test:extras": "node scripts/extras-regression.cjs",
+    "test:books-profiles": "node scripts/books-profiles-regression.cjs",
+    "test:film-browser": "node scripts/film-browser-regression.cjs",
+    "test:book-music": "node scripts/book-music-regression.cjs",
+    "test:delivery": "node scripts/delivery-regression.cjs",
+    "test:assistant-presentation": "node scripts/assistant-presentation-regression.cjs",
+    "test:workspace": "node scripts/workspace-regression.cjs",
+    "test:deep-refinement": "node scripts/deep-refinement-regression.cjs",
+    "test:comfort": "node scripts/comfort-regression.cjs",
+    "test:reading-experience": "node scripts/reading-experience-regression.cjs",
+    "test:music-workspace": "node scripts/music-workspace-regression.cjs",
+    "test:book-library-view": "node scripts/book-library-view-regression.cjs",
+    "test:quality": "node scripts/quality-regression.cjs",
+    "test:assistant-safety": "node scripts/assistant-safety-regression.cjs",
+    "test:claude-integration": "node scripts/claude-integration-regression.cjs",
+    "test:browser-native": "node scripts/browser-native-regression.cjs",
+    "test:web-notebook": "node scripts/web-notebook-regression.cjs"
   },
   "dependencies": {
     "@fontsource/ibm-plex-sans": "^5.3.0",

@@ -1,6 +1,11 @@
 // Storage and identity boundaries shared by imports, collections and the library.
 export type StringStorage = Pick<Storage, "length" | "key" | "getItem" | "setItem" | "clear">;
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+/** Durable snapshots are flat string maps, never arrays/scalars or nested values. */
+export function durableState(value: unknown): Record<string,string> {
+  if (!record(value) || Object.values(value).some(v=>typeof v!=="string")) throw Error("Invalid Luna state");
+  return value as Record<string,string>;
+}
 let restoreDepth = 0;
 export const storageRestoreInProgress = () => restoreDepth > 0;
 export function storageSnapshot(storage: StringStorage, excluded: readonly string[] = []): Record<string, string> {
@@ -20,8 +25,8 @@ export function backupData(value: unknown, excluded: readonly string[]): Record<
     data[key] = item;
   }
   // Reject wrong-shaped boot data before touching any existing records.
-  const arrays = ["folders", "pinned", "recent", "collections", "playlists", "recs", "seenList", "laterList", "musicFolders", "bookFolders"];
-  const objects = ["meta", "diary", "bookDiary", "readerSet", "ttsSet"];
+  const arrays = ["folders", "pinned", "recent", "collections", "playlists", "recs", "seenList", "laterList", "musicFolders", "bookFolders", "bookShelfNames", "bookWantToRead"];
+  const objects = ["meta", "diary", "bookDiary", "readerSet", "ttsSet", "bookDetailsByPath", "bookShelves"];
   for (const key of [...arrays, ...objects]) {
     if (!(key in data)) continue;
     const item: unknown = JSON.parse(data[key]);

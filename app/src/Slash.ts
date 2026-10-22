@@ -1,9 +1,11 @@
 import { tt } from "./i18n";
+import { matchKey } from "./textMatch";
 
 /** The assistant's "/" commands. They are handled by Luna itself, before any model sees them, so
  *  they work the same with Gemini, OpenAI, Claude or a local model. */
-export type SlashId = "help" | "new" | "model" | "big" | "small" | "settings" | "history" | "collections" | "next" | "prev" | "pause" | "resume";
-export const SLASH: { id: SlashId; cmd: string; alias: string[]; about: () => string }[] = [
+export type SlashId = "help" | "new" | "model" | "big" | "small" | "settings" | "history" | "collections" | "next" | "prev" | "pause" | "resume" | "translate" | "original";
+/** `web`: only listed (and explained) while the Web part is open. */
+export const SLASH: { id: SlashId; cmd: string; alias: string[]; about: () => string; web?: true }[] = [
   { id: "help", cmd: "/help", alias: ["/yardım", "/yardim", "/komutlar", "/?"], about: () => tt("Bütün komutları ve asistanın yapabildiklerini gösterir") },
   { id: "new", cmd: "/yeni", alias: ["/new", "/temizle", "/clear"], about: () => tt("Yeni bir sohbet başlatır (eskisi geçmişte kalır)") },
   { id: "model", cmd: "/model", alias: ["/ai"], about: () => tt("Şu an hangi yapay zekânın cevap verdiğini söyler") },
@@ -16,24 +18,29 @@ export const SLASH: { id: SlashId; cmd: string; alias: string[]; about: () => st
   { id: "resume", cmd: "/devam", alias: ["/resume", "/play"], about: () => tt("Duraklatılanı sürdürür") },
   { id: "next", cmd: "/sonraki", alias: ["/next"], about: () => tt("Sonraki şarkıya geçer") },
   { id: "prev", cmd: "/önceki", alias: ["/onceki", "/prev"], about: () => tt("Önceki şarkıya döner") },
+  { id: "translate", cmd: "/çevir", alias: ["/cevir", "/translate"], web: true, about: () => tt("Açık web sayfasını çevirir: /çevir almanca (dil yazmazsan arayüz dili)") },
+  { id: "original", cmd: "/orijinal", alias: ["/original", "/restore"], web: true, about: () => tt("Çevrilmiş sayfayı özgün diline döndürür") },
 ];
+// Turkish lower-casing turns a capital I into a dotless ı ("/SETTINGS" → "/settıngs"): compare folded.
 export function findSlash(text: string) {
-  const w = text.trim().split(/\s+/)[0]?.toLocaleLowerCase("tr");
-  if (!w?.startsWith("/")) return null;
-  return SLASH.find((c) => c.cmd === w || c.alias.includes(w)) ?? null;
+  // (matchKey: "/HISTORY" and "/Geçmiş" work, Turkish ı/i and accents do not matter)
+  const w = matchKey(text.trim().split(/\s+/)[0] ?? "");
+  if (!w.startsWith("/")) return null;
+  return SLASH.find((c) => matchKey(c.cmd) === w || c.alias.some((a) => matchKey(a) === w)) ?? null;
 }
 /** Commands that start with what is typed (for the list over the input). */
-export const slashMatches = (typed: string) => {
-  const w = typed.trim().toLocaleLowerCase("tr");
-  return SLASH.filter((c) => c.cmd.startsWith(w) || c.alias.some((a) => a.startsWith(w)));
+export const slashMatches = (typed: string, web = false) => {
+  const w = matchKey(typed.trim());
+  // In the Web part its own commands come first: they are what is wanted there.
+  return SLASH.filter((c) => (!c.web || web) && (matchKey(c.cmd).startsWith(w) || c.alias.some((a) => matchKey(a).startsWith(w)))).sort((a, b) => Number(!!b.web) - Number(!!a.web));
 };
 
 /** "/help": the commands, the instant phrases and what can be asked, by part of Luna. */
-export function helpText(aiName: string): string {
+export function helpText(aiName: string, web = false): string {
   const sec = (h: string, l: string[]) => `**${h}**\n${l.map((x) => "- " + x).join("\n")}`;
   return [
     tt("Şu an cevap veren: {0}. Aşağıdakilerin hepsi her yapay zekâyla çalışır; sadece Google araması Gemini'ye özel.", aiName),
-    sec(tt("Komutlar (/ ile başlar)"), SLASH.map((c) => `${c.cmd} — ${c.about()}`)),
+    sec(tt("Komutlar (/ ile başlar)"), SLASH.filter((c) => !c.web || web).map((c) => `${c.cmd} — ${c.about()}`)),
     sec(tt("Anında çalışanlar (modele sorulmadan)"), [
       tt("durdur · devam · kapat · sonraki · önceki"),
       tt("sesi aç · sesi kıs · ses 40 · sessize al · sesi geri aç"),

@@ -5,6 +5,8 @@ use serde::Serialize;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+const MAX_FONT_BYTES:u64=32*1024*1024;
+const MAX_FONT_TOTAL:u64=128*1024*1024;
 const FONT_EXT: &[&str] = &["ttf", "otf", "ttc"];
 
 fn is_font(name: &str) -> bool {
@@ -28,6 +30,8 @@ pub fn prepare(dir: &Path, bundled: &Path) {
 pub fn add(dir: &Path, paths: Vec<String>) -> Result<u32, String> {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let mut n = 0;
+    let mut remaining=MAX_FONT_TOTAL;
+    if paths.len()>64{return Err("Too many font files (maximum 64)".into());}
     // names already in the folder or written by this call: "FamilyA/Regular.ttf" and
     // "FamilyB/Regular.ttf" both stay, also when they're added at different times
     // (lowercase: Windows names ignore case)
@@ -49,19 +53,32 @@ pub fn add(dir: &Path, paths: Vec<String>) -> Result<u32, String> {
         if p.to_lowercase().ends_with(".zip") {
             let f = std::fs::File::open(&path).map_err(|e| e.to_string())?;
             let mut zip = zip::ZipArchive::new(f).map_err(|e| tr!("Zip açılamadı: {}", "Couldn't open the zip: {}", e))?;
+            if zip.len()>1000{return Err("Font archive has too many entries (maximum 1000)".into());}
+            let mut expanded=0u64;
+            for i in 0..zip.len(){let entry=zip.by_index(i).map_err(|e|e.to_string())?;if entry.is_file()&&is_font(entry.name()){
+                if entry.size()>MAX_FONT_BYTES{return Err("Font exceeds 32 MiB".into());}
+                expanded=expanded.checked_add(entry.size()).filter(|n|*n<=remaining).ok_or("Font archive exceeds the total byte budget")?;
+            }}
             for i in 0..zip.len() {
                 let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
                 let name = entry.name().rsplit(['/', '\\']).next().unwrap_or("").to_string();
                 if entry.is_file() && is_font(&name) {
                     let mut buf = Vec::new();
-                    entry.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+                    (&mut entry).take(MAX_FONT_BYTES.min(remaining)+1).read_to_end(&mut buf).map_err(|e| e.to_string())?;
+                    if buf.len() as u64>MAX_FONT_BYTES.min(remaining){return Err("Font exceeds its byte budget".into());}
+                    remaining-=buf.len() as u64;
                     std::fs::write(dir.join(free_name(&name)), buf).map_err(|e| e.to_string())?;
                     n += 1;
                 }
             }
         } else if is_font(&p) {
             let name = path.file_name().ok_or(tr!("Geçersiz dosya", "Invalid file"))?.to_string_lossy().into_owned();
-            std::fs::copy(&path, dir.join(free_name(&name))).map_err(|e| e.to_string())?;
+            // Bound the actual read as well as metadata: a changing local file cannot bypass the cap.
+            let mut buf=Vec::new();
+            std::fs::File::open(&path).map_err(|e|e.to_string())?.take(MAX_FONT_BYTES.min(remaining)+1).read_to_end(&mut buf).map_err(|e|e.to_string())?;
+            if buf.len() as u64>MAX_FONT_BYTES.min(remaining){return Err("Font exceeds its byte budget".into());}
+            remaining-=buf.len() as u64;
+            std::fs::write(dir.join(free_name(&name)),buf).map_err(|e|e.to_string())?;
             n += 1;
         }
     }
@@ -89,7 +106,9 @@ pub fn list(dir: &Path) -> Vec<FontInfo> {
         if !is_font(&file) {
             continue;
         }
-        let Ok(data) = std::fs::read(e.path()) else { continue };
+        let Ok(font_file)=std::fs::File::open(e.path())else{continue};
+        if font_file.metadata().map(|m|m.len()>MAX_FONT_BYTES).unwrap_or(true){continue;}
+        let mut data=Vec::new();if font_file.take(MAX_FONT_BYTES+1).read_to_end(&mut data).is_err()||data.len() as u64>MAX_FONT_BYTES{continue;}
         // a .ttc collection holds several fonts: each one is listed
         for index in 0..ttf_parser::fonts_in_collection(&data).unwrap_or(1) {
             let Ok(face) = ttf_parser::Face::parse(&data, index) else { continue };

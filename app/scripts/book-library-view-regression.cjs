@@ -1,0 +1,24 @@
+const fs=require('node:fs'),path=require('node:path'),ts=require('typescript'),assert=require('node:assert/strict');
+const root=path.resolve(__dirname,'..'),cache={};let map=new Map(),flushFail=false,requests=[],reply=async()=>({});
+const storage={getItem:k=>map.get(k)??null,setItem:(k,v)=>map.set(k,String(v)),removeItem:k=>map.delete(k)};
+const store={get:storage.getItem,set:(k,v)=>{storage.setItem(k,v);return true},remove:storage.removeItem,json:(k,f)=>{try{return JSON.parse(map.get(k))??f}catch{return f}}};
+global.localStorage=storage;global.window={dispatchEvent:()=>true};
+function load(name){if(cache[name])return cache[name];const m={exports:{}};const code=ts.transpileModule(fs.readFileSync(path.join(root,'src',name+'.ts'),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;new Function('require','exports','module',code)(dep=>dep==='./library'?{store,flushSecrets:async()=>{if(flushFail){flushFail=false;throw Error('vault unavailable')}}}:dep==='@tauri-apps/api/core'?{invoke:async(cmd,args)=>{requests.push(args.url);return reply(args.url)}}:load(dep.replace('./','')),m.exports,m);return cache[name]=m.exports;}
+const b=load('bookLibraryModel'),d=load('BookData'),tests=[];const test=(n,f)=>tests.push([n,f]);
+
+const books=[{path:'a',title:'Ten',author:'A',kind:'pdf',cover:null},{path:'b',title:'Two',author:'B',kind:'epub',cover:'https://example.org/b.jpg'},{path:'c',title:'Zero',author:'A',kind:'cbz',cover:null}];
+const env={inLibrary:new Set(['a','b','c']),later:['c','a','hidden','b'],shelves:{a:['X']},progress:x=>({a:.2,b:.8,c:0})[x.path],finished:()=>false,vote:()=>undefined};
+const list=patch=>b.visibleBooks(books,{shelf:'all',topic:'',query:'',sort:'recent',recent:[],env,...patch}).map(x=>x.path);
+test('Format and missing-cover filters intersect with shelves and search',()=>{assert.deepEqual(list({format:'pdf',covers:'without',topic:'X',query:'ten'}),['a']);assert.deepEqual(list({format:'epub',covers:'without'}),[]);});
+test('Progress sort prioritizes books closest to completion',()=>assert.deepEqual(list({sort:'progress'}),['b','a','c']));
+test('Reading plan order uses saved priorities rather than recent activity',()=>assert.deepEqual(list({shelf:'later',sort:'plan',recent:['b','a']}),['c','a','b']));
+test('Reordering preserves hidden and unavailable plan entries',()=>{const before=JSON.stringify(env.later);assert.deepEqual(b.reorderReadingPlan(env.later,'a',1),['c','hidden','a','b']);assert.equal(JSON.stringify(env.later),before);});
+test('Reading plan boundaries and absent paths are safe',()=>{assert.deepEqual(b.reorderReadingPlan(['a','b'],'a',-1),['a','b']);assert.deepEqual(b.reorderReadingPlan(['a','b'],'missing',1),['a','b']);});
+test('Invalid persisted view values fall back to supported options',()=>{assert.deepEqual(b.libraryView({sort:'constructor',format:'exe',covers:'bad',topic:42}),{sort:'recent',format:'all',covers:'all',topic:''});assert.equal(b.libraryView({sort:'plan',format:'pdf'}).sort,'plan');});
+test('Corrupt book position does not become a percentage or reader location',()=>{for(const raw of [[],null,{pct:'0.5'},{pct:NaN},{pct:2},{pct:-.1}])assert.equal(b.cleanBookPosition(raw),null);assert.deepEqual(b.cleanBookPosition({pct:.5,loc:{},at:Infinity}),{pct:.5,at:0});});
+test('Valid EPUB location and PDF page positions survive validation',()=>{assert.equal(b.cleanBookPosition({pct:.2,loc:'epubcfi(/6)',at:3}).loc,'epubcfi(/6)');assert.equal(b.cleanBookPosition({pct:0,loc:1}).loc,1);});
+test('Topic counts ignore inherited property names without creating bogus counts',()=>{const result=b.topicCounts(['a','a'],{a:['constructor','X']},['X']);assert.deepEqual(Object.keys(result),['X']);assert.equal(result.X,1);assert.equal(b.topicCounts(['a'],{a:['constructor']},['constructor']).constructor,1);});
+test('Removing a nonexistent shelf does not create that shelf',()=>{map=new Map();d.organizeBooks([{path:'a',shelves:['Ghost']}],true);assert.deepEqual(d.shelfNames(),[]);});
+test('Actual plan writer rejects damaged storage and retains all entries on move',()=>{map=new Map([['bookWantToRead','["a","hidden","b"]']]);d.movePlannedBook('a',1);assert.deepEqual(d.laterBooks(),['hidden','a','b']);map.set('bookWantToRead','[42]');const before=[...map];assert.throws(()=>d.movePlannedBook('a',1));assert.deepEqual([...map],before);});
+test('Prototype-like paths cannot alter the shelf map prototype',()=>{map=new Map();d.organizeBooks([{path:'__proto__',shelves:['X']}]);assert.deepEqual(d.shelfMap()['__proto__'],['X']);});
+let failed=0;for(const[n,f]of tests){try{f();console.log('PASS',n)}catch(e){failed++;console.error('FAIL',n,e.stack)}}console.log(JSON.stringify({total:tests.length,passed:tests.length-failed,failed}));process.exitCode=failed?1:0;

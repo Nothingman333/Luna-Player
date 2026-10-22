@@ -15,10 +15,10 @@ function music(){
  const names=['prefetch','skipFailed','loadCurrent','stopMusic','playQueue'];
  if(!baseline)names.push('pauseMusic');
  const reg=node('src/Music.tsx',n=>ts.isCallExpression(n)&&n.expression.getText()==='listen'&&n.arguments[0]?.getText()==='"mpv"').getText();
- const prelude='let directFor=null,failedInRow=0,loadGeneration=0,wantsPlayback=true;const musicPaths=new Set();';
+ const prelude='let suspended=null;let directFor=null,failedInRow=0,loadGeneration=0,wantsPlayback=true;const musicPaths=new Set();';
  const api=compile('(()=>{'+prelude+names.map(n=>fn('src/Music.tsx',n)).join('\n')+';'+reg+';return {loadCurrent,stopMusic,playQueue,pause:'+(baseline?'p=>{P.paused=p;setProp("pause",p);}':'pauseMusic')+',directFor:()=>directFor};})()',{
   P,direct,resolving,findFailed,changed:noop,setProp:(...a)=>properties.push(a),mpv:(...a)=>commands.push(a),store:{get:()=>null,set:()=>true,json:(_,f)=>f},Date,URL,TextEncoder,
-  addHistory:noop,countPlay:noop,nextUp:noop,listen:(_,f)=>listener=f,setTimeout:(f,ms)=>{if(ms!==4000)timers.push(f);},invoke:()=>new Promise(r=>finish=r)
+  audioResume:load("src/musicWorkspaceModel.ts",{},n=>({})).audioResume,addHistory:noop,countPlay:noop,nextUp:noop,listen:(_,f)=>listener=f,setTimeout:(f,ms)=>{if(ms!==4000)timers.push(f);},invoke:()=>new Promise(r=>finish=r)
  });
  return{P,api,direct,commands,properties,timers,event:p=>listener({payload:p}),finish:()=>finish({url:'https://audio.test/?expire=9999999999'})};
 }
@@ -38,7 +38,7 @@ test('N10','non-finite assistant volume arguments never reach mpv',()=>{const ca
 function annotations(){const data=new Map(),bkKey=b=>(b.title+'|'+b.author).toLocaleLowerCase(),store={json:(k,f)=>data.has(k)?data.get(k):f};const annKey=compile(variable('src/Books.tsx','annKey'),{bkKey});const cleanAnn=baseline?undefined:compile(fn('src/Books.tsx','cleanAnn'));const loadAnn=compile(variable('src/Books.tsx','loadAnn'),{store,annKey,cleanAnn});return{data,annKey,loadAnn};}
 test('N11','malformed annotation arrays do not crash the reader',()=>{const e=annotations(),b={path:'a.epub',title:'Title',author:'Author'};e.data.set(e.annKey(b),{hl:null,marks:{},notes:'bad'});const a=e.loadAnn(b);assert(Array.isArray(a.hl)&&Array.isArray(a.marks)&&Array.isArray(a.notes));});
 test('N12','different editions no longer share annotations just because titles match',()=>{const e=annotations(),a={path:'first.epub',title:'A',author:'B'},b={...a,path:'second.epub'};assert.notEqual(e.annKey(a),e.annKey(b));});
-test('N13','annotation storage failure does not claim the edit was saved',()=>{let state={hl:[],marks:[],notes:[]},error='';const save=compile(variable('src/Books.tsx','setAnn','Reader'),{ann:state,b:{path:'a'},store:{set:()=>false},annKey:()=> 'x',setAnnState:n=>{state=typeof n==='function'?n(state):n;},setErr:v=>error=v,setAnnError:v=>error=v,tt});save(a=>({...a,notes:[{text:'important'}]}));assert.equal(state.notes.length,0);assert(error);});
+test('N13','annotation storage failure does not claim the edit was saved',()=>{let state={hl:[],marks:[],notes:[]},error='';const save=compile(variable('src/Books.tsx','setAnn','Reader'),{ann:state,b:{path:'a'},store:{get:()=>null,set:()=>false},annKey:()=> 'x',setAnnState:n=>{state=typeof n==='function'?n(state):n;},setErr:v=>error=v,setAnnError:v=>error=v,tt});save(a=>({...a,notes:[{text:'important'}]}));assert.equal(state.notes.length,0);assert(error);});
 test('N14','EPUB uses the patched xmldom 0.8.x parser without a major EPUB upgrade',()=>{const p=JSON.parse(read('package-lock.json'));const dep=p.packages['node_modules/@xmldom/xmldom'];assert.equal(dep.version,'0.8.15');assert.equal(p.packages['node_modules/epubjs'].version,'0.3.93');});
 function edgeFailure(){let audio,finished=0,failed=0;const done=()=>finished++,E={audio:null,gen:1,done},T={playing:true,rate:1,volume:100,muted:false};const play=compile(fn('src/ReadAloud.ts','playEdge'),{E,T,lastWord:0,Audio:class{constructor(){audio=this;}play(){return Promise.resolve();}},tick:noop,sync:noop,mark:noop,audioFailure:()=>failed++});play({a:0,p:{text:'test'}},{url:'blob:test',words:[]},done);audio.onerror();return{finished,failed};}
 test('N15','an Edge audio decode error cannot silently skip unread text',()=>{assert.deepEqual(edgeFailure(),{finished:0,failed:1});});

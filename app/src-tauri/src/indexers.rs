@@ -88,10 +88,15 @@ pub fn add(dir: &Path, paths: Vec<String>) -> Result<u32, String> {
 }
 
 pub fn remove(dir: &Path, file: &str) -> Result<(), String> {
-    if file.contains(['/', '\\']) {
+    // a bare file name only: no folder, no drive prefix (`C:x.json` would leave `dir` on Windows), no "." or ".."
+    if file.is_empty() || file == "." || file == ".." || file.contains(['/', '\\', ':']) {
         return Err(tr!("Geçersiz dosya adı", "Invalid file name"));
     }
-    std::fs::remove_file(dir.join(file)).map_err(|e| e.to_string())
+    let path = dir.join(file);
+    if path.parent() != Some(dir) {
+        return Err(tr!("Geçersiz dosya adı", "Invalid file name"));
+    }
+    std::fs::remove_file(path).map_err(|e| e.to_string())
 }
 
 // ---------- Go-template subset ----------

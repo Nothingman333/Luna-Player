@@ -17,6 +17,10 @@ pub struct Book {
     pub title: String,
     pub author: String,
     pub lang: Option<String>,
+    #[serde(default)]
+    pub isbn: Option<String>,
+    #[serde(default)]
+    metadata_version: u8,
     pub cover: Option<String>,
     #[serde(default)]
     size: u64,
@@ -130,18 +134,47 @@ fn text_of(xml: &str, name: &str) -> Option<String> {
     (!t.is_empty()).then_some(t)
 }
 
+const MAX_BOOK_BYTES: u64 = 300 * 1024 * 1024;
+const MAX_ZIP_ENTRIES: usize = 10_000;
+const MAX_ZIP_EXPANDED: u64 = 2 * 1024 * 1024 * 1024;
+const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_XML_BYTES: u64 = 4 * 1024 * 1024;
+fn archive_limits<R: std::io::Read + std::io::Seek>(z: &mut zip::ZipArchive<R>) -> Result<(),String> {
+    if z.len()>MAX_ZIP_ENTRIES { return Err("Book archive has too many entries (maximum 10000)".into()); }
+    let mut total=0u64;
+    for i in 0..z.len() {
+        let f=z.by_index(i).map_err(|e|e.to_string())?;
+        total=total.checked_add(f.size()).ok_or("Book archive size overflow")?;
+        if total>MAX_ZIP_EXPANDED { return Err("Expanded book archive exceeds 2 GiB".into()); }
+        if IMG_EXT.contains(&f.name().rsplit('.').next().unwrap_or("").to_lowercase().as_str()) && f.size()>MAX_IMAGE_BYTES {
+            return Err("Book image exceeds 64 MiB".into());
+        }
+    }
+    Ok(())
+}
+pub fn validate_book_file(p: &Path) -> Result<(),String> {
+    if p.metadata().map_err(|e|e.to_string())?.len()>MAX_BOOK_BYTES { return Err("Book file exceeds 300 MiB".into()); }
+    if ["epub","cbz"].contains(&ext(p).as_str()) {
+        let mut z=zip::ZipArchive::new(std::fs::File::open(p).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+        archive_limits(&mut z)?;
+    }
+    Ok(())
+}
+
 fn zip_text(z: &mut zip::ZipArchive<std::fs::File>, name: &str) -> Option<String> {
-    let mut f = z.by_name(name).ok()?;
+    let f = z.by_name(name).ok()?;
+    if f.size()>MAX_XML_BYTES{return None;}
     let mut s = String::new();
-    f.read_to_string(&mut s).ok()?;
-    Some(s)
+    f.take(MAX_XML_BYTES+1).read_to_string(&mut s).ok()?;
+    (s.len() as u64<=MAX_XML_BYTES).then_some(s)
 }
 
 fn zip_bytes(z: &mut zip::ZipArchive<std::fs::File>, name: &str) -> Option<Vec<u8>> {
-    let mut f = z.by_name(name).ok()?;
+    let f = z.by_name(name).ok()?;
+    if f.size()>MAX_IMAGE_BYTES{return None;}
     let mut v = Vec::new();
-    f.read_to_end(&mut v).ok()?;
-    Some(v)
+    f.take(MAX_IMAGE_BYTES+1).read_to_end(&mut v).ok()?;
+    (v.len() as u64<=MAX_IMAGE_BYTES).then_some(v)
 }
 
 /// A path inside the zip, relative to `base` (the package file's folder).
@@ -178,13 +211,29 @@ fn percent_decode(s: &str) -> String {
 }
 
 struct Meta {
+    isbn: Option<String>,
     title: Option<String>,
     author: Option<String>,
     lang: Option<String>,
     cover: Option<Vec<u8>>,
 }
 
+fn metadata_isbn(opf: &str) -> Option<String> {
+    let re = regex::Regex::new(r"(?is)<(?:[\w-]+:)?identifier\b[^>]*>([^<]+)</(?:[\w-]+:)?identifier\s*>").ok()?;
+    for cap in re.captures_iter(opf) {
+        let text = cap[1].trim().to_ascii_uppercase();
+        let text = text.strip_prefix("URN:ISBN:").or_else(|| text.strip_prefix("ISBN:")).unwrap_or(&text);
+        let value: String = text.chars().filter(|c| !c.is_whitespace() && *c != '-').collect();
+        let bytes = value.as_bytes();
+        let valid13 = bytes.len() == 13 && bytes.iter().all(u8::is_ascii_digit) && bytes.iter().enumerate().map(|(i,b)| u32::from(b-b'0') * if i%2==0 {1} else {3}).sum::<u32>()%10==0;
+        let valid10 = bytes.len() == 10 && bytes[..9].iter().all(u8::is_ascii_digit) && (bytes[9].is_ascii_digit() || bytes[9]==b'X') && bytes.iter().enumerate().map(|(i,b)| (if *b==b'X' {10} else {u32::from(b-b'0')})*(10-i as u32)).sum::<u32>()%11==0;
+        if valid13 || valid10 { return Some(value); }
+    }
+    None
+}
+
 fn epub_meta(p: &Path) -> Option<Meta> {
+    validate_book_file(p).ok()?;
     let mut z = zip::ZipArchive::new(std::fs::File::open(p).ok()?).ok()?;
     let container = zip_text(&mut z, "META-INF/container.xml")?;
     let opf_path = tags(&container, "rootfile").into_iter().find_map(|a| a.get("full-path").cloned())?;
@@ -199,7 +248,7 @@ fn epub_meta(p: &Path) -> Option<Meta> {
         .or_else(|| items.iter().find(|a| a.get("id").is_some_and(|i| i.to_lowercase().contains("cover")) && a.get("media-type").is_some_and(|m| m.starts_with("image/"))))
         .and_then(|a| a.get("href").cloned());
     let cover = cover_href.and_then(|h| zip_bytes(&mut z, &join(&base, &h)));
-    Some(Meta { title: text_of(&opf, "title"), author: text_of(&opf, "creator"), lang: text_of(&opf, "language"), cover })
+    Some(Meta { isbn: metadata_isbn(&opf), title: text_of(&opf, "title"), author: text_of(&opf, "creator"), lang: text_of(&opf, "language"), cover })
 }
 
 /// A zip that is really a book: an EPUB with its package, or a comic with at least one page.
@@ -207,7 +256,8 @@ fn zip_has_book(bytes: &[u8], kind: &str) -> bool {
     if kind == "pdf" {
         return true;
     }
-    let Ok(z) = zip::ZipArchive::new(std::io::Cursor::new(bytes)) else { return false };
+    let Ok(mut z) = zip::ZipArchive::new(std::io::Cursor::new(bytes)) else { return false };
+    if archive_limits(&mut z).is_err(){return false;}
     let mut names = z.file_names();
     if kind == "epub" {
         names.any(|n| n.eq_ignore_ascii_case("META-INF/container.xml") || n.to_lowercase().ends_with(".opf"))
@@ -218,6 +268,7 @@ fn zip_has_book(bytes: &[u8], kind: &str) -> bool {
 
 /// The pages of a comic (images inside the zip), in reading order.
 pub fn cbz_pages(p: &Path) -> Result<Vec<String>, String> {
+    validate_book_file(p)?;
     let z = zip::ZipArchive::new(std::fs::File::open(p).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let mut names: Vec<String> = z
         .file_names()
@@ -266,7 +317,7 @@ fn read(p: &Path, size: u64, mtime: u64, covers: &Path) -> Book {
     };
     let meta = match kind.as_str() {
         "epub" => epub_meta(p),
-        "cbz" => cbz_pages(p).ok().and_then(|n| n.first().cloned()).and_then(|first| cbz_page(p, &first).ok()).map(|c| Meta { title: None, author: None, lang: None, cover: Some(c) }),
+        "cbz" => cbz_pages(p).ok().and_then(|n| n.first().cloned()).and_then(|first| cbz_page(p, &first).ok()).map(|c| Meta { isbn: None, title: None, author: None, lang: None, cover: Some(c) }),
         _ => None,
     };
     let cover = meta.as_ref().and_then(|m| m.cover.as_ref()).and_then(|bytes| {
@@ -279,6 +330,8 @@ fn read(p: &Path, size: u64, mtime: u64, covers: &Path) -> Book {
         path: p.to_string_lossy().into_owned(),
         title: meta.as_ref().and_then(|m| m.title.clone()).unwrap_or(ft),
         author: meta.as_ref().and_then(|m| m.author.clone()).unwrap_or(fa),
+        isbn: meta.as_ref().and_then(|m| m.isbn.clone()),
+        metadata_version: 1,
         lang: meta.and_then(|m| m.lang),
         kind,
         cover,
@@ -309,7 +362,7 @@ pub fn scan(folders: &[String], index_file: &Path, covers: &Path) -> Vec<Book> {
             let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
             let mtime = meta.and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
             match old.get(&*p.to_string_lossy()) {
-                Some(b) if b.size == size && b.mtime == mtime && b.cover.as_ref().is_none_or(|c| Path::new(c).exists()) => b.clone(),
+                Some(b) if b.metadata_version == 1 && b.size == size && b.mtime == mtime && b.cover.as_ref().is_none_or(|c| Path::new(c).exists()) => b.clone(),
                 _ => read(p, size, mtime, covers),
             }
         })

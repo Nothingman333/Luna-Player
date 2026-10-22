@@ -1,3 +1,5 @@
+import { durableState } from "./safety";
+import { applyAccessibility } from "./Extras";
 import React from "react";
 import ReactDOM from "react-dom/client";
 // Fonts ship with the app: no network wait, no flash of fallback text, works offline.
@@ -8,6 +10,7 @@ import "@fontsource/ibm-plex-sans/400.css";
 import "@fontsource/ibm-plex-sans/500.css";
 import "@fontsource/ibm-plex-sans/600.css";
 import App from "./App";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { loadedLang } from "./i18n";
 import { SubsOverlay } from "./Upscaler";
 import { invoke } from "@tauri-apps/api/core";
@@ -54,7 +57,7 @@ async function restore() {
   try {
     const raw = await invoke<string | null>("state_load");
     if (!raw) return;
-    const o = JSON.parse(raw) as Record<string, string>;
+    const o = durableState(JSON.parse(raw));
     const seed = o.__seed === "1", force = o.__seed === "force";
     const empty = !localStorage.getItem("lunaMark");
     for (const [k, v] of Object.entries(o)) {
@@ -69,6 +72,7 @@ async function restore() {
     await restore();
     // the API keys from Windows (an old plain copy, also one the state file just brought back, moves there)
     await loadSecrets();
+    applyAccessibility();
     // a restored backup can carry another language than the one the texts were loaded in
     if (localStorage.getItem("lang") === "tr" ? loadedLang !== "tr" : loadedLang !== "en") { location.reload(); return; }
     invoke("set_lang", { lang: localStorage.getItem("lang") === "tr" ? "tr" : "en" }).catch(() => {});
@@ -80,7 +84,7 @@ async function restore() {
   }
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
-      {isSubs ? <SubsOverlay /> : <App />}
+      {isSubs ? <SubsOverlay /> : <ErrorBoundary><App /></ErrorBoundary>}
     </React.StrictMode>,
   );
 })();

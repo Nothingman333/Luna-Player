@@ -1,11 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": [
-    "main",
-    "subs"
-  ],
+  "description": "Luna main and subtitle UI only; remote browser child views receive no native capabilities",
   "permissions": [
     "core:default",
     "core:window:allow-set-fullscreen",
@@ -19,5 +15,9 @@
     "core:webview:allow-set-webview-focus",
     "opener:default",
     "dialog:default"
+  ],
+  "webviews": [
+    "main",
+    "subs"
   ]
 }

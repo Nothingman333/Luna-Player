@@ -1,0 +1,13 @@
+/* The way back from a screen that failed to render: Luna's own colours, centred card, fits a narrow window. */
+.luna-crash { position: fixed; inset: 0; z-index: 99999; display: grid; place-items: center; padding: 24px; overflow: auto;
+  background: radial-gradient(1100px 520px at 50% -8%, rgba(232, 112, 26, .16), transparent 62%), var(--bg, #0a0a0b); color: var(--text, #f2f2f2); }
+.luna-crash-card { width: min(560px, 100%); padding: 28px; border: 1px solid var(--line, #2a2a30); border-radius: 16px; background: var(--panel, #141417); box-shadow: 0 14px 38px rgba(0, 0, 0, .55); }
+.luna-crash-mark { font: 700 24px Sora, sans-serif; letter-spacing: -1px; }
+.luna-crash-mark span { color: var(--accent, #e8701a); }
+.luna-crash h1 { margin: 14px 0 8px; font: 600 20px Sora, sans-serif; }
+.luna-crash p { margin: 0 0 18px; color: var(--muted, #9a9aa3); line-height: 1.6; }
+.luna-crash-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.luna-crash-note { margin: 12px 0 0 !important; font-size: 13px; }
+.luna-crash details { margin-top: 16px; font-size: 12px; color: var(--muted, #9a9aa3); }
+.luna-crash summary { cursor: pointer; }
+.luna-crash pre { margin: 8px 0 0; padding: 10px; max-height: 180px; overflow: auto; white-space: pre-wrap; word-break: break-word; border-radius: 8px; background: rgba(255, 255, 255, .04); user-select: text; }

@@ -1,3 +1,6 @@
+import { CollectionRecovery } from "./CollectionRecovery";
+import { SeriesTracker } from "./Extras";
+import { readCollections } from "./collectionStorage";
 // Collections (a theme across films, music and books: "everything Dune") and one history of
 // what was watched, listened to and read. Both open from the top bar in every part of Luna.
 import { useEffect, useRef, useState } from "react";
@@ -21,8 +24,8 @@ export type CItem = { kind: CKind; title: string; by?: string; year?: string; no
 export type Collection = { id: string; name: string; about?: string; at: number; items: CItem[] };
 
 const subs = new Set<() => void>();
-export const loadCollections = () => store.json<Collection[]>("collections", []);
-export function saveCollections(l: Collection[]) { if (!store.set("collections", JSON.stringify(l))) throw new Error(tt("Depolama dolu: son değişiklikler kaydedilemedi.")); subs.forEach((f) => f()); }
+export const loadCollections = () => readCollections(store.get("collections")).collections;
+export function saveCollections(l: Collection[]) { if (readCollections(store.get("collections")).damaged) throw new Error(tt("Koleksiyon kaydı hasarlı; mevcut veriyi korumak için kaydetme durduruldu. Önce yedeğini dışa aktar.")); if (!store.set("collections", JSON.stringify(l))) throw new Error(tt("Depolama dolu: son değişiklikler kaydedilemedi.")); subs.forEach((f) => f()); }
 /** Tells the open pages that something changed outside them (the assistant, an undo). */
 export const collectionsChanged = () => subs.forEach((f) => f());
 function useTick() {
@@ -249,6 +252,7 @@ export function MinePage({ tab, setTab, items, play, onClose, openId }: { tab: M
               <button className="round" aria-label={tt("Kapat")} title={tt("Kapat")} onClick={onClose}><Icon d={I.x} size={18} /></button>
             </div>
             <div className="set-body mine-body" key={tab + (open ?? "")}>
+              {tab === "collections" && <><CollectionRecovery changed={collectionsChanged}/><SeriesTracker/></>}
               {tab === "collections" && <div className="mine-search"><input aria-label={tt("Koleksiyonlarda ara")} placeholder={tt("Koleksiyonlarda ara")} value={query} onChange={(e) => setQuery(e.target.value)} />{query && <button className="chip" onClick={() => setQuery("")}>{tt("Temizle")}</button>}</div>}
               {tab === "history" ? <History items={items} play={(p) => { close(); play(p); }} />
                 : cur ? (<>

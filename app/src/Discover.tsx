@@ -8,6 +8,7 @@ import { IMG, isFinished, Item, Recent, SearchHit, searchTmdb, store, tmdbGet, t
 import { I, Icon, openMenu, pct, titleAsks } from "./Screens";
 import { cwOf, DetailTarget, diaryGet, isSafe, loadDiary, loadTaste, modOn, SourceProps, TitleDetail, useContentWarnings, useTaste, youtubeTrailer } from "./Taste";
 import { catalogItems, catalogRows, useAddons } from "./Addons";
+import { matchKey } from "./textMatch";
 
 type Card = {
   key: string; title: string; year?: string; poster?: string; rating?: number;
@@ -24,6 +25,8 @@ const targetOf = (h: SearchHit): DetailTarget => ({ title: h.title, year: h.year
 // ---------- "Sana özel" ----------
 type Seed = { id: number; kind: "movie" | "tv"; title: string; why: "like" | "watched"; genres?: string[] };
 const norm = (t: string) => t.trim().toLocaleLowerCase("tr");
+// for comparing titles from different sources ("interstellar" = "Interstellar"); `norm` stays for the stored cache key
+const same = (t: string) => matchKey(t.trim());
 
 /** A diary title's TMDB id (looked up once). */
 async function diaryId(title: string, year?: string): Promise<{ id: number; kind: "movie" | "tv" } | null> {
@@ -79,13 +82,13 @@ async function picks(items: Item[], recent: Recent[]): Promise<Picks | "empty"> 
   const from = await seeds(items, recent);
   if (!from.length) return "empty";
   const diary = Object.values(loadDiary());
-  const disliked = new Set(diary.filter((d) => d.vote === "dislike").map((d) => norm(d.title)));
-  for (const e of Object.values(loadTaste())) if (e.vote === "dislike") disliked.add(norm(e.title));
+  const disliked = new Set(diary.filter((d) => d.vote === "dislike").map((d) => same(d.title)));
+  for (const e of Object.values(loadTaste())) if (e.vote === "dislike") disliked.add(same(e.title));
   // anything already watched, liked or rated isn't news
-  const watched = new Set(diary.filter((d) => d.watched || d.vote || d.rating).map((d) => norm(d.title)));
-  for (const e of Object.values(loadTaste())) if (e.vote) watched.add(norm(e.title));
+  const watched = new Set(diary.filter((d) => d.watched || d.vote || d.rating).map((d) => same(d.title)));
+  for (const e of Object.values(loadTaste())) if (e.vote) watched.add(same(e.title));
   const owned = new Set(items.filter((i) => i.meta).map((i) => i.meta!.kind + ":" + i.meta!.id));
-  const skip = (h: SearchHit) => owned.has(h.kind + ":" + h.id) || disliked.has(norm(h.title)) || watched.has(norm(h.title)) ||
+  const skip = (h: SearchHit) => owned.has(h.kind + ":" + h.id) || disliked.has(same(h.title)) || watched.has(same(h.title)) ||
     from.some((s) => s.id === h.id && s.kind === h.kind) || (h.rating ?? 0) < 5.5;
   const why = (s: Seed) => (s.why === "like" ? tt("{0} beğendiğin için", s.title) : tt("{0} izlediğin için", s.title));
 

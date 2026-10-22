@@ -1,0 +1,45 @@
+/* Assistant polish uses Luna's existing theme tokens and leaves native bounds unchanged. */
+.assistant-conversation-tools{flex:none;padding:6px 14px;border-bottom:1px solid var(--line);background:rgba(var(--acc-rgb,232,112,26),.025)}
+.assistant-tool-row,.assistant-find-row{display:flex;align-items:center;gap:6px}.assistant-tool-row button,.assistant-find-row button,.assistant-message-actions button{border:1px solid transparent;background:transparent;color:var(--muted);font:inherit;font-size:11px;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:5px 7px;border-radius:8px;cursor:pointer;min-height:28px}
+.assistant-tool-row button:hover,.assistant-tool-row button.active,.assistant-find-row button:hover,.assistant-message-actions button:hover{color:var(--accent-soft,var(--accent));background:rgba(var(--acc-rgb,232,112,26),.09);border-color:rgba(var(--acc-rgb,232,112,26),.2)}
+.assistant-conversation-tools svg,.assistant-message-actions svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.assistant-find-row{margin-top:6px}.assistant-find-row input{min-width:0;flex:1;border:1px solid var(--line);border-radius:9px;background:rgba(255,255,255,.035);color:var(--text);padding:8px;font:inherit;font-size:12px}.assistant-find-row>span{font-size:10px;color:var(--muted);white-space:nowrap}.assistant-tool-status{font-size:11px;padding:4px;color:var(--accent-soft);overflow-wrap:anywhere}
+.assistant-message-actions{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:4px 0 8px}.msg-wrap.user .assistant-message-actions{justify-content:flex-end}.assistant-message-actions button{font-size:10px;opacity:.75}.assistant-message-actions>span{font-size:10px;color:var(--accent-soft);max-width:100%;overflow-wrap:anywhere}
+:is(.chat-panel,.ws-main) .msg-wrap.assistant-search-hit>.msg{outline:1px solid rgba(var(--acc-rgb,232,112,26),.45);outline-offset:3px}:is(.chat-panel,.ws-main) .msg-wrap.assistant-search-current>.msg{outline:2px solid var(--accent);background:rgba(var(--acc-rgb,232,112,26),.08)}
+.assistant-welcome-head{display:flex;align-items:center;gap:12px;margin-bottom:14px}.assistant-welcome-mark{width:44px;height:44px;display:grid;place-items:center;border:1px solid rgba(var(--acc-rgb,232,112,26),.28);border-radius:15px;background:radial-gradient(circle at 25% 10%,rgba(var(--acc-rgb,232,112,26),.2),transparent 90%);color:var(--accent);font-size:24px}.assistant-welcome-head small{color:var(--accent-soft);letter-spacing:.1em;text-transform:uppercase;font-size:9px}.assistant-welcome-head h3{font-size:18px;letter-spacing:-.4px;margin:4px 0;color:var(--text)}
+.chat-empty .chat-quick{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:16px}.chat-empty .chat-quick .chip{text-align:left;white-space:normal;min-height:48px;line-height:1.45;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.025);transition:border-color .15s,background .15s}.chat-empty .chat-quick .chip:hover{border-color:var(--accent);background:rgba(var(--acc-rgb,232,112,26),.065)}
+:is(.chat-panel,.ws-main) .chat-box{border-radius:20px;align-items:flex-end}:is(.chat-panel,.ws-main) .chat-box textarea{flex:1;min-width:0;box-sizing:border-box;resize:none;max-height:126px;min-height:36px;border:0;outline:0;background:transparent;color:var(--text,#fff);font:inherit;font-size:14px;line-height:1.5;padding:7px 0;box-shadow:none}.chat-box:focus-within{border-color:rgba(var(--acc-rgb,232,112,26),.55);box-shadow:0 0 0 3px rgba(var(--acc-rgb,232,112,26),.07)}.chat-box .chat-send{margin-bottom:1px}.assistant-composer-hint{display:flex;justify-content:space-between;gap:8px;padding:6px 5px 0;color:var(--muted);font-size:10px}.assistant-composer-hint small{font:inherit}.chat-panel .msg.model{line-height:1.65}.chat-panel .msg.model p:first-child{margin-top:0}.chat-panel .msg.model p:last-child{margin-bottom:0}.chat-panel .msg.model pre{overflow-x:auto;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere}.chat-panel .msg.user{white-space:pre-wrap;overflow-wrap:anywhere}.assistant-busy-placeholder{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px}
+@media(max-width:520px){.chat-empty .chat-quick{grid-template-columns:1fr}.assistant-conversation-tools{padding:5px 12px}.assistant-welcome-head h3{font-size:17px}}@media(prefers-reduced-motion:reduce){.chat-empty .chat-quick .chip{transition:none}}
+
+.chat-empty .chat-quick .chip{height:auto!important;min-height:52px;overflow-wrap:anywhere;align-items:center}.chat-box textarea:focus-visible{box-shadow:none!important}
+
+.assistant-composer-options{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 3px 8px;min-height:26px}.assistant-composer-options label{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:10px}.assistant-composer-options select{color:var(--text);border:1px solid var(--line);border-radius:8px;background:var(--panel);font:inherit;padding:4px 7px;max-width:110px}.assistant-composer-options .chip{font-size:10px;height:25px;padding:0 8px}
+
+/* ----- what the tools did: one line each, the symbol carries the meaning, colour only helps ----- */
+.assistant-outcomes{display:flex;flex-direction:column;gap:3px;margin:2px 0 6px;max-width:92%;font-size:12px;line-height:1.45}
+.assistant-outcome{overflow-wrap:anywhere;color:var(--muted)}
+.assistant-outcome.ok{color:var(--accent-soft,var(--accent))}.assistant-outcome.warn{color:#d9a441}.assistant-outcome.cancel{opacity:.85}
+.assistant-meta-line{font-size:11px;line-height:1.45;color:var(--muted);max-width:92%;overflow-wrap:anywhere;margin:2px 0 4px}
+.assistant-meta-line.page b{color:#d9a441;font-weight:600}.assistant-meta-line.basis{opacity:.85}
+/* ----- calm, distinct states while a turn runs ----- */
+.msg.working .assistant-work-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:2px}
+.assistant-phase{font-size:11px;color:var(--muted)}.assistant-stop{font-size:11px;min-height:28px;border-radius:8px;cursor:pointer}
+.msg.working.phase-waiting{border-color:rgba(217,164,65,.5)}.msg.working.phase-waiting .step-dots{display:none}
+.msg.working.phase-tools{border-color:rgba(var(--acc-rgb,232,112,26),.35)}
+@media(prefers-reduced-motion:reduce){.msg.working .step-dots i{animation:none!important}}
+/* ----- keyboard focus, disabled and pinned states ----- */
+:is(.assistant-tool-row,.assistant-find-row,.assistant-message-actions,.assistant-work-actions,.assistant-stash,.assistant-history-notice) button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.assistant-message-actions button:disabled,.assistant-tool-row button:disabled{opacity:.4;cursor:not-allowed}
+.assistant-message-actions button.active{color:var(--accent-soft,var(--accent));border-color:rgba(var(--acc-rgb,232,112,26),.3)}
+.assistant-stash,.assistant-history-notice{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 3px 6px;padding:6px 8px;border:1px solid var(--line);border-radius:10px;font-size:11px;color:var(--muted);background:rgba(255,255,255,.03)}
+.assistant-history-notice{margin:8px 0;color:var(--text)}.assistant-history-notice small{flex-basis:100%;color:var(--accent-soft)}
+/* ----- where a title in an answer stands: in the library, suggested from outside, or an unclear match ----- */
+.prov{display:inline-block;margin-left:5px;padding:1px 6px;border-radius:999px;border:1px solid var(--line);font-size:10px;letter-spacing:.02em;color:var(--muted);vertical-align:1px;white-space:nowrap}
+.prov-library{color:var(--accent-soft,var(--accent));border-color:rgba(var(--acc-rgb,232,112,26),.35)}.prov-uncertain{color:#d9a441;border-color:rgba(217,164,65,.45)}
+.film-ext{text-decoration:underline dotted;text-underline-offset:3px;text-decoration-color:var(--muted)}.film-ext.uncertain{text-decoration-color:#d9a441}
+/* ----- long words, addresses and lists stay inside the small panel ----- */
+:is(.chat-panel,.ws-main) .msg{min-width:0;max-width:100%;overflow-wrap:anywhere}
+:is(.chat-panel,.ws-main) .msg a.msg-link{overflow-wrap:anywhere;word-break:break-all}
+:is(.chat-panel,.ws-main) .msg.model ul{padding-left:1.2em;margin:.4em 0}:is(.chat-panel,.ws-main) .msg.model code{overflow-wrap:anywhere;white-space:pre-wrap}
+:is(.chat-panel,.ws-main) .msg-sources{flex-wrap:wrap;max-width:100%}:is(.chat-panel,.ws-main) .src-chip{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lib-choices .choice{min-width:0}.assistant-find-row input{min-width:0}

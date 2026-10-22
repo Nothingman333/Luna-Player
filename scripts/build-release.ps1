@@ -1,7 +1,7 @@
 # Builds the release (installer and Luna Player.exe) with this computer's folders left out of the
 # program: Rust and C keep source file paths for their error messages, and those would carry the
 # Windows user name and the project folder. They are rewritten to "cargo", "luna" and "~".
-param([string]$Tag = "", [string]$Notes = "")
+param([string]$Tag = "", [string]$Notes = "", [switch]$RequireUpdater)
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE ".cargo" }
@@ -19,16 +19,24 @@ $env:CARGO_ENCODED_RUSTFLAGS = ($maps.Keys | ForEach-Object { "--remap-path-pref
 $env:CFLAGS = ($maps.Keys | Where-Object { $_ -notmatch ' ' } | ForEach-Object { "/d1trimfile:$_\" }) -join " "
 
 $key = Join-Path $env:USERPROFILE ".luna-keys\luna-updater.key"
-if (Test-Path $key) {
+if (-not $env:TAURI_SIGNING_PRIVATE_KEY -and (Test-Path $key)) {
   $env:TAURI_SIGNING_PRIVATE_KEY = (Get-Content $key -Raw).Trim()
-  $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
-} else { Write-Warning "No update key at ${key}: this build won't be offered as an update." }
+  if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) { $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = "" }
+}
+$hasSigningKey = -not [string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)
+if ($RequireUpdater -and -not $hasSigningKey) { throw "Set TAURI_SIGNING_PRIVATE_KEY (existing updater key) before building an update." }
+if (-not $hasSigningKey) { Write-Warning "No updater signing key: local build only, no automatic updates." }
+$version = (Get-Content (Join-Path $root "app/src-tauri/tauri.conf.json") -Raw | ConvertFrom-Json).version
+if ($Tag -and $Tag -cne "v$version") { throw "Tag must match the configured version: v$version" }
+& node (Join-Path $PSScriptRoot "release-version.cjs") --check $version
+if ($LASTEXITCODE -ne 0) { throw "Release versions do not match." }
 
 Set-Location (Join-Path $root "app")
 # The build prints its progress on stderr; Windows PowerShell would stop on that, so only the exit code counts.
 $ErrorActionPreference = "Continue"
 npm run tauri build
 if ($LASTEXITCODE -ne 0) { throw "tauri build failed ($LASTEXITCODE)" }
+$ErrorActionPreference = "Stop"
 
 # ---- Updates: the installer is signed with Luna's update key, and latest.json tells installed
 # copies about it. Upload latest.json, the setup exe and its .sig to the GitHub release with this tag.
@@ -37,7 +45,8 @@ if ($LASTEXITCODE -ne 0) { throw "tauri build failed ($LASTEXITCODE)" }
 $version = (Get-Content (Join-Path $root "app/src-tauri/tauri.conf.json") -Raw | ConvertFrom-Json).version
 $nsis = Join-Path $root "app/src-tauri/target/release/bundle/nsis"
 $setup = Join-Path $nsis "Luna Player_${version}_x64-setup.exe"
-if ((Test-Path $key) -and (Test-Path "$setup.sig")) {
+if ($RequireUpdater -and (-not (Test-Path $setup) -or -not (Test-Path "$setup.sig"))) { throw "Signed installer is missing; updater release was not prepared." }
+if ($hasSigningKey -and (Test-Path "$setup.sig")) {
   if (-not $Tag) { $Tag = "v$version" }
   # GitHub turns the space in the file name into a dot
   $asset = "Luna.Player_${version}_x64-setup.exe"

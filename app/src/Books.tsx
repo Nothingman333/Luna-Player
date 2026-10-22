@@ -1,7 +1,17 @@
+import {QuoteNotebookPanel} from "./QuoteNotebookPanel";
+import {cleanReadingPreferences,mergeReadingSession,readingDayKey,annotationDataWritable} from "./readingExperienceModel";
+import {mergeBookSources,validListedBook,bookPaths,libraryView,cleanBookPosition} from "./bookLibraryModel";
+import { BookManager, manageBook } from "./BookManager";
+import { withBookInfo, bookDetails, shelfNames, shelfMap, laterBooks, movePlannedBook, organizeBooks } from "./BookData";
+import { bookIdentity, bookFold } from "./bookDataModel";
+import { displayFirstWorking, spineProgress } from "./bookReaderModel";
+import { activeTopic, inBookShelf, topicCounts, visibleBooks } from "./bookLibraryModel";
+import "./BookMusic.css";
+import { ExtraModal, exportExtra, extraText } from "./Extras";
 // Kitap modu: the user's own books (EPUB, PDF, comics), books from open libraries (Project
 // Gutenberg) and free audiobooks (LibriVox, played by the music player), plus the reader.
 import { lang, tt } from "./i18n";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -9,7 +19,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { store } from "./library";
 import { I, Icon, MenuEntry, openMenu } from "./Screens";
 import { askAssistant, openAssistant, TrText } from "./Taste";
-import { MiniMusic, playQueue, QItem, useMusic } from "./Music";
+import { MiniMusic, playQueue, QItem, useMusic, beginMusicSelection,isMusicSelectionCurrent } from "./Music";
 import { collectEntry } from "./Mine";
 import { ReviewAiCard } from "./FilmReviewAi";
 import { cleanProfile, filmKey } from "./filmReviewModel";
@@ -28,10 +38,10 @@ import literata600x from "@fontsource/literata/files/literata-latin-ext-600-norm
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 // ---------- library ----------
-export type Book = { path: string; kind: "epub" | "pdf" | "cbz"; title: string; author: string; lang?: string; cover?: string | null };
+export type Book = { path: string; kind: "epub" | "pdf" | "cbz"; title: string; author: string; lang?: string; cover?: string | null; isbn?:string; identityTitle?:string; identityAuthor?:string; originalCover?: string | null };
 type Pos = { loc?: string | number; pct: number; at: number; chapter?: string };
 const posKey = (p: string) => "bookPos:" + p;
-export const getPos = (p: string) => store.json<Pos | null>(posKey(p), null);
+export const getPos = (p: string) => cleanBookPosition(store.json<unknown>(posKey(p), null));
 const setPos = (p: string, v: Pos) => store.set(posKey(p), JSON.stringify(v));
 export const loadBookFolders = () => store.json<string[]>("bookFolders", []);
 let libCache: { sig: string; books: Book[] } | null = null;
@@ -40,22 +50,23 @@ const libChanged = () => { libCache = null; libSubs.forEach((f) => f()); };
 /** The book library (scanned once; the index keeps it quick). */
 export async function loadBookLibrary(): Promise<Book[]> {
   const f = loadBookFolders();
-  if (libCache?.sig === f.join("|")) return libCache.books;
+  if (libCache?.sig === f.join("|")) return libCache.books.map(withBookInfo);
   // a failed scan isn't kept as an empty library: the next ask scans again
   let ok = true;
   const books = f.length ? await invoke<Book[]>("books_scan", { folders: f }).catch(() => { ok = false; return [] as Book[]; }) : [];
   if (ok) libCache = { sig: f.join("|"), books };
-  return books;
+  return books.map(withBookInfo);
 }
 
 // opening a book from anywhere (the assistant): the books page opens it when it's on screen
 let openHandler: ((b: Book) => void) | null = null;
 let pendingOpen: Book | null = null;
 export function requestOpenBook(b: Book) {
-  const recent = [b.path, ...store.json<string[]>("bookRecent", []).filter((p) => p !== b.path)].slice(0, 20);
+  b=withBookInfo(b);
+  const recent = [b.path, ...bookPaths(store.json("bookRecent", [])).filter((p) => p !== b.path)].slice(0, 20);
   store.set("bookRecent", JSON.stringify(recent));
   // what the book is, also when it lives outside the book folders (opened with "Open file")
-  const known = store.json<Record<string, Book>>("bookOpened", {});
+  const known = Object.fromEntries(mergeBookSources<Book>(store.json("bookOpened", {})).map(x=>[x.path,x]));
   known[b.path] = b;
   store.set("bookOpened", JSON.stringify(Object.fromEntries(recent.filter((p) => known[p]).map((p) => [p, known[p]]))));
   if (openHandler) openHandler(b); else pendingOpen = b;
@@ -99,7 +110,10 @@ export async function fetchBook(url: string, title: string, author: string, kind
 }
 
 function useBookLibrary() {
+  const[,metadataChanged]=useState(0);
+  useEffect(()=>{const f=()=>metadataChanged(n=>n+1);window.addEventListener("luna-book-data",f);return()=>window.removeEventListener("luna-book-data",f);},[]);
   const [folders, setFoldersState] = useState<string[]>(loadBookFolders);
+  useEffect(()=>{const update=()=>libChanged();window.addEventListener("luna-library",update);return()=>window.removeEventListener("luna-library",update);},[]);
   useEffect(() => {
     const f = () => { setFoldersState(loadBookFolders()); setTick((n) => n + 1); };
     libSubs.add(f);
@@ -107,21 +121,26 @@ function useBookLibrary() {
   }, []);
   const [books, setBooks] = useState<Book[] | null>(() => (libCache?.sig === loadBookFolders().join("|") ? libCache.books : null));
   const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState(false);
   const [tick, setTick] = useState(0);
   const sig = folders.join("|");
   useEffect(() => {
-    if (!folders.length) { libCache = { sig, books: [] }; setBooks([]); setScanning(false); return; }
-    if (libCache?.sig === sig && tick === 0) { setBooks(libCache.books); return; }
+    // (a scan cancelled by an early return never reaches its own finally: "scanning" is switched off here too)
+    if (!folders.length) { libCache = { sig, books: [] }; setBooks([]); setScanning(false); setScanError(false); return; }
+    if (libCache?.sig === sig && tick === 0) { setBooks(libCache.books); setScanning(false); setScanError(false); return; }
     let alive = true;
     setScanning(true);
+    setScanError(false);
     invoke<Book[]>("books_scan", { folders })
-      .then((b) => { libCache = { sig, books: b }; if (alive) setBooks(b); })
-      .catch(() => alive && setBooks([]))
+      // a scan for folders that changed meanwhile is dropped, not written over the newer one
+      .then((b) => { if (sig !== loadBookFolders().join("|")) return; libCache = { sig, books: b }; if (alive) setBooks(b); })
+      // a failed scan is told, with a way to try again; it is not kept as an empty library
+      .catch(() => { if (alive) { setBooks([]); setScanError(true); } })
       .finally(() => alive && setScanning(false));
     return () => { alive = false; };
   }, [sig, tick]);
   const setFolders = (f: string[]) => { store.set("bookFolders", JSON.stringify(f)); setFoldersState(f); };
-  return { folders, setFolders, books, scanning, rescan: () => setTick((n) => n + 1) };
+  return { folders, setFolders, books:books?.map(withBookInfo)??null, scanning, scanError, rescan: () => setTick((n) => n + 1) };
 }
 type Lib = ReturnType<typeof useBookLibrary>;
 
@@ -174,10 +193,10 @@ export async function abChapters(a: Ab): Promise<QItem[]> {
     if (!byChapter.has(key) || /_64kb\.mp3$/i.test(f.name)) byChapter.set(key, f);
   }
   const list = [...byChapter.values()].sort((x, y) => String(x.name).localeCompare(String(y.name), undefined, { numeric: true }));
-  return list.map((f) => ({
+  return list.map((f,chapter) => ({
     src: `https://archive.org/download/${encodeURIComponent(a.identifier)}/${encodeURIComponent(f.name)}`,
     title: f.title || String(f.name).replace(/_64kb\.mp3$|\.mp3$/i, "").replace(/_/g, " "),
-    artist: abAuthor(a), album: abTitle(a.title), cover: abCover(a.identifier), duration: Number(f.length) || undefined, book: a.identifier,
+    artist: abAuthor(a), album: abTitle(a.title), cover: abCover(a.identifier), duration: Number(f.length) || undefined, book: a.identifier, chapter,
   } as QItem));
 }
 
@@ -296,6 +315,10 @@ const bookMenu = (b: Book, read: () => void, details: () => void): MenuEntry[] =
   "sep",
   { label: tt("Oku"), act: read },
   { label: tt("Detaylar"), act: details },
+  { label: laterBooks().includes(b.path) ? extraText("Okunacaklardan çıkar", "Remove from reading plan") : extraText("Okunacaklara ekle", "Add to reading plan"),
+    act: () => { try { organizeBooks([{ path: b.path, shelves: [], readLater: !laterBooks().includes(b.path) }]); } catch (e) { alert(String(e)); } } },
+  {label:extraText("Kapak ve bilgileri düzenle…","Find/edit cover and information…"),act:()=>manageBook(b.path)},
+  {label:extraText("Raflara / okunacaklara ekle…","Organize shelves / reading plan…"),act:()=>manageBook(b.path,"shelves")},
   collectEntry({ kind: "book", title: b.title, by: b.author, path: b.path, cover: b.cover }),
   "sep",
   ...deleteEntries(b),
@@ -315,6 +338,7 @@ async function deleteBookFile(b: Book) {
 }
 
 function BookCard({ b, onOpen, onRead }: { b: Book; onOpen: () => void; onRead?: () => void }) {
+  b=withBookInfo(b);
   const pos = getPos(b.path);
   // like films: a book being read opens to its page, any other one shows its details
   const reading = !!onRead && !!pos && pos.pct > 0.01 && pos.pct < 0.99;
@@ -347,6 +371,9 @@ export function BooksPage({ view, setView, query }: { view: BooksView; setView: 
   const lib = useBookLibrary();
   const [reading, setReading] = useState<Book | null>(null);
   const [detail, setDetail] = useState<Book | null>(null);
+  const [manager,setManager]=useState<{path?:string;tab:"metadata"|"shelves"}|null>(null);
+  useEffect(()=>{const show=(e:Event)=>setManager((e as CustomEvent).detail||{tab:"metadata"});window.addEventListener("luna-book-manage",show);return()=>window.removeEventListener("luna-book-manage",show);},[]);
+
   const addFolder = async () => {
     const d = await open({ directory: true, multiple: false });
     if (typeof d === "string" && !lib.folders.includes(d)) lib.setFolders([...lib.folders, d]);
@@ -362,6 +389,7 @@ export function BooksPage({ view, setView, query }: { view: BooksView; setView: 
   useEffect(() => () => showBook(null), []);
   return (
     <div className="page books">
+      {(view === "home" || view === "library") && <div className="row-head"><QuoteNotebook books={lib.books ?? []}/><button className="chip" onClick={()=>setManager({tab:"metadata"})}>{extraText("Kapak ve bilgileri bul","Find covers and information")}</button><button className="chip" onClick={()=>setManager({tab:"shelves"})}>{extraText("Rafları düzenle","Organize shelves")}</button></div>}
       {view === "home" && <BooksHome lib={lib} onOpen={openBook} onDetail={setDetail} onAddFolder={addFolder} onFetch={fetchBook} go={setView} />}
       {view === "library" && <BookLibrary lib={lib} query={query} onOpen={openBook} onDetail={setDetail} onAddFolder={addFolder} />}
       {detail && <BookDetail b={detail} onClose={() => setDetail(null)} onRead={() => { setDetail(null); openBook(detail); }} />}
@@ -371,6 +399,7 @@ export function BooksPage({ view, setView, query }: { view: BooksView; setView: 
         <section className="la mu-taste"><TastePanel kind="book" open={false} /></section>
       </>}
       {view === "audio" && <Audiobooks query={query} />}
+      {manager&&<BookManager books={[...new Map([...(lib.books??[]),...Object.values(store.json<Record<string,Book>>("bookOpened",{})),...(detail?[detail]:[])].filter(b=>b&&typeof b.path==="string").map(b=>[b.path,withBookInfo(b)])).values()]} initialPath={manager.path} initialTab={manager.tab} close={()=>setManager(null)}/>}
       {reading && <Reader key={reading.path} b={reading} onClose={() => setReading(null)} />}
     </div>
   );
@@ -381,7 +410,7 @@ function BooksHome({ lib, onOpen, onDetail, onAddFolder, onFetch, go }: {
   lib: Lib; onOpen: (b: Book) => void; onDetail: (b: Book) => void; onAddFolder: () => void; onFetch: Fetch; go: (v: BooksView) => void;
 }) {
   const opened = store.json<Record<string, Book>>("bookOpened", {});
-  const recent = store.json<string[]>("bookRecent", []).map((p) => lib.books?.find((b) => b.path === p) ?? opened[p]).filter(Boolean) as Book[];
+  const recent = bookPaths(store.json("bookRecent", [])).map((p) => lib.books?.find((b) => b.path === p) ?? opened[p]).filter(Boolean) as Book[];
   const [, setAbTick] = useState(0);
   useEffect(() => { const f = () => setAbTick((n) => n + 1); window.addEventListener("luna-ab", f); return () => window.removeEventListener("luna-ab", f); }, []);
   const abRecent = loadAbRecent().slice(0, 8);
@@ -389,7 +418,7 @@ function BooksHome({ lib, onOpen, onDetail, onAddFolder, onFetch, go }: {
   const pos = cur ? getPos(cur.path) : null;
   const rest = (lib.books ?? []).filter((b) => b !== cur);
   const notesAll = loadBookNotes();
-  const known = [...(lib.books ?? []), ...Object.values(opened).filter((b) => !(lib.books ?? []).some((x) => x.path === b.path))];
+  const known = mergeBookSources<Book>(lib.books,opened);
   const doneShelf = known.filter(isFinishedBook).slice(0, 14);
   const likedShelf = known.filter((b) => notesAll[bkKey(b)]?.vote === "like").slice(0, 14);
   const toShelf = (x: Shelf) => { store.set("bookShelf", x); go("library"); };
@@ -455,51 +484,46 @@ function BooksHome({ lib, onOpen, onDetail, onAddFolder, onFetch, go }: {
   );
 }
 
-type Shelf = "all" | "reading" | "done" | "liked" | "disliked" | "history";
+type Shelf = "all" | "later" | "reading" | "done" | "liked" | "disliked" | "history";
 function BookLibrary({ lib, query, onOpen, onDetail, onAddFolder }: { lib: Lib; query: string; onOpen: (b: Book) => void; onDetail: (b: Book) => void; onAddFolder: () => void }) {
-  const [sort, setSort] = useState<"recent" | "title" | "author">("recent");
-  const [shelf, setShelfState] = useState<Shelf>(() => (store.get("bookShelf") as Shelf) || "all");
+  const [view,setView]=useState(()=>libraryView(store.json("bookLibraryView",{})));
+  const {sort,topic,format,covers}=view;
+  const [viewError,setViewError]=useState("");
+  const updateView=(patch:Partial<typeof view>)=>{const next={...view,...patch};setView(next);setViewError(store.set("bookLibraryView",JSON.stringify(next))?"":extraText("Görünüm kaydedilemedi; bu oturumda uygulanıyor.","View could not be saved; it is applied for this session."));};
+  const setSort=(sort:typeof view.sort)=>updateView({sort});
+  const setTopic=(topic:string)=>updateView({topic});
+  const shelves=shelfMap(),wantLater=laterBooks();
+  const [shelf, setShelfState] = useState<Shelf>(() => (["all","later","reading","done","liked","disliked","history"].includes(store.get("bookShelf")||"")?store.get("bookShelf"):"all") as Shelf);
   const setShelf = (x: Shelf) => { setShelfState(x); store.set("bookShelf", x); };
   const q = query.trim().toLocaleLowerCase();
-  const recent = store.json<string[]>("bookRecent", []);
+  const recent = bookPaths(store.json("bookRecent", []));
   const notes = loadBookNotes();
   const opened = store.json<Record<string, Book>>("bookOpened", {});
   // books read from a link or "Open file" count too, not only the folder's
-  const all = useMemo(() => {
-    const m = new Map((lib.books ?? []).map((b) => [b.path, b]));
-    for (const b of Object.values(opened)) if (!m.has(b.path)) m.set(b.path, b);
-    for (const x of loadReadHistory()) if (!m.has(x.b.path)) m.set(x.b.path, x.b);
-    return [...m.values()];
-  }, [lib.books]);
-  const inShelf = (b: Book) => {
-    const n = notes[bkKey(b)];
-    const pct = getPos(b.path)?.pct ?? 0;
-    return shelf === "all" ? (lib.books ?? []).some((x) => x.path === b.path)
-      : shelf === "reading" ? pct > 0.005 && !isFinishedBook(b)
-      : shelf === "done" ? isFinishedBook(b)
-      : shelf === "liked" ? n?.vote === "like"
-      : shelf === "disliked" ? n?.vote === "dislike" : true;
+  const all = mergeBookSources<Book>(lib.books,opened,loadReadHistory().map(x=>x.b));
+  const topicNames = shelfNames();
+  const activeTopicName = activeTopic(topic, topicNames);
+  const env = {
+    inLibrary: new Set((lib.books ?? []).filter(validListedBook).map((x) => x.path)), later: wantLater, shelves,
+    progress: (b: Book) => getPos(b.path)?.pct ?? 0, finished: isFinishedBook, vote: (b: Book) => notes[bkKey(b)]?.vote,
   };
-  const list = useMemo(() => all
-    .filter(inShelf)
-    .filter((b) => !q || b.title.toLocaleLowerCase().includes(q) || b.author.toLocaleLowerCase().includes(q))
-    .sort((x, y) => sort === "title" ? x.title.localeCompare(y.title) : sort === "author" ? x.author.localeCompare(y.author) || x.title.localeCompare(y.title)
-      : (recent.indexOf(x.path) + 1 || 999) - (recent.indexOf(y.path) + 1 || 999)), [all, q, sort, shelf]);
-  const count = (x: Shelf) => x === "history" ? loadReadHistory().length : all.filter((b) => {
-    const n = notes[bkKey(b)]; const pct = getPos(b.path)?.pct ?? 0;
-    return x === "reading" ? pct > 0.005 && !isFinishedBook(b) : x === "done" ? isFinishedBook(b) : x === "liked" ? n?.vote === "like" : x === "disliked" ? n?.vote === "dislike" : true;
-  }).length;
+  // worked out from the current records at every render: a list kept from earlier still showed a book finished or un-liked meanwhile,
+  // while the numbers on the shelf buttons (counted fresh) were already different
+  const list = visibleBooks(all, { shelf, topic: activeTopicName, query, sort, format, covers, recent, env });
+  const count = (x: Shelf) => x === "history" ? loadReadHistory().length : all.filter((b) => inBookShelf(b, x, env)).length;
+  const topicN = topicCounts(all.map((b) => b.path), shelves, topicNames);
   return (
     <>
       <div className="seg-row bk-shelves">
-        {([["all", tt("Tümü")], ["reading", tt("Okuyorum")], ["done", tt("Bitirdiklerim")], ["liked", tt("Beğendiklerim")], ["disliked", tt("Beğenmediklerim")], ["history", tt("Geçmiş")]] as const).map(([k, l]) => {
+        {([["all", tt("Tümü")], ["later", extraText("Okunacaklar","To read")], ["reading", tt("Okuyorum")], ["done", tt("Bitirdiklerim")], ["liked", tt("Beğendiklerim")], ["disliked", tt("Beğenmediklerim")], ["history", tt("Geçmiş")]] as const).map(([k, l]) => {
           const n = k === "all" ? 0 : count(k);
           return <button key={k} className={"seg sm" + (shelf === k ? " on" : "")} onClick={() => setShelf(k)}>{l}{n ? ` ${n}` : ""}</button>;
         })}
       </div>
+      <div className="book-topic-filters"><label>{extraText("Konu rafı", "Topic shelf")} <select aria-label={extraText("Konu rafına göre filtrele","Filter by topic shelf")} value={activeTopicName} onChange={e=>setTopic(e.target.value)}><option value="">{extraText("Bütün raflar","All shelves")}</option>{topicNames.map(name=><option key={name} value={name}>{name} ({topicN[name] ?? 0})</option>)}</select></label><button className="chip" onClick={()=>manageBook(undefined,"shelves")}>{extraText("Rafları düzenle","Organize shelves")}</button></div>
       <div className="row-head mu-lib-head">
         {shelf !== "history" && <div className="seg-row">
-          {([["recent", tt("Son okunan")], ["title", tt("Ada göre")], ["author", tt("Yazara göre")]] as const).map(([k, l]) => (
+          {([["recent", tt("Son okunan")], ["title", tt("Ada göre")], ["author", tt("Yazara göre")], ["progress", extraText("İlerlemeye göre","By progress")], ...(shelf==="later"?[["plan",extraText("Plan sırası","Plan order")]] as const:[])] as const).map(([k, l]) => (
             <button key={k} className={"seg sm" + (sort === k ? " on" : "")} onClick={() => setSort(k)}>{l}</button>
           ))}
         </div>}
@@ -508,21 +532,29 @@ function BookLibrary({ lib, query, onOpen, onDetail, onAddFolder }: { lib: Lib; 
         <button className="chip" onClick={lib.rescan} disabled={lib.scanning}>{tt("Yeniden tara")}</button>
         <button className="chip" onClick={onAddFolder}><Icon d={I.plus} size={14} />  {tt("Klasör")}</button>
       </div>
+      {shelf!=="history"&&<div className="book-view-tools">
+        <label>{extraText("Biçim","Format")}<select value={format} onChange={e=>updateView({format:e.target.value})}><option value="all">{extraText("Bütün biçimler","All formats")}</option>{["epub","pdf","cbz"].map(k=><option key={k} value={k}>{k.toUpperCase()}</option>)}</select></label>
+        <label>{extraText("Kapak","Cover")}<select value={covers} onChange={e=>updateView({covers:e.target.value})}><option value="all">{extraText("Hepsi","All")}</option><option value="with">{extraText("Kapaklı","With cover")}</option><option value="without">{extraText("Kapaksız","Without cover")}</option></select></label>
+        <span className="muted small" aria-live="polite">{list.length} / {count(shelf)} {extraText("kitap","books")}</span>
+        {(topic||format!=="all"||covers!=="all"||sort!=="recent")&&<button className="chip" onClick={()=>updateView(libraryView({}))}>{extraText("Görünümü sıfırla","Reset view")}</button>}
+        {shelf==="later"&&<small className="muted">{extraText("Plan sırasını seçip oklarla öncelik ver.","Choose plan order and use the arrows to set priorities.")}</small>}
+      </div>}{viewError&&<p role="alert" className="extra-status">{viewError}</p>}
       <div className="mu-folders">
         {lib.folders.map((f) => (
           <span key={f} className="mu-folder" title={f}><Icon d={I.folder} size={14} /><span className="ellipsis">{f}</span>
             <button aria-label={tt("Kaldır")} title={tt("Kaldır")} onClick={() => lib.setFolders(lib.folders.filter((x) => x !== f))}><Icon d={I.x} size={12} /></button></span>
         ))}
       </div>
+      {lib.scanError && !lib.scanning && <div className="mu-note warn" role="alert"><span>{extraText("Kitap klasörleri taranamadı. Sürücü bağlı mı, klasör yerinde mi?", "The book folders could not be scanned. Is the drive connected and the folder still there?")}</span><button className="chip" onClick={lib.rescan}>{extraText("Yeniden dene", "Try again")}</button></div>}
       {shelf === "history" ? <ReadHistory onOpen={onOpen} onDetail={onDetail} /> : (
         <>
-          {lib.books && !list.length && <div className="muted empty-note">{q ? tt("Kitaplığında bulunamadı.")
+          {lib.books && !list.length && <div className="muted empty-note">{q ? tt("Kitaplığında bulunamadı.") : activeTopicName ? extraText("Bu rafta, seçili görünümde kitap yok.", "No books on this shelf in this view.")
             : shelf === "reading" ? tt("Şu an okuduğun bir kitap yok.")
             : shelf === "done" ? tt("Bitirdiğin kitaplar burada toplanır (sonuna gelince ya da detay sayfasında “Okudum” deyince).")
             : shelf === "liked" ? tt("Beğendiğin kitaplar burada toplanır: kitabın detay sayfasında 👍.")
             : shelf === "disliked" ? tt("Beğenmediğin kitaplar burada toplanır: kitabın detay sayfasında 👎.")
             : tt("Henüz kitap yok. Bir klasör ekle ya da Keşfet'ten ücretsiz kitap indir.")}</div>}
-          <div className="bk-grid">{list.map((b) => <BookCard key={b.path} b={b} onOpen={() => onDetail(b)} onRead={() => onOpen(b)} />)}</div>
+          <div className="bk-grid">{list.map((b) => <div key={b.path} className="book-grid-entry"><BookCard b={b} onOpen={() => onDetail(b)} onRead={() => onOpen(b)} />{shelf==="later"&&sort==="plan"&&<div className="book-plan-controls"><span>{wantLater.indexOf(b.path)+1}</span>{([-1,1] as const).map(dir=><button key={dir} className="chip" aria-label={b.title+" · "+(dir===-1?extraText("Öne al","Move earlier"):extraText("Sona al","Move later"))} disabled={dir===-1?wantLater.indexOf(b.path)===0:wantLater.indexOf(b.path)===wantLater.length-1} onClick={()=>{try{movePlannedBook(b.path,dir);setViewError("");}catch(e){setViewError(String(e));}}}>{dir===-1?"↑":"↓"}</button>)}</div>}</div>)}</div>
         </>
       )}
     </>
@@ -532,28 +564,32 @@ function BookLibrary({ lib, query, onOpen, onDetail, onAddFolder }: { lib: Lib; 
 /** "Geçmiş": the sittings with books, day by day (how long, from where to where). */
 function ReadHistory({ onOpen, onDetail }: { onOpen: (b: Book) => void; onDetail: (b: Book) => void }) {
   const [l, setL] = useState(loadReadHistory);
+  const[query,setQuery]=useState(""),[period,setPeriod]=useState("all"),[error,setError]=useState("");
+  const now=Date.now(),words=bookFold(query).split(" ").filter(Boolean);
+  const visible=l.filter(x=>(period==="all"||now-x.at<=Number(period)*86400000)&&words.every(w=>bookFold(x.b.title+" "+x.b.author).includes(w))).sort((a,b)=>b.at-a.at);
   if (!l.length) return <div className="muted empty-note">{tt("Okuma geçmişin burada birikecek: hangi gün hangi kitabı ne kadar okudun.")}</div>;
   const day = (t: number) => {
     const d = new Date(t), today = new Date(), y = new Date(); y.setDate(today.getDate() - 1);
     return d.toDateString() === today.toDateString() ? tt("Bugün") : d.toDateString() === y.toDateString() ? tt("Dün")
       : d.toLocaleDateString(lang() === "tr" ? "tr-TR" : "en-US", { weekday: "long", day: "numeric", month: "long" });
   };
-  const groups: { day: string; items: Sitting[] }[] = [];
-  for (const x of l) { const d = day(x.at); if (groups[groups.length - 1]?.day !== d) groups.push({ day: d, items: [] }); groups[groups.length - 1].items.push(x); }
-  const total = Math.round(l.reduce((n, x) => n + x.mins, 0));
+  const groups: { day: string; key:string; items: Sitting[] }[] = [];
+  for (const x of visible) { const key=readingDayKey(x.at);if(groups[groups.length-1]?.key!==key)groups.push({key,day:day(x.at)+" · "+new Date(x.at).getFullYear(),items:[]});groups[groups.length-1].items.push(x); }
+  const total = Math.round(visible.reduce((n, x) => n + x.mins, 0));
   return (
     <>
       <div className="row-head"><span className="muted small">{tt("Toplam {0} saat {1} dakika okuma", Math.floor(total / 60), total % 60)}</span><span className="grow" />
-        <button className="chip" onClick={() => { if (confirm(tt("Okuma geçmişi silinsin mi? (Kitapların, notların ve kaldığın yerler kalır.)"))) { store.remove("bookHistory"); setL([]); } }}>{tt("Geçmişi temizle")}</button></div>
+        <button className="chip" onClick={() => { if (confirm(tt("Okuma geçmişi silinsin mi? (Kitapların, notların ve kaldığın yerler kalır.)"))) { if(store.set("bookHistory","[]"))setL([]);else setError(extraText("Geçmiş kaydedilemedi; hiçbir satır kaldırılmadı.","History could not be saved; no rows were removed.")); } }}>{tt("Geçmişi temizle")}</button></div>
+      <div className="reading-history-tools"><input value={query} onChange={e=>setQuery(e.target.value)} aria-label={extraText("Okuma geçmişinde ara","Search reading history")} placeholder={extraText("Kitap veya yazar…","Book or author…")}/><select aria-label={extraText("Okuma geçmişi dönemi","Reading history period")} value={period} onChange={e=>setPeriod(e.target.value)}><option value="all">{extraText("Bütün zamanlar","All time")}</option><option value="7">{extraText("Son 7 gün","Last 7 days")}</option><option value="30">{extraText("Son 30 gün","Last 30 days")}</option><option value="90">{extraText("Son 90 gün","Last 90 days")}</option></select><button className="chip" disabled={!visible.length} onClick={()=>void exportExtra("Luna-okuma-gecmisi.md",visible.map(x=>`- ${x.b.title} — ${x.b.author} · ${new Date(x.at).toLocaleString()} · ${Math.round(x.mins)} ${extraText("dk","min")} · ${pctText(x.from)} → ${pctText(x.to)}`).join("\n"),"md").catch(e=>setError(String(e)))}>{extraText("Görünen geçmişi dışa aktar","Export filtered history")}</button><small>{visible.length} / {l.length} {extraText("oturum","sessions")}</small></div>{error&&<p role="alert" className="extra-status">{error}</p>}{!visible.length&&<p className="muted empty-note">{extraText("Bu filtrelerde okuma oturumu yok.","No reading sessions match these filters.")}</p>}
       {groups.map((g) => (
-        <section key={g.day} className="row mu-hist">
+        <section key={g.key} className="row mu-hist">
           <h3>{g.day} · {tt("{0} dk", Math.round(g.items.reduce((n, x) => n + x.mins, 0)))}</h3>
           <div className="bk-hist">
             {g.items.map((x) => (
-              <button key={x.at} className="bk-hist-row" onClick={() => onDetail(x.b)}
+              <button key={x.b.path+":"+x.at} className="bk-hist-row" onClick={() => onDetail(x.b)}
                 onContextMenu={(e) => openMenu(e, [{ label: tt("Okumaya devam et"), act: () => onOpen(x.b) }, { label: tt("Detaylar"), act: () => onDetail(x.b) }, "sep",
                   ...deleteEntries(x.b), "sep",
-                  { label: tt("Geçmişten kaldır"), danger: true, act: () => { const n = loadReadHistory().filter((y) => y.at !== x.at); store.set("bookHistory", JSON.stringify(n)); setL(n); } }])}>
+                  { label: tt("Geçmişten kaldır"), danger: true, act: () => { const n = loadReadHistory().filter((y) => !(y.at===x.at&&y.b.path===x.b.path));if(store.set("bookHistory", JSON.stringify(n)))setL(n);else setError(extraText("Geçmiş kaydedilemedi.","History could not be saved.")); } }])}>
                 <BookCover src={x.b.cover} title={x.b.title} author={x.b.author} w={44} />
                 <span className="mu-song-t"><b className="ellipsis">{x.b.title}</b><span className="muted small ellipsis">{x.b.author}</span></span>
                 <span className="muted small bk-hist-r">{new Date(x.at).toLocaleTimeString(lang() === "tr" ? "tr-TR" : "en-US", { hour: "2-digit", minute: "2-digit" })} · {tt("{0} dk", Math.max(1, Math.round(x.mins)))}{x.aloud ? " · 🔊 " + tt("{0} dk", Math.max(1, Math.round(x.aloud))) : ""}<br />{pctText(x.from)} → {pctText(x.to)}</span>
@@ -746,22 +782,24 @@ function Catalogs({ query, onFetch }: { query: string; onFetch: Fetch }) {
 function AbCard({ a }: { a: Ab }) {
   const m = useMusic();
   const [busy, setBusy] = useState(false);
+  const[error,setError]=useState("");const lock=useRef(false),alive=useRef(true);useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const on = m.now?.book === a.identifier;
   const play = async () => {
-    setBusy(true);
+    if(lock.current)return;const selection=beginMusicSelection();lock.current=true;setBusy(true);setError("");
     try {
       const ch = await abChapters(a);
-      const last = Number(store.get("abPos:" + a.identifier) ?? 0);
+      if(!alive.current||!isMusicSelectionCurrent(selection))return;
+      const saved=Number(store.get("abPos:"+a.identifier)||0);const last=Number.isFinite(saved)?Math.max(0,Math.trunc(saved)):0;
       if (ch.length) { rememberAb(a); playQueue(ch, Math.min(last, ch.length - 1)); }
-    } finally { setBusy(false); }
+    } catch(e){if(alive.current)setError(String(e));}finally {lock.current=false;if(alive.current)setBusy(false);}
   };
   return (
-    <button className={"bk-card ab" + (on ? " on" : "")} onClick={play} disabled={busy} title={tt("Dinle")}
+    <button className={"bk-card ab" + (on ? " on" : "")} onClick={play} disabled={busy} title={error||tt("Dinle")}
       onContextMenu={(e) => openMenu(e, [...askEntries({ title: abTitle(a.title), author: abAuthor(a) }), "sep", { label: tt("Dinle"), act: play }])}>
       <div className="bk-cover sq"><img src={abCover(a.identifier)} alt="" loading="lazy" /></div>
       <b className="bk-t">{abTitle(a.title)}</b>
       <span className="muted small ellipsis">{abAuthor(a)}</span>
-      <span className="bk-prog muted small">{busy ? tt("Hazırlanıyor…") : on ? tt("Çalıyor") : store.get("abPos:" + a.identifier) ? tt("Devam et") : tt("Dinle")}</span>
+      <span className="bk-prog muted small">{error?extraText("Açılamadı · tekrar dene","Could not open · retry"):busy ? tt("Hazırlanıyor…") : on ? tt("Çalıyor") : store.get("abPos:" + a.identifier) ? tt("Devam et") : tt("Dinle")}</span>
     </button>
   );
 }
@@ -804,7 +842,7 @@ function Audiobooks({ query }: { query: string }) {
 
 // ---------- a book's page (like a film's): what it is, your verdict, questions for the assistant ----------
 type BookNote = { vote?: "like" | "dislike"; rating?: number; note?: string; read?: number; at: number };
-const bkKey = (b: { title: string; author: string }) => (b.title + "|" + b.author).toLocaleLowerCase();
+const bkKey = bookIdentity;
 export const loadBookNotes = () => store.json<Record<string, BookNote & { title: string; author: string }>>("bookDiary", {});
 /** Clears what Luna kept about a book: where you were, likes, points and note. The file stays. */
 export function clearBookRecord(b: { path: string; title: string; author: string }) {
@@ -812,7 +850,7 @@ export function clearBookRecord(b: { path: string; title: string; author: string
   const d = loadBookNotes();
   delete d[bkKey(b)];
   store.set("bookDiary", JSON.stringify(d));
-  store.set("bookRecent", JSON.stringify(store.json<string[]>("bookRecent", []).filter((p) => p !== b.path)));
+  store.set("bookRecent", JSON.stringify(bookPaths(store.json("bookRecent", [])).filter((p) => p !== b.path)));
   libSubs.forEach((f) => f());
 }
 /** A deleted book file leaves the library (rescanned). */
@@ -905,8 +943,12 @@ async function artFor(b: { title: string; author: string }, subjects: string[]):
 /** Luna Analiz names the six topics for books. */
 const BOOK_ASPECTS: Record<Aspect, string> = { story: "Kurgu", pace: "Tempo", acting: "Üslup", visuals: "Atmosfer ve dünya", emotion: "Karakter ve duygu", sound: "Fikirler ve derinlik" };
 function BookDetail({ b, onClose, onRead }: { b: Book; onClose: () => void; onRead: () => void }) {
+  b=withBookInfo(b);
+  const[,refreshBookInfo]=useState(0);useEffect(()=>{const f=()=>refreshBookInfo(n=>n+1);window.addEventListener("luna-book-data",f);return()=>window.removeEventListener("luna-book-data",f);},[]);
   const bookProfile = cleanProfile(store.json(profileKeyOf("book"), null));
-  const [info, setInfo] = useState<OlInfo | null | undefined>(undefined);
+  const [lookupInfo, setInfo] = useState<OlInfo | null | undefined>(undefined);
+  const saved=bookDetails(b.path);
+  const info:OlInfo|null|undefined=saved?{...lookupInfo,about:saved.description,subjects:saved.subjects,cover:saved.cover,url:saved.url,year:saved.year}:lookupInfo;
   const [, bump] = useState(0);
   const note = loadBookNotes()[bkKey(b)];
   const [text, setText] = useState(note?.note ?? "");
@@ -917,9 +959,10 @@ function BookDetail({ b, onClose, onRead }: { b: Book; onClose: () => void; onRe
     let alive = true;
     artFor(b, info?.subjects ?? []).then((a) => { if (alive) setArt(a); });
     return () => { alive = false; };
-  }, [b.path, info]);
+  }, [b.path, info === undefined, info?.subjects.join("|")]);
   useEffect(() => {
     let alive = true;
+    if(bookDetails(b.path))return;
     openLibrary(b).then((i) => alive && setInfo(i)).catch(() => alive && setInfo(null));
     return () => { alive = false; };
   }, [b.path]);
@@ -934,7 +977,7 @@ function BookDetail({ b, onClose, onRead }: { b: Book; onClose: () => void; onRe
   const cover = b.cover ?? info?.cover;
   const going = !!pos && pos.pct > 0.01 && pos.pct < 0.99;
   useEffect(() => {
-    const k = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } };
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape"&&!document.querySelector(".extra-modal")) { e.stopPropagation(); onClose(); } };
     window.addEventListener("keydown", k, true);
     return () => window.removeEventListener("keydown", k, true);
   }, []);
@@ -995,6 +1038,7 @@ function BookDetail({ b, onClose, onRead }: { b: Book; onClose: () => void; onRe
           </div>
         </div>
       </section>
+      <div className="book-topic-filters"><button className="chip" onClick={()=>manageBook(b.path)}>{extraText("Kapak / bilgileri bul ve düzenle","Find or edit cover / information")}</button><button className="chip" onClick={()=>manageBook(b.path,"shelves")}>{extraText("Raflara / okunacaklara ekle","Shelves / reading plan")}</button><small className="muted">{(shelfMap()[b.path]||[]).join(" · ")}</small></div>
       {info?.subjects.length ? (
         <section className="row"><h2>{tt("Konular")}</h2><div className="bk-d-subs">{info.subjects.map((s) => <span key={s} className="chip">{s}</span>)}</div></section>
       ) : null}
@@ -1027,18 +1071,12 @@ function BookDetail({ b, onClose, onRead }: { b: Book; onClose: () => void; onRe
 
 // ---------- reading history: every sitting with a book (when, how long, from where to where) ----------
 type Sitting = { b: Book; at: number; mins: number; from: number; to: number; aloud?: number };
-export const loadReadHistory = () => store.json<Sitting[]>("bookHistory", []);
+export const loadReadHistory = ():Sitting[] => {const raw=store.json<unknown>("bookHistory",[]);return Array.isArray(raw)?raw.filter((x):x is Sitting=>!!x&&validListedBook(x.b)&&[x.at,x.mins,x.from,x.to].every(n=>typeof n==="number"&&Number.isFinite(n))&&x.at>0&&x.mins>=0&&x.from>=0&&x.from<=1&&x.to>=0&&x.to<=1&&(x.aloud===undefined||(typeof x.aloud==="number"&&Number.isFinite(x.aloud)&&x.aloud>=0))):[];};
 function addSitting(b: Book, start: number, from: number, to: number, aloudSecs = 0) {
   const mins = (Date.now() - start) / 60000;
-  if (mins < 0.3) return;
-  const l = loadReadHistory();
-  const last = l[0];
-  const aloud = aloudSecs / 60;
-  // back to the same book within half an hour: one sitting
-  if (last && last.b.path === b.path && start - (last.at + last.mins * 60000) < 30 * 60000) {
-    l[0] = { ...last, mins: last.mins + mins, to, aloud: (last.aloud ?? 0) + aloud || undefined };
-  } else l.unshift({ b, at: start, mins, from, to, aloud: aloud >= 0.1 ? aloud : undefined });
-  store.set("bookHistory", JSON.stringify(l.slice(0, 300)));
+  const rows=loadReadHistory();
+  const next=mergeReadingSession(rows,{b,at:start,mins,from,to,aloud:Number.isFinite(aloudSecs)&&aloudSecs>=6?Math.min(mins,aloudSecs/60):undefined});
+  if(next!==rows)store.set("bookHistory",JSON.stringify(next));
 }
 const isFinishedBook = (b: { path: string; title: string; author: string }) => (getPos(b.path)?.pct ?? 0) >= 0.99 || !!loadBookNotes()[bkKey(b)]?.read;
 
@@ -1059,14 +1097,18 @@ const THEMES: Record<Theme, { bg: string; fg: string; label: string }> = {
   forest: { bg: "#1d2a24", fg: "#dfeee5", label: "Orman" },
 };
 const LINE: Record<Spacing, number> = { tight: 1.45, normal: 1.7, loose: 1.95 };
-const loadSet = (): ReaderSet => {
-  const s = { theme: "sepia" as Theme, size: 100, font: "serif" as const, spread: true, spacing: "normal" as Spacing, bold: false, scroll: false, dim: 0, warm: 0,
-    ...store.json<Partial<ReaderSet> & { theme?: string }>("readerSet", {}) } as ReaderSet;
-  // the earlier themes: "gray" became "Akşam"
-  if (!(s.theme in THEMES)) s.theme = (s.theme as string) === "gray" ? "dusk" : "sepia";
-  return s;
-};
+const loadSet = (): ReaderSet => cleanReadingPreferences(store.json("readerSet",{}));
 type Toc = { label: string; href: string; subitems?: Toc[] };
+
+let pendingQuoteJump: { path: string; cfi: string } | null = null;
+function QuoteNotebook({ books, compact = false }: { books: Book[]; compact?: boolean }) {
+  const [shown,setShown]=useState(false),[known,setKnown]=useState<Book[]>(books),[message,setMessage]=useState("");
+  const generation=useRef(0);useEffect(()=>()=>{generation.current++;},[]);
+  const close=()=>{generation.current++;setShown(false);};
+  const open=async()=>{const token=++generation.current;setKnown(books);setShown(true);setMessage("");try{const list=await loadBookLibrary();if(token!==generation.current)return;setKnown(mergeBookSources<Book>(books,list,store.json("bookOpened",{})));}catch(e){if(token===generation.current)setMessage(String(e));}};
+  const entries=known.flatMap(b=>loadAnn(b).hl.map(h=>({b,h,key:JSON.stringify([b.path,h.id])})));
+  return <><button className={compact?"rb":"chip"} title={extraText("Ortak alıntı defteri","Commonplace notebook")} onClick={()=>void open()}>{compact?"❞":extraText("Alıntı defterim","My quotations")}</button>{shown&&<ExtraModal title={extraText("Ortak alıntı defteri","Commonplace notebook")} close={close}>{message&&<p className="extra-status" role="status">{message}</p>}<QuoteNotebookPanel entries={entries} onSource={x=>{const book=known.find(b=>b.path===x.b.path);if(!book)return;pendingQuoteJump={path:book.path,cfi:x.h.cfi};requestOpenBook(book);window.dispatchEvent(new CustomEvent("luna-quote-jump",{detail:pendingQuoteJump}));close();}}/></ExtraModal>}</>;
+}
 
 // ---------- highlights, notes and bookmarks (per book, on this computer) ----------
 type HlColor = "yellow" | "green" | "blue" | "pink" | "line";
@@ -1100,7 +1142,7 @@ type Side = "" | "toc" | "marks" | "notes" | "find";
 
 function Reader({ b, onClose }: { b: Book; onClose: () => void }) {
   const [set, setSetState] = useState<ReaderSet>(loadSet);
-  const setSet = (p: Partial<ReaderSet>) => setSetState((s) => { const n = { ...s, ...p }; store.set("readerSet", JSON.stringify(n)); return n; });
+  const setSet = (p: Partial<ReaderSet>) => setSetState((s) => { const n = cleanReadingPreferences({ ...s, ...p }); store.set("readerSet", JSON.stringify(n)); return n; });
   const [panel, setPanelNow] = useState<"" | "aa" | "music" | "side">("");
   // a popup that closes fades out instead of vanishing
   const [leaving, setLeaving] = useState<"" | "aa" | "music">("");
@@ -1127,6 +1169,8 @@ function Reader({ b, onClose }: { b: Book; onClose: () => void }) {
   const [annError, setAnnError] = useState("");
   const [legacyAnn, setLegacyAnn] = useState(() => !store.get(annKey(b)) && !!store.get("bkAnn:" + bkKey(b)));
   const setAnn = (f: (a: Ann) => Ann) => {
+    const raw=store.get(annKey(b));
+    if(raw!==null){try{const parsed=JSON.parse(raw);if(!annotationDataWritable(parsed,cleanAnn(parsed)))throw Error("damaged");}catch{setAnnError(extraText("Not kayıtları hasarlı; üzerine yazılmadı. Önce Ayarlar › Yedekleme üzerinden kopya al.","Annotation data is damaged and was not overwritten. Save a backup first."));return false;}}
     const n = f(ann);
     if (!store.set(annKey(b), JSON.stringify(n))) { setAnnError(tt("Not kaydedilemedi. Depolama alanını kontrol et.")); return false; }
     setAnnError(""); setAnnState(n); return true;
@@ -1134,6 +1178,8 @@ function Reader({ b, onClose }: { b: Book; onClose: () => void }) {
   const [sel, setSel] = useState<Sel | null>(null);
   const [noteFor, setNoteFor] = useState<{ id?: string; hlId?: string; text: string } | null>(null);
   const nav = useRef<Nav>({ next: () => {}, prev: () => {} });
+  useEffect(() => { const jump=(e:Event)=>{const target=(e as CustomEvent<{path:string;cfi:string}>).detail;if(target?.path===b.path&&nav.current.go){nav.current.go(target.cfi);pendingQuoteJump=null;}};window.addEventListener("luna-quote-jump",jump);return()=>window.removeEventListener("luna-quote-jump",jump);},[b.path]);
+
   // the bars fade while you read; a move of the mouse brings them back
   const [idle, setIdle] = useState(false);
   const idleT = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -1142,6 +1188,7 @@ function Reader({ b, onClose }: { b: Book; onClose: () => void }) {
   const closeAll = () => { setPanel(""); setSel(null); };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if(document.querySelector(".extra-modal"))return;
       // Keys from inside the EPUB frame are passed on to the window, so the target isn't always an element.
       const el = e.target instanceof Element ? (e.target as HTMLElement) : null;
       // A focused button keeps Space for its own activation, but arrow/page keys should still
@@ -1215,6 +1262,7 @@ function Reader({ b, onClose }: { b: Book; onClose: () => void }) {
         <button className={"rb" + (panel === "music" ? " on" : "") + (music.now && !music.paused ? " playing" : "")} aria-label={tt("Müzik")} title={tt("Müzik")}
           onClick={() => { setSel(null); setPanel(panel === "music" ? "" : "music"); }}><Icon d="M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" size={16} /></button>
         <button className={"rb aa" + (panel === "aa" ? " on" : "")} aria-label={tt("Temalar ve ayarlar")} title={tt("Temalar ve ayarlar")} onClick={() => { setSel(null); setPanel(panel === "aa" ? "" : "aa"); }}>Aa</button>
+        <QuoteNotebook books={[b]} compact/>
         <button className={"rb" + (marked ? " on marked" : "")} aria-label={marked ? tt("Yer imini kaldır") : tt("Yer imi ekle")} title={marked ? tt("Yer imini kaldır") : tt("Yer imi ekle")} onClick={toggleMark}>
           <Icon d="M6 3h12v18l-6-4-6 4z" size={16} fill={!!marked} /></button>
       </div>
@@ -1555,7 +1603,10 @@ function EpubView({ b, set, nav, onState, onToc, onErr, hl, onSelect, onTap, onM
         if (!alive) return;
         if (nav2?.toc) onToc(nav2.toc as Toc[]);
         const saved = getPos(b.path);
-        await rendition.display(typeof saved?.loc === "string" ? saved.loc : undefined);
+        const quote = pendingQuoteJump?.path === b.path ? pendingQuoteJump : null;
+        // a saved or quoted place that no longer exists in the file (a replaced edition) falls back to the next one, last to the start of the book
+        await displayFirstWorking((t) => rendition.display(t), [quote?.cfi, typeof saved?.loc === "string" ? saved.loc : undefined]);
+        if (quote === pendingQuoteJump) pendingQuoteJump = null;
         if (!alive) return;
         paint(cb.current.hl);
         let located = false;
@@ -1565,7 +1616,10 @@ function EpubView({ b, set, nav, onState, onToc, onErr, hl, onSelect, onTap, onM
         const chapterOf = (href: string) => flat.find((t) => href && t.href.split("#")[0].endsWith(href.split("#")[0]))?.label.trim();
         rendition.on("relocated", (loc: any) => {
           const cfi = loc.start.cfi;
-          const pct = located ? book.locations.percentageFromCfi(cfi) : loc.start.percentage ?? saved?.pct ?? 0;
+          const dd = loc.start.displayed;
+          // before the page positions of the whole book exist (they are made in the background, and a book closed soon after opening never gets them)
+          // the chapter and the page in it give the estimate, not the value saved last time
+          const pct = located ? book.locations.percentageFromCfi(cfi) : loc.start.percentage ?? spineProgress(loc.start.index, (book as any).spine?.length, dd?.page, dd?.total, loc.atEnd) ?? saved?.pct ?? 0;
           const chapter = chapterOf(loc.start.href);
           const d = loc.start.displayed;
           const page = d ? tt("Bölümde {0}/{1}", d.page, d.total) : "";
@@ -1573,7 +1627,7 @@ function EpubView({ b, set, nav, onState, onToc, onErr, hl, onSelect, onTap, onM
           setPos(b.path, { loc: cfi, pct, at: Date.now(), chapter });
         });
         nav.current = {
-          next: () => rendition.next(), prev: () => rendition.prev(), go: (h) => rendition.display(h),
+          next: () => rendition.next(), prev: () => rendition.prev(), go: (h) => { rendition.display(h).catch(() => {}); },
           seek: (p) => {
             if (located) { rendition.display(book.locations.cfiFromPercentage(p)); return; }
             // page positions not ready (or failed): jump to the chapter at that point

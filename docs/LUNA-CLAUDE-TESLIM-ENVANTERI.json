@@ -1,0 +1,604 @@
+{
+  "source": "C:\\Users\\K\\Downloads\\Yeni klasör (3)\\Yeni klasör",
+  "archives": [
+    {
+      "archive": "files (1).zip",
+      "sha256": "15643c14f61a48ea119ceb4cdfaed58432be85edd6d579d9d6acf2d95602e213",
+      "entries": [
+        {
+          "name": "Luna-Asistan-ARA1.patch",
+          "bytes": 74633,
+          "sha256": "e86333a57a23e502bb4cdd6fc9021fceeb2a36cd5c1f1cccddb5a860c0f0731e",
+          "paths": [
+            "app/scripts/assistant-safety-regression.cjs",
+            "app/src/ai.ts",
+            "app/src/assistantHistory.ts",
+            "app/src/assistantPresentation.ts",
+            "app/src/assistantProviderModel.ts",
+            "app/src/assistantReliability.ts",
+            "app/src/assistantToolRun.ts"
+          ]
+        },
+        {
+          "name": "Luna-Asistan-ARA1-RAPOR.md",
+          "bytes": 3261,
+          "sha256": "b579593503ed64df7ac8b962faf1e0e42ed5d5957cdc141e87bba09390d1778f"
+        },
+        {
+          "name": "Luna-Asistan-ARA1-SHA256.txt",
+          "bytes": 1247,
+          "sha256": "0361369baed9926299ffcf7a9c3201f8f6ee7d22102502c001443053c1c31716"
+        }
+      ]
+    },
+    {
+      "archive": "files (10).zip",
+      "sha256": "cfb9633c59a5ae74a17bc7945dd2fe5255f2b584abb5adf5fdd46b90b44900f6",
+      "entries": [
+        {
+          "name": "luna-kitap-muzik-ARA3.patch",
+          "bytes": 86059,
+          "sha256": "47fd27abd39866e7b9bf2f0ae7ab45f3d330e55081f68fd5536f60342ae1a8ff",
+          "paths": [
+            "app/package.json",
+            "app/scripts/book-music-regression.cjs",
+            "app/src/App.tsx",
+            "app/src/BookData.ts",
+            "app/src/BookManager.tsx",
+            "app/src/BookMusic.css",
+            "app/src/Books.tsx",
+            "app/src/Music.tsx",
+            "app/src/bookLibraryModel.ts",
+            "app/src/bookReaderModel.ts",
+            "app/src/i18n-en.ts",
+            "app/src/musicModel.ts"
+          ]
+        },
+        {
+          "name": "luna-kitap-muzik-ARA3-rapor.md",
+          "bytes": 10860,
+          "sha256": "6dc8003c7af8b2eda54aa120f2f6637800100e9e3efcd772b7709ff9d366b8c5"
+        }
+      ]
+    },
+    {
+      "archive": "files (11).zip",
+      "sha256": "6c9f9358e79bc5865037bbdc399280e819ca2dc60a429b91e6a909cee52de842",
+      "entries": [
+        {
+          "name": "luna-gelistirme-ARA2-durum.md",
+          "bytes": 8464,
+          "sha256": "367a996b0bd8d827faf8dc9507a39e1354947e4548c8a41f5500ff7260bb65af"
+        },
+        {
+          "name": "luna-gelistirme-ARA2.patch",
+          "bytes": 41898,
+          "sha256": "529e53a01e77a08eed65431a249e97802fe12bc429b251070813d98c54566e75",
+          "paths": [
+            ".github/workflows/ci.yml",
+            "app/package.json",
+            "app/scripts/quality-regression.cjs",
+            "app/src-tauri/src/indexers.rs",
+            "app/src-tauri/src/yt.rs",
+            "app/src/Discover.tsx",
+            "app/src/ErrorBoundary.css",
+            "app/src/ErrorBoundary.tsx",
+            "app/src/M3u.tsx",
+            "app/src/Slash.ts",
+            "app/src/Taste.tsx",
+            "app/src/TasteProfile.tsx",
+            "app/src/i18n-en.ts",
+            "app/src/main.tsx",
+            "app/src/tasteFill.ts",
+            "app/src/textMatch.ts"
+          ]
+        }
+      ]
+    },
+    {
+      "archive": "files (12).zip",
+      "sha256": "805690a8bcdc22282cbb8f9cc8f38673bc57046942f4cde92ae21ad0e6bdf45f",
+      "entries": [
+        {
+          "name": "luna-kitap-muzik-ARA3.patch",
+          "bytes": 86059,
+          "sha256": "47fd27abd39866e7b9bf2f0ae7ab45f3d330e55081f68fd5536f60342ae1a8ff",
+          "paths": [
+            "app/package.json",
+            "app/scripts/book-music-regression.cjs",
+            "app/src/App.tsx",
+            "app/src/BookData.ts",
+            "app/src/BookManager.tsx",
+            "app/src/BookMusic.css",
+            "app/src/Books.tsx",
+            "app/src/Music.tsx",
+            "app/src/bookLibraryModel.ts",
+            "app/src/bookReaderModel.ts",
+            "app/src/i18n-en.ts",
+            "app/src/musicModel.ts"
+          ]
+        },
+        {
+          "name": "luna-kitap-muzik-ARA3-rapor.md",
+          "bytes": 11025,
+          "sha256": "58795df7b54ebc3a6de5591ad5ed5d81e59b58bcbc469e45a1a556dba17e12d6"
+        },
+        {
+          "name": "luna-kitap-muzik-NIHAI-rapor.md",
+          "bytes": 109835,
+          "sha256": "7e67acd5699b6c036d5ae20f837064b6e361792ffa81ee2addb55fe799b09379"
+        },
+        {
+          "name": "luna-kitap-muzik-NIHAI.patch",
+          "bytes": 93124,
+          "sha256": "293fb3ff5473b0ba3b34b4e99c76ae4d66c0e187307ae8d027eb9227797ab068",
+          "paths": [
+            "app/package.json",
+            "app/scripts/book-music-regression.cjs",
+            "app/src/App.tsx",
+            "app/src/BookData.ts",
+            "app/src/BookManager.tsx",
+            "app/src/BookMusic.css",
+            "app/src/Books.tsx",
+            "app/src/Music.tsx",
+            "app/src/bookLibraryModel.ts",
+            "app/src/bookReaderModel.ts",
+            "app/src/i18n-en.ts",
+            "app/src/musicModel.ts",
+            "docs/LUNA-KITAP-MUZIK-GELISTIRMELERI.md"
+          ]
+        },
+        {
+          "name": "Luna-Player-Kitap-Muzik-NIHAI-tam-kaynak.zip",
+          "bytes": 3612472,
+          "sha256": "0b0dd2bf480f4d1b520ca3b31f05e6e7037fec1301cb2c0d804db403d802bd85"
+        },
+        {
+          "name": "luna-kitap-muzik-NIHAI-degisen-dosyalar.zip",
+          "bytes": 191360,
+          "sha256": "632814c797489bb0949a8f8fbfaabd1825bd5ce2336b46a1819e56c4bdc2b0dd"
+        },
+        {
+          "name": "luna-kitap-muzik-arayuz-kontrolleri.zip",
+          "bytes": 10084,
+          "sha256": "266ae9f5900b82497ee6f7a22b5ea1b4d7ba18c163b8c8252a0c2d6cb2f2d1df"
+        }
+      ]
+    },
+    {
+      "archive": "files (14).zip",
+      "sha256": "64fe6831c620bd42577393ed9c03501dbd58284ad8ca45c6c1c3950158a93c04",
+      "entries": [
+        {
+          "name": "Luna-AB-ara-01-RAPOR.md",
+          "bytes": 36497,
+          "sha256": "745aec98d95c10ea791dabd4d94575f7b2ea5f33bac08963844114db3a898344"
+        },
+        {
+          "name": "Luna-AB-ara-01.patch",
+          "bytes": 29205,
+          "sha256": "e551b95bf68ecfb138d2e8bee5b9ef0f32277529ff19bd03a84a2184f0116579",
+          "paths": [
+            "app/scripts/browser-regression.cjs",
+            "app/scripts/translation-regression.cjs",
+            "app/src/Browser.tsx",
+            "app/src/Taste.tsx",
+            "app/src/browserModel.ts",
+            "app/src/browserPage.d.ts",
+            "app/src/browserPage.js",
+            "app/src/browserTranslation.ts"
+          ]
+        },
+        {
+          "name": "Luna-AB-NIHAI-RAPOR.md",
+          "bytes": 50333,
+          "sha256": "3b906ee080c2a2290161fa82e9775843945205b15a276b87d8c5d9527aef3fef"
+        },
+        {
+          "name": "Luna-AB-NIHAI.patch",
+          "bytes": 40679,
+          "sha256": "defc7d3303ecc2e2fde92f0e9e20547c221e13520f97cb1959ae8d14c20a39a2",
+          "paths": [
+            "CHANGELOG.md",
+            "app/scripts/browser-regression.cjs",
+            "app/scripts/translation-regression.cjs",
+            "app/src/Browser.tsx",
+            "app/src/Slash.ts",
+            "app/src/Taste.tsx",
+            "app/src/browserModel.ts",
+            "app/src/browserPage.d.ts",
+            "app/src/browserPage.js",
+            "app/src/browserTranslation.ts",
+            "app/src/i18n-en.ts"
+          ]
+        },
+        {
+          "name": "Luna-AB-ara-02.patch",
+          "bytes": 40679,
+          "sha256": "defc7d3303ecc2e2fde92f0e9e20547c221e13520f97cb1959ae8d14c20a39a2",
+          "paths": [
+            "CHANGELOG.md",
+            "app/scripts/browser-regression.cjs",
+            "app/scripts/translation-regression.cjs",
+            "app/src/Browser.tsx",
+            "app/src/Slash.ts",
+            "app/src/Taste.tsx",
+            "app/src/browserModel.ts",
+            "app/src/browserPage.d.ts",
+            "app/src/browserPage.js",
+            "app/src/browserTranslation.ts",
+            "app/src/i18n-en.ts"
+          ]
+        },
+        {
+          "name": "Luna-AB-kontrol-betikleri.zip",
+          "bytes": 6294,
+          "sha256": "e0ba117d1c1b6aa82501ff8a3c3c0b7a534e62ba9e071dd291cfc9fd308c1414"
+        },
+        {
+          "name": "Luna-Player-Asistan-Browser-Guncel-Tam-Kaynak.zip",
+          "bytes": 5480895,
+          "sha256": "f3c2260c44135204ff8bb0ab002abda461e6d5f35ba0cab7e0ea26b393b89e1c"
+        }
+      ]
+    },
+    {
+      "archive": "files (2).zip",
+      "sha256": "999348773869e824ca16adb00f09b5f47c54d8267ff7ce6c9c2deee3da4c89dd",
+      "entries": [
+        {
+          "name": "luna-gelistirme-ARA1-durum.md",
+          "bytes": 6811,
+          "sha256": "cb3b2b8568e3db42d88595ddbd541b8e28391236b6c8ae900806ad0760447e2c"
+        },
+        {
+          "name": "luna-gelistirme-ARA1.patch",
+          "bytes": 28307,
+          "sha256": "e616fdf0df526f2e482042a8e4bdbd2bd5726085252467cc70983a6376ead5b5",
+          "paths": [
+            ".github/workflows/ci.yml",
+            "app/package.json",
+            "app/scripts/quality-regression.cjs",
+            "app/src-tauri/src/indexers.rs",
+            "app/src-tauri/src/yt.rs",
+            "app/src/ErrorBoundary.css",
+            "app/src/ErrorBoundary.tsx",
+            "app/src/M3u.tsx",
+            "app/src/Taste.tsx",
+            "app/src/i18n-en.ts",
+            "app/src/main.tsx",
+            "app/src/textMatch.ts"
+          ]
+        }
+      ]
+    },
+    {
+      "archive": "files (3).zip",
+      "sha256": "97522d608031e91214648f647fae72d792261c17b1d4f3ccd87083b2c24cd9a3",
+      "entries": [
+        {
+          "name": "Luna-Asistan-ARA1.patch",
+          "bytes": 74633,
+          "sha256": "e86333a57a23e502bb4cdd6fc9021fceeb2a36cd5c1f1cccddb5a860c0f0731e",
+          "paths": [
+            "app/scripts/assistant-safety-regression.cjs",
+            "app/src/ai.ts",
+            "app/src/assistantHistory.ts",
+            "app/src/assistantPresentation.ts",
+            "app/src/assistantProviderModel.ts",
+            "app/src/assistantReliability.ts",
+            "app/src/assistantToolRun.ts"
+          ]
+        },
+        {
+          "name": "Luna-Asistan-ARA1-RAPOR.md",
+          "bytes": 3261,
+          "sha256": "b579593503ed64df7ac8b962faf1e0e42ed5d5957cdc141e87bba09390d1778f"
+        },
+        {
+          "name": "Luna-Asistan-ARA1-SHA256.txt",
+          "bytes": 1247,
+          "sha256": "0361369baed9926299ffcf7a9c3201f8f6ee7d22102502c001443053c1c31716"
+        },
+        {
+          "name": "Luna-Asistan-ARA2.patch",
+          "bytes": 187211,
+          "sha256": "209f5ad54711527d0f66e477ccbdb8246cb87ddd9c55f880611613d20f5b2c29",
+          "paths": [
+            "app/scripts/assistant-safety-regression.cjs",
+            "app/scripts/deep-refinement-regression.cjs",
+            "app/scripts/delivery-regression.cjs",
+            "app/src/AssistantTools.css",
+            "app/src/AssistantTools.tsx",
+            "app/src/Taste.tsx",
+            "app/src/ai.ts",
+            "app/src/assistantHistory.ts",
+            "app/src/assistantPresentation.ts",
+            "app/src/assistantProviderModel.ts",
+            "app/src/assistantReliability.ts",
+            "app/src/assistantToolRun.ts"
+          ]
+        },
+        {
+          "name": "Luna-Asistan-ARA2-RAPOR.md",
+          "bytes": 6592,
+          "sha256": "d208d02ec2b640787f46d09fb3f17bce08e7345c940595ad883e04d132a39869"
+        },
+        {
+          "name": "Luna-Asistan-ARA2-SHA256.txt",
+          "bytes": 2138,
+          "sha256": "78a8cb84476059fbf2a192333e30ee0c1ad38baf9e3fa885fc91c03f05f3041f"
+        }
+      ]
+    },
+    {
+      "archive": "files (4).zip",
+      "sha256": "a99e390eb5d9611bdf3782dc1a0d193d91e725e23bed0c0475ef2c08913fc361",
+      "entries": [
+        {
+          "name": "LUNA-FILM-ARA1.patch",
+          "bytes": 98243,
+          "sha256": "25454d3da11c3fd5c4ee8f409a7d9cd4d4d432c8e9f6789375c078a2b1ace53f",
+          "paths": []
+        },
+        {
+          "name": "YENI-DEGISIKLIKLER-ARA1.md",
+          "bytes": 4904,
+          "sha256": "d7cdf1104e5c3f778cde95e182e71b1bff0deaccac0f0e28cb20705289814ba4"
+        },
+        {
+          "name": "SHA256-ONCE-SONRA-ARA1.txt",
+          "bytes": 1407,
+          "sha256": "05b0341bce2de4143edee2f9da7f27c905794bd247c265ec73185c6bfd2f7ed3"
+        }
+      ]
+    },
+    {
+      "archive": "files (5).zip",
+      "sha256": "6c8a20e0b00ac3b35c4f396e715a81caa5054990b6c7dc942d2fad3d572240bf",
+      "entries": [
+        {
+          "name": "fixes-interim-1.patch",
+          "bytes": 19365,
+          "sha256": "3ec75bc86421901c12904218df6a040e42a8eca550d36b019452bc5de287cf6f",
+          "paths": [
+            "backend/subtitle_sdh.py",
+            "backend/test_subtitle_sdh.py",
+            "src/dub-service.js",
+            "tests/dub-service.test.js",
+            "tests/test_dub_finish.py",
+            "tests/test_dub_plan_regressions.py",
+            "tools/voxcpm2/dub_finish.py",
+            "tools/voxcpm2/dub_plan.py",
+            "tools/voxcpm2/dub_quality.py"
+          ]
+        },
+        {
+          "name": "REPORT-interim-1.md",
+          "bytes": 25309,
+          "sha256": "51291a1c45a87ec18b0b8b6ec2b241a5dbc9c6e0d88dfa57ae926ad3637dd734"
+        }
+      ]
+    },
+    {
+      "archive": "files (6).zip",
+      "sha256": "8f2257a2948b2e80a363fa038be7a52b79dea037f0173f25acf836997b316b5f",
+      "entries": [
+        {
+          "name": "Luna-Browser-ARA1.patch",
+          "bytes": 19953,
+          "sha256": "b859a46da6fc0864c71e8d1a16f087ea77f0fba7d11fce60badc9ff92abb52d3",
+          "paths": [
+            "app/src-tauri/src/browser.rs",
+            "app/src-tauri/src/browser_url.rs",
+            "app/src/Browser.tsx"
+          ]
+        },
+        {
+          "name": "Luna-Browser-ARA1-RAPOR.md",
+          "bytes": 26863,
+          "sha256": "66e3a5de857005acaf5cd8850c5088ce67909333340f2f8b91c262aa8736aff8"
+        },
+        {
+          "name": "browser.rs",
+          "bytes": 27835,
+          "sha256": "417892d77715ee734d77db4f2abbea78459d3d2984063202ed20d2e80d739fff"
+        },
+        {
+          "name": "browser_url.rs",
+          "bytes": 4204,
+          "sha256": "796be66d8105284ae9b8271ee16ce9520d96073ad3bf00e7cb44b42899bd9d5e"
+        },
+        {
+          "name": "Browser.tsx",
+          "bytes": 44849,
+          "sha256": "3b621d1ebc11ab2621b27fcec61a6b89cf67dd23d23881422237a785deee20e3"
+        }
+      ]
+    },
+    {
+      "archive": "files (7).zip",
+      "sha256": "7694f429de2915df7120b82921f206782d1db59f83ec92fbbae2469a19f4e006",
+      "entries": [
+        {
+          "name": "luna-gelistirme-ARA2-durum.md",
+          "bytes": 8464,
+          "sha256": "367a996b0bd8d827faf8dc9507a39e1354947e4548c8a41f5500ff7260bb65af"
+        },
+        {
+          "name": "luna-gelistirme-ARA2.patch",
+          "bytes": 41898,
+          "sha256": "529e53a01e77a08eed65431a249e97802fe12bc429b251070813d98c54566e75",
+          "paths": [
+            ".github/workflows/ci.yml",
+            "app/package.json",
+            "app/scripts/quality-regression.cjs",
+            "app/src-tauri/src/indexers.rs",
+            "app/src-tauri/src/yt.rs",
+            "app/src/Discover.tsx",
+            "app/src/ErrorBoundary.css",
+            "app/src/ErrorBoundary.tsx",
+            "app/src/M3u.tsx",
+            "app/src/Slash.ts",
+            "app/src/Taste.tsx",
+            "app/src/TasteProfile.tsx",
+            "app/src/i18n-en.ts",
+            "app/src/main.tsx",
+            "app/src/tasteFill.ts",
+            "app/src/textMatch.ts"
+          ]
+        }
+      ]
+    },
+    {
+      "archive": "files (8).zip",
+      "sha256": "f9ec1b8683eab0e9a25f8be097c186f29b4bde642c04d38aad020db27bbf289e",
+      "entries": [
+        {
+          "name": "LUNA-FILM-ARA1.patch",
+          "bytes": 98243,
+          "sha256": "25454d3da11c3fd5c4ee8f409a7d9cd4d4d432c8e9f6789375c078a2b1ace53f",
+          "paths": []
+        },
+        {
+          "name": "YENI-DEGISIKLIKLER-ARA1.md",
+          "bytes": 4904,
+          "sha256": "d7cdf1104e5c3f778cde95e182e71b1bff0deaccac0f0e28cb20705289814ba4"
+        },
+        {
+          "name": "SHA256-ONCE-SONRA-ARA1.txt",
+          "bytes": 1407,
+          "sha256": "05b0341bce2de4143edee2f9da7f27c905794bd247c265ec73185c6bfd2f7ed3"
+        }
+      ]
+    },
+    {
+      "archive": "files (9).zip",
+      "sha256": "025856ea03845837cad96f1f4815a89ea6fe5e9190fa95bd5319bb32604d00a2",
+      "entries": [
+        {
+          "name": "Luna-Asistan-ARA1.patch",
+          "bytes": 74633,
+          "sha256": "e86333a57a23e502bb4cdd6fc9021fceeb2a36cd5c1f1cccddb5a860c0f0731e",
+          "paths": [
+            "app/scripts/assistant-safety-regression.cjs",
+            "app/src/ai.ts",
+            "app/src/assistantHistory.ts",
+            "app/src/assistantPresentation.ts",
+            "app/src/assistantProviderModel.ts",
+            "app/src/assistantReliability.ts",
+            "app/src/assistantToolRun.ts"
+          ]
+        },
+        {
+          "name": "Luna-Asistan-ARA1-RAPOR.md",
+          "bytes": 3261,
+          "sha256": "b579593503ed64df7ac8b962faf1e0e42ed5d5957cdc141e87bba09390d1778f"
+        },
+        {
+          "name": "Luna-Asistan-ARA1-SHA256.txt",
+          "bytes": 1247,
+          "sha256": "0361369baed9926299ffcf7a9c3201f8f6ee7d22102502c001443053c1c31716"
+        },
+        {
+          "name": "Luna-Asistan-ARA2.patch",
+          "bytes": 187211,
+          "sha256": "209f5ad54711527d0f66e477ccbdb8246cb87ddd9c55f880611613d20f5b2c29",
+          "paths": [
+            "app/scripts/assistant-safety-regression.cjs",
+            "app/scripts/deep-refinement-regression.cjs",
+            "app/scripts/delivery-regression.cjs",
+            "app/src/AssistantTools.css",
+            "app/src/AssistantTools.tsx",
+            "app/src/Taste.tsx",
+            "app/src/ai.ts",
+            "app/src/assistantHistory.ts",
+            "app/src/assistantPresentation.ts",
+            "app/src/assistantProviderModel.ts",
+            "app/src/assistantReliability.ts",
+            "app/src/assistantToolRun.ts"
+          ]
+        },
+        {
+          "name": "Luna-Asistan-ARA2-RAPOR.md",
+          "bytes": 6592,
+          "sha256": "d208d02ec2b640787f46d09fb3f17bce08e7345c940595ad883e04d132a39869"
+        },
+        {
+          "name": "Luna-Asistan-ARA2-SHA256.txt",
+          "bytes": 2138,
+          "sha256": "78a8cb84476059fbf2a192333e30ee0c1ad38baf9e3fa885fc91c03f05f3041f"
+        }
+      ]
+    },
+    {
+      "archive": "files.zip",
+      "sha256": "3aa0c9cc6293fd59aaf80bba4f4df35eae107501a3ccece8ff6b232fbc32da3e",
+      "entries": [
+        {
+          "name": "LUNA-FILM-ARA1.patch",
+          "bytes": 98243,
+          "sha256": "25454d3da11c3fd5c4ee8f409a7d9cd4d4d432c8e9f6789375c078a2b1ace53f",
+          "paths": []
+        },
+        {
+          "name": "YENI-DEGISIKLIKLER-ARA1.md",
+          "bytes": 4904,
+          "sha256": "d7cdf1104e5c3f778cde95e182e71b1bff0deaccac0f0e28cb20705289814ba4"
+        },
+        {
+          "name": "SHA256-ONCE-SONRA-ARA1.txt",
+          "bytes": 1407,
+          "sha256": "05b0341bce2de4143edee2f9da7f27c905794bd247c265ec73185c6bfd2f7ed3"
+        }
+      ]
+    },
+    {
+      "archive": "files (17).zip",
+      "sha256": "445e4e2e77840786b9dcd45fc3d4ce956cf96e45fc89539c678233cb4bff07b1",
+      "entries": [
+        {
+          "name": "Luna-ARA-02.patch",
+          "bytes": 380331,
+          "sha256": "6c57204171eb834fd6603a0dc0f9d1137d7becbdf802f2cf0a8b3a9a0b7ca370"
+        },
+        {
+          "name": "Luna-ARA-02-RAPOR.md",
+          "bytes": 9102,
+          "sha256": "720f125d089cc6862df6bdd0eeb627ff768507544b1ff2f584d5787eff2a471f"
+        },
+        {
+          "name": "Luna-ARA-02-test-ciktilari.txt",
+          "bytes": 1591,
+          "sha256": "b06edeb7af588144a301b223e1dd0c4a78b96d033057e182cb199971cd0be81a"
+        },
+        {
+          "name": "Luna-ARA-03.patch",
+          "bytes": 418430,
+          "sha256": "b4bdcde7211e206f90f4164b50de58766c45acb5a6bd003f394c7a7adab9a4e1"
+        },
+        {
+          "name": "Luna-ARA-03-RAPOR.md",
+          "bytes": 12243,
+          "sha256": "cbb44976a242f6efe1fca2cfb2525150bde5adb0a1579a463e8c3193e8272591"
+        },
+        {
+          "name": "Luna-ARA-03-test-ciktilari.txt",
+          "bytes": 3281,
+          "sha256": "4a485f490e32c6ebca97b640114af63dc9575a2b9c454706ce1b7b15e21818e3"
+        },
+        {
+          "name": "Luna-ARA-03-tam-kaynak.zip",
+          "bytes": 3783419,
+          "sha256": "e889457b78007054da3f917f07a1a6a761687a8992b877bbb887ce53e138b334"
+        },
+        {
+          "name": "Luna-ARA-03-yakinlik-paneli.png",
+          "bytes": 58929,
+          "sha256": "d8ae7b04473e11f8d010981afc4e2d28394e927ae8d151fb654691ff35a3f4c1"
+        }
+      ]
+    }
+  ],
+  "duplicateGroups": []
+}

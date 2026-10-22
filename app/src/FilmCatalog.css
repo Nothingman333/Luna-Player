@@ -1,0 +1,57 @@
+/* Film catalog additions. Scoped to catalog surfaces and written in Luna's own palette
+   (--accent, --accent-soft, --line, --muted, --panel); mpv's transparent video overlay is untouched. */
+.library-count { font-weight: 500; }
+.library-active-filters .library-search-chip { color: var(--text); border-color: var(--accent-soft); }
+.library-scan-note { margin: -8px 0 16px; line-height: 1.6; }
+.library-empty-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 14px 0 8px; }
+.library-empty .library-empty-actions > .chip { display: inline-block; margin: 0; }
+.library-empty .small { max-width: 520px; margin: 8px auto 0; line-height: 1.6; }
+.library-surprise { display: flex; gap: 16px; align-items: center; margin: 0 0 22px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(135deg, rgba(var(--acc-rgb), .1), rgba(255, 255, 255, .025)); }
+.library-surprise:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 3px; }
+.library-surprise-poster { flex: none; width: 72px; aspect-ratio: 2 / 3; border-radius: 8px; overflow: hidden; background: #1a1a1f; display: flex; align-items: center; justify-content: center; text-align: center; padding: 6px; color: #6a6a72; font: 600 11px Sora, sans-serif; overflow-wrap: anywhere; }
+.library-surprise-poster img { width: 100%; height: 100%; object-fit: cover; display: block; margin: -6px; }
+.library-surprise-body { min-width: 0; }
+.library-surprise h3 { margin: 2px 0 4px; font-size: 18px; overflow-wrap: anywhere; }
+.library-surprise-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
+/* cards: the top-right corner stacks the TMDB rating and the "finished" mark instead of laying one over the other */
+.library-corner { position: absolute; top: 8px; right: 8px; z-index: 2; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: none; }
+.library-corner .done-badge, .library-corner .library-rating-badge { position: static; }
+.library-rating-badge small { font-size: 9px; font-weight: 600; letter-spacing: .4px; color: var(--muted); margin-right: 3px; }
+.library-progress { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; max-width: none; border-radius: 0; }
+.library-progress > div { border-radius: 0; }
+.library-state-chip { position: absolute; left: 8px; bottom: 12px; z-index: 2; padding: 3px 7px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .16); background: rgba(12, 12, 14, .88); color: #e4e4ea; font: 600 10px/1.2 "IBM Plex Sans", sans-serif; letter-spacing: .2px; max-width: calc(100% - 16px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.poster-img.remote .poster-badges { left: 40px; }
+.library-resume { margin-top: 1px; font-size: 11.5px; line-height: 1.4; color: var(--accent-soft); overflow-wrap: anywhere; }
+.library-resume.is-other, .library-match-reason { color: var(--muted); }
+.library-match-reason { font-size: 11px; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-results .poster { min-width: 0; }
+.library-results .poster .muted.small { overflow-wrap: anywhere; }
+.poster:focus-visible { outline: none; }
+.poster:focus-visible .poster-img { box-shadow: 0 12px 30px rgba(0, 0, 0, .6), 0 0 0 2px rgba(var(--acc-rgb), .9), 0 0 0 5px rgba(var(--acc-rgb), .28); }
+.poster:focus-visible .card-title { color: #fff; }
+@media (prefers-reduced-motion: no-preference) { .poster:focus-visible .poster-img { transform: translateY(-4px) scale(1.035); } }
+
+/* menus taller than the window scroll instead of running off the screen */
+.cm-bg > .cm { max-height: calc(100vh - 16px); overflow-y: auto; overscroll-behavior: contain; }
+.cm-item:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: -2px; background: rgba(var(--acc-rgb), .18); }
+.cm-item.is-sub .cm-more { color: var(--muted); }
+
+/* the search box clears itself */
+.search .search-clear { flex: none; width: 22px; height: 22px; border-radius: 11px; color: var(--muted); font-size: 16px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+.search .search-clear:hover { color: var(--text); background: rgba(255, 255, 255, .1); }
+.search .search-clear:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 1px; }
+
+/* details page: an honest copy list */
+.copy .copy-facts { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; color: var(--muted); }
+.copy .copy-note { font-size: 11px; color: var(--muted); font-style: italic; }
+.qb.guess { border-style: dashed; opacity: .78; }
+.copy-help { font-size: 11.5px; color: var(--muted); line-height: 1.6; max-width: 560px; }
+.d-quick { display: inline-flex; }
+.rating .rating-src { font-size: 10px; font-weight: 600; letter-spacing: .4px; opacity: .75; margin-right: 4px; }
+
+@media (max-width: 560px) {
+  .library-surprise { flex-direction: column; align-items: flex-start; }
+  .library-empty-actions { justify-content: flex-start; }
+}
+@media (prefers-reduced-motion: reduce) { .poster:focus-visible .poster-img { transform: none; } }

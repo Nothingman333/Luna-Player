@@ -44,9 +44,11 @@ jobs:
       - name: latest.json points at this release
         working-directory: rel
         run: |
-          if [ ! -f latest.json ]; then echo "::warning::no latest.json (the updater skips this release)"; exit 0; fi
+          if [ ! -f latest.json ]; then echo "::error::no latest.json (the updater cannot use this release)"; exit 1; fi
           url=$(jq -r '.platforms["windows-x86_64"].url' latest.json)
           sig=$(jq -r '.platforms["windows-x86_64"].signature' latest.json)
+          expected="${TAG#v}"
+          test "$(jq -r .version latest.json)" = "$expected" || { echo "::error::updater version differs from tag"; exit 1; }
           name=$(basename "$url")
           echo "$url"
           case "$url" in */download/$TAG/*) ;; *) echo "::error::latest.json points at another release: $url"; exit 1;; esac

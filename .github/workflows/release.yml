@@ -1,14 +1,18 @@
 name: Release
 
-# Runs only when started by hand (Actions > Release > Run workflow): pushing a tag no longer
-# rebuilds the release, so the files we build and test locally stay the ones on the page.
+# Manual builds only. Optional publication creates a draft for human review.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to build (for example 0.3.0)"
+        description: "Version to build (for example 1.6.1)"
         required: true
         type: string
+      publish:
+        description: "Create a draft GitHub release after a successful signed build"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -22,7 +26,7 @@ jobs:
     name: Windows setup and portable
     runs-on: windows-latest
     env:
-      VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+      REQUESTED_VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -38,6 +42,14 @@ jobs:
         with:
           workspaces: app/src-tauri
 
+      - name: Set and validate the release version
+        shell: pwsh
+        run: |
+          node scripts/release-version.cjs "$env:REQUESTED_VERSION"
+          if ($LASTEXITCODE -ne 0) { throw "Invalid release version" }
+          $version = (Get-Content app/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          "VERSION=$version" >> $env:GITHUB_ENV
+
       - name: Fetch mpv, yt-dlp and license texts
         shell: pwsh
         env:
@@ -48,20 +60,43 @@ jobs:
         working-directory: app
         run: npm ci
 
-      - name: Build the NSIS installer
-        working-directory: app
-        run: npm run tauri build
+      - name: Check interface and release inputs
+        shell: pwsh
+        run: |
+          node scripts/release-version.cjs --check "$env:VERSION"
+          if ($LASTEXITCODE -ne 0) { throw "Version mismatch" }
+          node app/scripts/i18n-check.cjs
+          if ($LASTEXITCODE -ne 0) { throw "Translation check failed" }
+
+      - name: Build the signed NSIS installer and updater manifest
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: ./scripts/build-release.ps1 -Tag "v$env:VERSION" -RequireUpdater
 
       - name: Build the portable zip
         shell: pwsh
         run: ./scripts/package-portable.ps1 -Version "$env:VERSION"
 
-      - name: Write checksums
+      - name: Stage and verify updater files and checksums
         shell: pwsh
         run: |
-          $files = @(Get-ChildItem app/src-tauri/target/release/bundle/nsis/*.exe) + @(Get-ChildItem dist-share/*-portable.zip)
+          $ErrorActionPreference = 'Stop'
+          $nsis = 'app/src-tauri/target/release/bundle/nsis'
+          $name = "Luna Player_$($env:VERSION)_x64-setup.exe"
+          $asset = $name.Replace(' ', '.')
+          $manifest = Get-Content "$nsis/latest.json" -Raw | ConvertFrom-Json
+          if ($manifest.version -cne $env:VERSION) { throw 'Updater version mismatch' }
+          if ($manifest.platforms.'windows-x86_64'.url -cne "https://github.com/Nothingman333/Luna-Player/releases/download/v$($env:VERSION)/$asset") { throw 'Updater URL mismatch' }
+          $signature = (Get-Content "$nsis/$name.sig" -Raw).Trim()
+          if (-not $signature -or $manifest.platforms.'windows-x86_64'.signature -cne $signature) { throw 'Updater signature mismatch' }
+          Copy-Item "$nsis/$name" "dist-share/$asset"
+          Copy-Item "$nsis/$name.sig" "dist-share/$asset.sig"
+          Copy-Item "$nsis/latest.json" 'dist-share/latest.json'
+          $files = Get-ChildItem dist-share -File | Where-Object Name -ne 'SHA256SUMS.txt'
           $lines = $files | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" }
-          $lines | Set-Content dist-share/SHA256SUMS.txt -Encoding utf8
+          [IO.File]::WriteAllLines("$PWD/dist-share/SHA256SUMS.txt", $lines, [Text.UTF8Encoding]::new($false))
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -69,16 +104,16 @@ jobs:
           name: Luna-Player-${{ env.VERSION }}
           if-no-files-found: error
           path: |
-            app/src-tauri/target/release/bundle/nsis/*.exe
-            dist-share/*_x64-portable.zip
-            dist-share/SHA256SUMS.txt
+            dist-share/*
 
       - name: Publish the GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: ${{ inputs.publish }}
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          draft: true
+          prerelease: ${{ contains(env.VERSION, '-') }}
           generate_release_notes: true
           files: |
-            app/src-tauri/target/release/bundle/nsis/*.exe
-            dist-share/*_x64-portable.zip
-            dist-share/SHA256SUMS.txt
+            dist-share/*

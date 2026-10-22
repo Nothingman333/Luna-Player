@@ -18,7 +18,13 @@ $outRoot = Join-Path $root "dist-share"
 $folder = Join-Path $outRoot "Luna Player"
 $zip = Join-Path $outRoot "Luna Player_${Version}_x64-portable.zip"
 
-Remove-Item $folder -Recurse -Force -ErrorAction SilentlyContinue
+$resolvedFolder = [IO.Path]::GetFullPath($folder)
+$expectedFolder = [IO.Path]::GetFullPath((Join-Path $root 'dist-share/Luna Player'))
+if ($resolvedFolder -cne $expectedFolder) { throw 'Portable staging directory escaped its expected location.' }
+if (Test-Path -LiteralPath $folder) {
+  if ((Get-Item -LiteralPath $folder).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Portable staging directory must not be a link.' }
+  Remove-Item -LiteralPath $folder -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path (Join-Path $folder "mpv/mpv"), (Join-Path $folder "fonts") | Out-Null
 Copy-Item $exe (Join-Path $folder "Luna Player.exe")
 

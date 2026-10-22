@@ -13,6 +13,31 @@ use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
+// Per-load budgets cover compressed packets, retained objects and decoded output.
+const MAX_PACKET_BYTES: usize = 16 * 1024 * 1024;
+const MAX_TRACK_BYTES: usize = 128 * 1024 * 1024;
+const MAX_PACKETS: usize = 100_000;
+const MAX_PIXELS: usize = 4096 * 2160;
+const MAX_OBJECT_BYTES: usize = 8 * 1024 * 1024;
+const MAX_OBJECT_TOTAL: usize = 32 * 1024 * 1024;
+const MAX_PICTURES: usize = 30_000;
+const MAX_DECODED_BYTES: usize = 1024 * 1024 * 1024;
+const MAX_INDEX_BYTES: u64 = 8 * 1024 * 1024;
+pub static LOAD_WORKER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+fn image_bytes(w:u16,h:u16)->Result<usize,String>{
+    let pixels=(w as usize).checked_mul(h as usize).ok_or("PGS image size overflow")?;
+    if w==0 || h==0 || w>8192 || h>4320 || pixels>MAX_PIXELS {return Err("PGS image exceeds the supported pixel budget".into());}
+    pixels.checked_mul(4).ok_or("PGS RGBA size overflow".into())
+}
+fn bounded_end(start:u64,size:u64,end:u64)->Result<u64,String>{
+    start.checked_add(size).filter(|n|*n<=end).ok_or_else(||"Invalid MKV element size".into())
+}
+fn check_cancel(cancelled:&dyn Fn()->bool)->Result<(),String>{if cancelled(){Err("PGS load superseded".into())}else{Ok(())}}
+fn packet_budget(count:usize,total:usize,next:usize)->Result<usize,String>{
+    if count>=MAX_PACKETS || next>MAX_PACKET_BYTES {return Err("PGS packet budget exceeded".into());}
+    total.checked_add(next).filter(|n|*n<=MAX_TRACK_BYTES).ok_or_else(||"PGS track exceeds 128 MiB".into())
+}
+
 // ---------- EBML ----------
 
 fn read_vint(r: &mut impl Read, keep_marker: bool) -> std::io::Result<Option<(u64, usize)>> {
@@ -38,6 +63,7 @@ fn read_vint(r: &mut impl Read, keep_marker: bool) -> std::io::Result<Option<(u6
 }
 
 fn read_uint(r: &mut impl Read, size: u64) -> std::io::Result<u64> {
+    if size==0 || size>8 {return Err(std::io::Error::new(std::io::ErrorKind::InvalidData,"Invalid EBML integer size"));}
     let mut v = 0u64;
     for _ in 0..size {
         let mut b = [0u8; 1];
@@ -86,6 +112,7 @@ fn parse_track(r: &mut BufReader<File>, end: u64) -> std::io::Result<TrackInfo> 
         let Some((id, _)) = read_vint(r, true)? else { break };
         let Some((size, _)) = read_vint(r, false)? else { break };
         let here = r.stream_position()?;
+        let next=here.checked_add(size).filter(|n|*n<=end).ok_or_else(||std::io::Error::new(std::io::ErrorKind::InvalidData,"Invalid track element size"))?;
         match id {
             TRACK_NUMBER => t.number = read_uint(r, size)?,
             CODEC_ID => {
@@ -107,25 +134,27 @@ fn parse_track(r: &mut BufReader<File>, end: u64) -> std::io::Result<TrackInfo> 
             }
             _ => {}
         }
-        r.seek(SeekFrom::Start(here + size))?;
+        r.seek(SeekFrom::Start(next))?;
     }
     // a ContentCompression element without ContentCompAlgo means zlib (default 0)
     Ok(t)
 }
 
 /// Reads all packets of MKV track `track_number` (the subtitle track mpv calls src-id).
-fn read_track(path: &Path, track_number: u64, progress: &dyn Fn(f32)) -> Result<(TrackInfo, Vec<Packet>), String> {
+fn read_track(path: &Path, track_number: u64, progress: &dyn Fn(f32), cancelled:&dyn Fn()->bool) -> Result<(TrackInfo, Vec<Packet>), String> {
     let f = File::open(path).map_err(|e| e.to_string())?;
     let total = f.metadata().map(|m| m.len()).unwrap_or(1).max(1);
     let mut r = BufReader::with_capacity(1 << 16, f);
     let mut ts_scale = 1_000_000u64; // ns per tick
     let mut track = TrackInfo::default();
     let mut packets = vec![];
+    let mut retained_bytes=0usize;
     let mut cluster_ts = 0u64;
     let mut last_report = 0u64;
     let e = |x: std::io::Error| x.to_string();
     // Walk: top level → Segment children → Cluster children.
     loop {
+        check_cancel(cancelled)?;
         let pos = r.stream_position().map_err(e)?;
         if pos >= total {
             break;
@@ -137,36 +166,41 @@ fn read_track(path: &Path, track_number: u64, progress: &dyn Fn(f32)) -> Result<
         let Some((id, _)) = read_vint(&mut r, true).map_err(e)? else { break };
         let Some((size, _)) = read_vint(&mut r, false).map_err(e)? else { break };
         let body = r.stream_position().map_err(e)?;
+        let element_end=if size==u64::MAX && matches!(id,SEGMENT|CLUSTER){total}else{bounded_end(body,size,total)?};
         match id {
             SEGMENT | CLUSTER => {
                 // descend into containers (also works for "unknown size")
                 continue;
             }
             INFO => {
-                let end = body + size;
+                let end = element_end;
                 while r.stream_position().map_err(e)? < end {
                     let Some((cid, _)) = read_vint(&mut r, true).map_err(e)? else { break };
                     let Some((cs, _)) = read_vint(&mut r, false).map_err(e)? else { break };
+                    check_cancel(cancelled)?;
                     let h = r.stream_position().map_err(e)?;
+                    let next=bounded_end(h,cs,end)?;
                     if cid == TIMESTAMP_SCALE {
                         ts_scale = read_uint(&mut r, cs).map_err(e)?;
                     }
-                    r.seek(SeekFrom::Start(h + cs)).map_err(e)?;
+                    r.seek(SeekFrom::Start(next)).map_err(e)?;
                 }
             }
             TRACKS => {
-                let end = body + size;
+                let end = element_end;
                 while r.stream_position().map_err(e)? < end {
                     let Some((cid, _)) = read_vint(&mut r, true).map_err(e)? else { break };
                     let Some((cs, _)) = read_vint(&mut r, false).map_err(e)? else { break };
+                    check_cancel(cancelled)?;
                     let h = r.stream_position().map_err(e)?;
+                    let next=bounded_end(h,cs,end)?;
                     if cid == TRACK_ENTRY {
-                        let t = parse_track(&mut r, h + cs).map_err(e)?;
+                        let t = parse_track(&mut r, next).map_err(e)?;
                         if t.number == track_number {
                             track = t;
                         }
                     }
-                    r.seek(SeekFrom::Start(h + cs)).map_err(e)?;
+                    r.seek(SeekFrom::Start(next)).map_err(e)?;
                 }
                 if track.number != track_number {
                     return Err(tr!("Altyazı izi bulunamadı (#{})", "Subtitle track not found (#{})", track_number));
@@ -179,22 +213,24 @@ fn read_track(path: &Path, track_number: u64, progress: &dyn Fn(f32)) -> Result<
             SIMPLE_BLOCK | BLOCK_GROUP => {
                 let (blk_start, blk_size) = if id == BLOCK_GROUP {
                     // find the Block inside the group
-                    let end = body + size;
+                    let end = element_end;
                     let mut found = None;
                     while r.stream_position().map_err(e)? < end {
                         let Some((cid, _)) = read_vint(&mut r, true).map_err(e)? else { break };
                         let Some((cs, _)) = read_vint(&mut r, false).map_err(e)? else { break };
-                        let h = r.stream_position().map_err(e)?;
+                        check_cancel(cancelled)?;
+                    let h = r.stream_position().map_err(e)?;
+                    let next=bounded_end(h,cs,end)?;
                         if cid == BLOCK {
                             found = Some((h, cs));
                         }
                         let _ = BLOCK_DURATION;
-                        r.seek(SeekFrom::Start(h + cs)).map_err(e)?;
+                        r.seek(SeekFrom::Start(next)).map_err(e)?;
                     }
                     match found {
                         Some(x) => x,
                         None => {
-                            r.seek(SeekFrom::Start(body + size)).map_err(e)?;
+                            r.seek(SeekFrom::Start(element_end)).map_err(e)?;
                             continue;
                         }
                     }
@@ -207,29 +243,31 @@ fn read_track(path: &Path, track_number: u64, progress: &dyn Fn(f32)) -> Result<
                     let mut hdr = [0u8; 3];
                     r.read_exact(&mut hdr).map_err(e)?;
                     let rel = i16::from_be_bytes([hdr[0], hdr[1]]) as i64;
-                    let Some(len) = (blk_size as usize).checked_sub(tlen as usize + 3) else { break; };
-                    if len > 16 * 1024 * 1024 { break; }
+                    let block_size=usize::try_from(blk_size).map_err(|_|"PGS block size overflow")?;
+                    let len=block_size.checked_sub(tlen+3).ok_or("Invalid PGS block header")?;
+                    packet_budget(packets.len(),retained_bytes,len)?;
                     let mut data = vec![0u8; len];
                     r.read_exact(&mut data).map_err(e)?;
                     let data = match track.comp_algo {
                         Some(0) => {
                             let mut out = vec![];
-                            std::io::Read::take(flate2::read::ZlibDecoder::new(&data[..]), 16 * 1024 * 1024).read_to_end(&mut out).map_err(e)?;
+                            std::io::Read::take(flate2::read::ZlibDecoder::new(&data[..]), (MAX_PACKET_BYTES+1) as u64).read_to_end(&mut out).map_err(e)?;
                             out
                         }
-                        Some(3) => [track.comp_settings.clone(), data].concat(),
+                        Some(3) => {let n=track.comp_settings.len().checked_add(data.len()).ok_or("PGS packet overflow")?;packet_budget(packets.len(),retained_bytes,n)?;[track.comp_settings.clone(),data].concat()},
                         _ => data,
                     };
-                    let ticks = cluster_ts as i64 + rel;
+                    retained_bytes=packet_budget(packets.len(),retained_bytes,data.len())?;
+                    let ticks = (cluster_ts as i128 + rel as i128).max(0);
                     packets.push(Packet { ms: ticks as f64 * ts_scale as f64 / 1e6, data });
                 }
-                r.seek(SeekFrom::Start(body + size)).map_err(e)?;
+                r.seek(SeekFrom::Start(element_end)).map_err(e)?;
             }
             _ => {
                 if size == u64::MAX {
                     break;
                 }
-                r.seek(SeekFrom::Start(body + size)).map_err(e)?;
+                r.seek(SeekFrom::Start(element_end)).map_err(e)?;
             }
         }
     }
@@ -276,13 +314,13 @@ fn ycbcr(y: u8, cr: u8, cb: u8, a: u8) -> [u8; 4] {
     [c(y + 1.5748 * cr), c(y - 0.1873 * cb - 0.4681 * cr), c(y + 1.8556 * cb), a]
 }
 
-fn decode_rle(o: &Object, pal: &[[u8; 4]; 256]) -> Vec<u8> {
+fn decode_rle(o: &Object, pal: &[[u8; 4]; 256]) -> Result<Vec<u8>,String> {
     let (w, h) = (o.w as usize, o.h as usize);
-    let mut px = vec![0u8; w * h * 4];
+    let mut px = vec![0u8; image_bytes(o.w,o.h)?];
     let (mut x, mut y, mut i) = (0usize, 0usize, 0usize);
     let d = &o.rle;
     let mut put = |x: &mut usize, y: usize, color: u8, n: usize| {
-        for _ in 0..n {
+        for _ in 0..n.min(w.saturating_sub(*x)) {
             if *x < w && y < h {
                 let k = (y * w + *x) * 4;
                 px[k..k + 4].copy_from_slice(&pal[color as usize]);
@@ -320,7 +358,7 @@ fn decode_rle(o: &Object, pal: &[[u8; 4]; 256]) -> Vec<u8> {
         };
         put(&mut x, y, color, n);
     }
-    px
+    Ok(px)
 }
 
 fn write_png(path: &Path, w: u32, h: u32, rgba: &[u8]) -> Result<(), String> {
@@ -334,17 +372,19 @@ fn write_png(path: &Path, w: u32, h: u32, rgba: &[u8]) -> Result<(), String> {
 }
 
 /// Decodes the PGS packets into timed pictures written as PNGs into `out`.
-fn decode(packets: &[Packet], out: &Path) -> Result<Track, String> {
+fn decode(packets: &[Packet], out: &Path, cancelled:&dyn Fn()->bool) -> Result<Track, String> {
     std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
     let mut palettes: Vec<[[u8; 4]; 256]> = vec![[[0u8; 4]; 256]; 8];
     let mut objects: std::collections::HashMap<u16, Object> = Default::default();
     let mut cues: Vec<Cue> = vec![];
     let mut n = 0usize;
+    let mut decoded_bytes=0usize;
     // composition state of the display set being read
     let mut canvas = (1920u16, 1080u16);
     let mut placements: Vec<(u16, u16, u16)> = vec![]; // object id, x, y
     let mut palette_id = 0usize;
     for p in packets {
+        check_cancel(cancelled)?;
         let d = &p.data;
         let mut i = 0usize;
         while i + 3 <= d.len() {
@@ -356,6 +396,7 @@ fn decode(packets: &[Packet], out: &Path) -> Result<Track, String> {
                 0x16 if s.len() >= 11 => {
                     // Presentation composition
                     canvas = (u16::from_be_bytes([s[0], s[1]]), u16::from_be_bytes([s[2], s[3]]));
+                    image_bytes(canvas.0,canvas.1)?;
                     let state = s[7];
                     palette_id = s[9] as usize % 8;
                     let count = s[10] as usize;
@@ -392,10 +433,14 @@ fn decode(packets: &[Packet], out: &Path) -> Result<Track, String> {
                     if seq & 0x80 != 0 && s.len() >= 11 {
                         let w = u16::from_be_bytes([s[7], s[8]]);
                         let h = u16::from_be_bytes([s[9], s[10]]);
+                        image_bytes(w,h)?;
+                        if !objects.contains_key(&id) && objects.len()>=256 {return Err("Too many PGS objects".into());}
                         objects.insert(id, Object { w, h, rle: s[11..].to_vec() });
                     } else if let Some(o) = objects.get_mut(&id) {
+                        if o.rle.len().checked_add(s.len()-4).is_none_or(|n|n>MAX_OBJECT_BYTES){return Err("PGS object exceeds 8 MiB".into());}
                         o.rle.extend_from_slice(&s[4..]);
                     }
+                    if objects.values().map(|o|o.rle.len()).sum::<usize>()>MAX_OBJECT_TOTAL {return Err("PGS retained objects exceed 32 MiB".into());}
                 }
                 0x80 => {
                     // End of display set: the previous cue ends here, a new one starts if anything is shown.
@@ -410,7 +455,11 @@ fn decode(packets: &[Packet], out: &Path) -> Result<Track, String> {
                             if o.w == 0 || o.h == 0 {
                                 continue;
                             }
-                            let rgba = decode_rle(o, &palettes[palette_id]);
+                            check_cancel(cancelled)?;
+                            let bytes=image_bytes(o.w,o.h)?;
+                            decoded_bytes=decoded_bytes.checked_add(bytes).filter(|n|*n<=MAX_DECODED_BYTES).ok_or("PGS decoded output exceeds 1 GiB")?;
+                            if n>=MAX_PICTURES {return Err("Too many PGS pictures".into());}
+                            let rgba = decode_rle(o, &palettes[palette_id])?;
                             let file = out.join(format!("{n}.png"));
                             n += 1;
                             write_png(&file, o.w as u32, o.h as u32, &rgba)?;
@@ -442,27 +491,81 @@ fn decode(packets: &[Packet], out: &Path) -> Result<Track, String> {
 }
 
 /// Loads (or builds and caches) the PGS track `track_number` of `file`.
-pub fn load(file: &str, track_number: u64, cache: &Path, progress: &dyn Fn(f32)) -> Result<Track, String> {
+pub fn load(file: &str, track_number: u64, cache: &Path, progress: &dyn Fn(f32),cancelled:&dyn Fn()->bool) -> Result<Track, String> {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
+    check_cancel(cancelled)?;
+    "bounded-pgs-v2".hash(&mut h);
     file.hash(&mut h);
+    std::fs::metadata(file).ok().and_then(|m|m.modified().ok()).hash(&mut h);
     std::fs::metadata(file).map(|m| m.len()).unwrap_or(0).hash(&mut h);
     track_number.hash(&mut h);
     let dir: PathBuf = cache.join(format!("{:016x}", h.finish()));
     let index = dir.join("index.json");
-    if let Ok(s) = std::fs::read_to_string(&index) {
-        if let Ok(t) = serde_json::from_str::<Track>(&s) {
-            return Ok(t);
+    if let Ok(f)=File::open(&index){
+        let mut s=String::new();
+        if f.take(MAX_INDEX_BYTES+1).read_to_string(&mut s).is_ok() && s.len() as u64<=MAX_INDEX_BYTES {
+            if let Ok(t)=serde_json::from_str::<Track>(&s){
+                let count=t.cues.iter().try_fold(0usize,|n,c|n.checked_add(c.pics.len()));
+                if count.is_some_and(|n|n<=MAX_PICTURES) && t.cues.len()<=MAX_PICTURES && t.cues.iter().all(|c|c.start.is_finite()&&c.end.is_finite()&&c.end>=c.start&&c.pics.iter().all(|p|[p.x,p.y,p.w,p.h].iter().all(|n|n.is_finite())&&p.w>0.0&&p.h>0.0&&Path::new(&p.file).parent()==Some(dir.as_path())&&Path::new(&p.file).is_file())) {return Ok(t);}
+            }
         }
     }
-    let (_, packets) = read_track(Path::new(file), track_number, progress)?;
-    let t = decode(&packets, &dir)?;
+    let (_, packets) = read_track(Path::new(file), track_number, progress,cancelled)?;
+    let t = decode(&packets, &dir,cancelled)?;
+    check_cancel(cancelled)?;
     std::fs::write(&index, serde_json::to_string(&t).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     Ok(t)
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    static TEST_STATE:Mutex<()>=Mutex::new(());
+    #[test]
+    fn late_worker_cannot_replace_new_track(){
+        let _guard=TEST_STATE.lock().unwrap();
+        let (old,_)=begin_load("old");let (tx,rx)=std::sync::mpsc::channel();
+        let worker=std::thread::spawn(move||{rx.recv().unwrap();finish_load(old,"old".into(),Track::default(),||panic!("stale notification"))});
+        let (new,_)=begin_load("new");assert!(finish_load(new,"new".into(),Track::default(),||{}));
+        tx.send(()).unwrap();assert!(!worker.join().unwrap());
+        assert_eq!(LIVE.lock().unwrap().as_ref().unwrap().key,"new");clear(||{});
+    }
+    #[test]
+    fn clear_invalidates_pending_and_cached_requests(){
+        let _guard=TEST_STATE.lock().unwrap();let (token,_)=begin_load("a");clear(||{});
+        assert!(!finish_load(token,"a".into(),Track::default(),||panic!("stale ready")));
+        let (first,_)=begin_load("a");assert!(finish_load(first,"a".into(),Track::default(),||{}));
+        let (cached,yes)=begin_load("a");assert!(yes);assert!(!current(first));assert!(current(cached));clear(||{});
+    }
+    #[test]
+    fn pgs_image_budget_rejects_huge_and_zero_dimensions(){
+        assert_eq!(image_bytes(1920,1080).unwrap(),1920*1080*4);
+        assert!(image_bytes(4096,2160).is_ok());
+        for (w,h) in [(0,100),(100,0),(65535,65535),(8192,4320)]{assert!(image_bytes(w,h).is_err());}
+    }
+    #[test]
+    fn pgs_packet_budget_checks_count_and_accumulated_bytes(){
+        assert!(packet_budget(MAX_PACKETS,0,1).is_err());assert!(packet_budget(0,0,MAX_PACKET_BYTES+1).is_err());
+        assert!(packet_budget(0,MAX_TRACK_BYTES,1).is_err());assert!(packet_budget(0,usize::MAX,1).is_err());
+        assert_eq!(packet_budget(1,100,20).unwrap(),120);
+    }
+    #[test]
+    fn ebml_rejects_overflow_and_oversized_integer(){
+        assert!(bounded_end(u64::MAX,2,u64::MAX).is_err());assert!(bounded_end(10,20,25).is_err());
+        assert!(read_uint(&mut &[][..],9).is_err());assert_eq!(read_uint(&mut &[0x12,0x34][..],2).unwrap(),0x1234);
+    }
+    #[test]
+    fn rle_still_decodes_valid_small_picture(){
+        let mut pal=[[0u8;4];256];pal[1]=[10,20,30,255];
+        let object=Object{w:2,h:1,rle:vec![1,1,0,0]};
+        assert_eq!(decode_rle(&object,&pal).unwrap(),vec![10,20,30,255,10,20,30,255]);
+        assert!(decode_rle(&Object{w:65535,h:65535,rle:vec![]},&pal).is_err());
+    }
+    #[test]
+    fn superseded_load_stops_before_reading_file(){
+        assert!(matches!(load("missing-file",1,Path::new("unused"),&|_|{},&||true),Err(e) if e.contains("superseded")));
+    }
     /// Real file on this machine: reads one PGS track of Paprika and reports what it found.
     #[test]
     #[ignore]
@@ -472,7 +575,7 @@ mod tests {
         let out = std::env::temp_dir().join("luna-pgs-test");
         let _ = std::fs::remove_dir_all(&out);
         let t0 = std::time::Instant::now();
-        let t = super::load(&file, track, &out, &|p| println!("  %{:.0}", p * 100.0)).unwrap();
+        let t = super::load(&file, track, &out, &|p| println!("  %{:.0}", p * 100.0),&||false).unwrap();
         println!("{} cues in {:?}", t.cues.len(), t0.elapsed());
         for c in t.cues.iter().take(5) {
             println!("{:.1}s - {:.1}s: {:?}", c.start / 1000.0, c.end / 1000.0, c.pics.iter().map(|p| (p.x, p.y, p.w, p.h)).collect::<Vec<_>>());
@@ -494,16 +597,24 @@ struct Live {
 static LIVE: Mutex<Option<Live>> = Mutex::new(None);
 static CLOCK: Mutex<(f64, f64)> = Mutex::new((0.0, 0.0)); // time-pos, sub-delay (seconds)
 
-pub fn set_track(key: String, track: Track) {
-    *LIVE.lock().unwrap() = Some(Live { key, track, shown: None });
+// Generation and publication share one lock: clear cannot race between the check and install/event.
+static GENERATION:Mutex<u64>=Mutex::new(0);
+pub fn begin_load(key:&str)->(u64,bool){
+    let mut generation=GENERATION.lock().unwrap();*generation=generation.wrapping_add(1);
+    let mut live=LIVE.lock().unwrap();let cached=live.as_ref().is_some_and(|l|l.key==key);
+    if !cached {*live=None;}(*generation,cached)
 }
-
-pub fn clear() {
-    *LIVE.lock().unwrap() = None;
+pub fn current(generation:u64)->bool{*GENERATION.lock().unwrap()==generation}
+pub fn with_current(generation:u64,notify:impl FnOnce()){
+    let lock=GENERATION.lock().unwrap();if *lock==generation {notify();}
 }
-
-pub fn loaded_key() -> Option<String> {
-    LIVE.lock().unwrap().as_ref().map(|l| l.key.clone())
+pub fn finish_load(generation:u64,key:String,track:Track,notify:impl FnOnce())->bool{
+    let lock=GENERATION.lock().unwrap();if *lock!=generation{return false;}
+    *LIVE.lock().unwrap()=Some(Live{key,track,shown:None});notify();true
+}
+pub fn clear(notify:impl FnOnce()){
+    let mut generation=GENERATION.lock().unwrap();*generation=generation.wrapping_add(1);
+    *LIVE.lock().unwrap()=None;notify();
 }
 
 pub fn set_time(t: f64) {

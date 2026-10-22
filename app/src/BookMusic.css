@@ -1,0 +1,28 @@
+/* Book and music refinements. The accent follows the section (music orange, books purple) through --accent;
+   the global :focus-visible ring of the app is used for keyboard focus. */
+.mu-bar:focus-visible > div { background: var(--accent-soft); }
+.mu-note { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 10px; padding: 8px 12px; border-radius: 10px; font-size: 13px; background: rgba(var(--acc-rgb), .10); color: var(--text); }
+.mu-note.warn { background: rgba(232, 112, 26, .14); }
+.mu-note .chip { flex: none; }
+.mu-cap-note { margin: 10px 4px 0; }
+.bk-t { overflow-wrap: anywhere; }
+.book-topic-filters select { max-width: min(260px, 100%); }
+.book-shelf-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0; }
+.book-shelf-tools .chip.danger { color: #ff8f8f; }
+@media (max-width: 760px) {
+  .mu-note { font-size: 12px; }
+  .luna-extra .book-manager-layout { grid-template-columns: 1fr; }
+}
+
+/* Compact library controls share the book theme accent and retain the cover grid. */
+.book-view-tools{display:flex;align-items:center;flex-wrap:wrap;gap:10px 16px;margin:0 0 18px;padding:10px 14px;border:1px solid var(--line,#29262f);border-radius:14px;background:var(--panel,#141119)}
+.book-view-tools label{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted,#a39ba9)}
+.book-view-tools select{color:var(--text,#eee);background:var(--bg,#0e0c12);border:1px solid var(--line,#34303c);border-radius:8px;padding:5px 8px;font:inherit}
+.book-grid-entry{min-width:0}.book-grid-entry>.bk-card{width:100%}
+.book-plan-controls{display:flex;align-items:center;justify-content:flex-end;gap:5px;padding:5px 0}.book-plan-controls>span{margin-right:auto;font-variant-numeric:tabular-nums;color:var(--muted,#a39ba9);font-size:12px}.book-plan-controls .chip{padding:3px 10px}.book-plan-controls button:disabled{opacity:.3}
+@media(max-width:640px){.book-view-tools{gap:10px;padding:10px}.book-view-tools>small{flex-basis:100%}}
+
+.pl-page > .pl-bg-clip { position: absolute; left: 0; right: 0; top: 0; height: 460px; overflow-x: clip; overflow-y: visible; pointer-events: none; }
+.pl-page > .pl-bg-clip > .pl-bg { inset: 0; height: auto; }
+.details > .book-topic-filters { padding: 0 48px; }
+@media(max-width:760px){.details > .book-topic-filters{padding:0 18px}}

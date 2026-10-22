@@ -32,6 +32,7 @@ keep their own licenses.
 
 - React, React DOM — MIT
 - Tauri and its plugins — MIT / Apache-2.0
+- webview2-com — MIT; windows-core — MIT / Apache-2.0. Used for native WebView2 audio isolation.
 - epub.js — BSD-2-Clause
 - PDF.js — Apache-2.0
 - Vite, TypeScript — MIT / Apache-2.0

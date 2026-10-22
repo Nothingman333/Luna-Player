@@ -173,8 +173,8 @@ export function setTtsVolume(volume: number, muted = T.muted) {
   set({ volume: safeVolume(volume), muted });
   saveTtsSettings();
   if (E.audio) { E.audio.volume = T.volume / 100; E.audio.muted = T.muted; }
-  // Windows captures volume when speaking starts; restart this chunk with the same pause intent.
-  if (T.active && E.mode === "win") restart();
+  // Windows snapshots controls at utterance start. Resume at the current word, not the paragraph.
+  if (T.active && E.mode === "win") restartWinAtWord();
 }
 export function setTtsMuted(muted: boolean) { setTtsVolume(T.volume, muted); }
 export function setRate(r: number) {
@@ -182,7 +182,7 @@ export function setRate(r: number) {
   set({ rate: r });
   saveTtsSettings();
   if (E.audio) E.audio.playbackRate = r;
-  if (E.mode === "win" && T.active) restart(); // Windows' voice takes the speed for the next sentence only
+  if (E.mode === "win" && T.active) restartWinAtWord();
 }
 export function setSleep(s: Sleep) {
   clearTimeout(E.sleepT);
@@ -210,6 +210,8 @@ const E = {
   heard: 0,
   lastTick: 0,
   winTick: 0,
+  winChunk: null as Chunk | null,
+  winOffset: 0,
   waitingChapter: false,
   sleepT: undefined as ReturnType<typeof setTimeout> | undefined,
 };
@@ -314,7 +316,6 @@ export function ttsResume() {
 }
 export function ttsToggle() { if (!T.active) ttsStart(); else if (T.playing) ttsPause(); else ttsResume(); }
 export function ttsStop() {
-  if (!T.active) return;
   cancel();
   clearMarks();
   dropCache();
@@ -338,6 +339,13 @@ function restart() {
   set({ playing });
   if (playing) { try { speechSynthesis.resume(); } catch {} }
   loop(E.gen);
+}
+function restartWinAtWord() {
+  const current = E.queue[E.qi];
+  if (current && E.winChunk === current && E.winOffset > current.a && E.winOffset < current.b) {
+    E.queue[E.qi] = { ...current, a: E.winOffset };
+  }
+  restart();
 }
 
 function media(on: boolean) {
@@ -493,6 +501,8 @@ function playEdge(c: Chunk, s: Synth, done: () => void) {
 
 function playWin(c: Chunk, done: () => void) {
   E.mode = "win";
+  E.winChunk = c;
+  E.winOffset = c.a;
   E.audio?.pause();
   const text = c.p.text.slice(c.a, c.b);
   const u = new SpeechSynthesisUtterance(text);
@@ -506,6 +516,7 @@ function playWin(c: Chunk, done: () => void) {
   u.onboundary = (e) => {
     if (E.done !== done || (e.name && e.name !== "word")) return;
     const s = c.a + e.charIndex;
+    if (Number.isFinite(s) && s >= c.a && s < c.b) E.winOffset = s;
     let end = s + (e.charLength || 0);
     if (end <= s) { const m = /^[^\s]+/.exec(c.p.text.slice(s)); end = s + (m ? m[0].length : 1); }
     mark(c, s, end);

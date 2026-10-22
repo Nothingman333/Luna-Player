@@ -1,3 +1,9 @@
+import {MusicPlaylistTools,PlaylistUtilities,SaveQueuePlaylist} from "./MusicPlaylistTools";
+import {validPlaylist,playlistCollection,uniquePlaylistName,reorderPlaylist,audioResume,storedAudioPosition} from "./musicWorkspaceModel";
+import {extraText,ExtraModal} from "./Extras";
+import {editMusicQueue,searchQueue} from "./queueEditModel";
+import type {QueueEdit} from "./queueEditModel";
+import "./QueueTools.css";
 // Müzik modu: the user's own music folders (albums, artists, songs), live radio, a mini player
 // and a "now playing" screen with synced lyrics. Playback goes through the same mpv as video,
 // with the picture track off.
@@ -16,6 +22,8 @@ import { TasteProfile } from "./TasteProfile";
 import { filmKey } from "./filmReviewModel";
 import { askAssistant, openAssistant } from "./Taste";
 import { collectEntry } from "./Mine";
+import { matchesSearch, playingRowIndex, restoreIndex, searchFold, seekKeyDelta } from "./musicModel";
+import "./BookMusic.css";
 
 // ---------- library ----------
 export type Track = {
@@ -36,18 +44,23 @@ function useMusicLibrary() {
   const [folders, setFoldersState] = useState<string[]>(loadMusicFolders);
   const [tracks, setTracks] = useState<Track[] | null>(() => (libCache?.sig === loadMusicFolders().join("|") ? libCache.tracks : null));
   const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState(false);
   const [tick, setTick] = useState(0);
   const sig = folders.join("|");
+  useEffect(()=>{const update=()=>{libCache=null;setFoldersState(loadMusicFolders());setTick(n=>n+1);};window.addEventListener("luna-library",update);return()=>window.removeEventListener("luna-library",update);},[]);
   useEffect(() => {
     const f = () => setTracks(libCache?.tracks ?? null);
     libSubs.add(f);
     return () => { libSubs.delete(f); };
   }, []);
   useEffect(() => {
-    if (!folders.length) { libCache = { sig, tracks: [] }; setTracks([]); return; }
-    if (libCache?.sig === sig && tick === 0) { setTracks(libCache.tracks); return; }
+    // (a scan cancelled by these early returns never reaches its own finally: "scanning" is switched off here,
+    // or "Taranıyor…" stayed on and the add-folder button stayed disabled)
+    if (!folders.length) { libCache = { sig, tracks: [] }; setTracks([]); setScanning(false); setScanError(false); return; }
+    if (libCache?.sig === sig && tick === 0) { setTracks(libCache.tracks); setScanning(false); setScanError(false); return; }
     let alive = true;
     setScanning(true);
+    setScanError(false);
     invoke<Track[]>("music_scan", { folders })
       // a scan for folders that changed meanwhile is dropped, not written over the newer one
       .then((t) => {
@@ -56,7 +69,8 @@ function useMusicLibrary() {
         if (alive) setTracks(t);
         libSubs.forEach((f) => f());
       })
-      .catch(() => alive && setTracks([]))
+      // a failed scan (a drive that is unplugged) is told, with a way to try again; it is not kept as an empty library
+      .catch(() => { if (alive) { setTracks([]); setScanError(true); } })
       .finally(() => alive && setScanning(false));
     return () => { alive = false; };
   }, [sig, tick]);
@@ -73,7 +87,7 @@ function useMusicLibrary() {
     }
     return [...m.values()];
   }, [tracks]);
-  return { folders, setFolders, tracks, albums, scanning, rescan: () => setTick((n) => n + 1) };
+  return { folders, setFolders, tracks, albums, scanning, scanError, rescan: () => setTick((n) => n + 1) };
 }
 
 /** Songs deleted from disk leave the library and the playlists at once (no rescan). */
@@ -113,7 +127,7 @@ export function groupAlbums(tracks: Track[]): Album[] {
 // ---------- the player (one queue for the whole app) ----------
 export type QItem = { src: string; title: string; artist?: string; album?: string; albumKey?: string; cover?: string | null; duration?: number; radio?: boolean; favicon?: string;
   /** an audiobook (its archive.org id): which chapter was playing is remembered */
-  book?: string;
+  book?: string; chapter?:number;
   /** a podcast episode (its show's feed): where you stopped is remembered */
   podcast?: string; start?: number;
   /** a podcast episode's own description (shown in place of lyrics) and when it came out */
@@ -128,7 +142,7 @@ const P = {
   original: [] as QItem[],
   index: -1,
   shuffle: false,
-  repeat: (store.get("musicRepeat") as Repeat) || "off",
+  repeat: (["off","all","one"].includes(store.get("musicRepeat")||"")?store.get("musicRepeat"):"off") as Repeat,
   view: false, // the "now playing" screen
   paused: false, // mpv's pause, reported by the dock
   from: "", // the playlist the queue was started from ("" for anything else)
@@ -139,6 +153,8 @@ const subs = new Set<() => void>();
 const changed = () => subs.forEach((f) => f());
 let loadGeneration = 0;
 let wantsPlayback = true;
+export const beginMusicSelection=()=>++loadGeneration;
+export const isMusicSelectionCurrent=(generation:number)=>generation===loadGeneration;
 export function pauseMusic(paused: boolean) {
   wantsPlayback = !paused;
   P.paused = paused;
@@ -345,7 +361,7 @@ function loadCurrent(preserveIntent = false) {
   P.loading = true;
   // the audio only: no cover art as a "video", no window
   // a podcast episode carries on where it was left
-  const resume = c.podcast ? Number(store.get("podPos:" + c.src) ?? 0) : 0;
+  const resume = audioResume(c.podcast?store.get("podPos:"+c.src):c.book?store.get("audioPos:"+c.src):0,c.duration);
   const d = c.yt ? direct.get(c.src) : undefined;
   const ready = !!d && d.exp > Date.now();
   // A YouTube song is always found by Luna first (its audio-only address) and then given to mpv:
@@ -373,13 +389,13 @@ function loadCurrent(preserveIntent = false) {
   // (speed and file loop set for a film don't carry over to music: these hold for this file only)
   const opts = ["vid=no", "speed=1", "loop-file=no", `pause=${wantsPlayback ? "no" : "yes"}`, ...(c.yt && !ready ? ["ytdl-format=bestaudio/best"] : []),
     ...(ready && d!.ua ? [`user-agent=%${new TextEncoder().encode(d!.ua).length}%${d!.ua}`] : []),
-    ...(resume > 30 ? [`start=+${Math.floor(resume - 5)}`] : [])];
+    ...(resume > 0 ? [`start=+${resume}`] : [])];
   if (ready) musicPaths.add(d!.url);
   mpv("loadfile", ready ? d!.url : c.src, "replace", "-1", opts.join(","));
   // a few seconds in, so finding the next one doesn't slow this one's start
   setTimeout(() => { if (P.queue[P.index] === c) prefetch(nextUp()); }, 4000);
   setProp("pause", !wantsPlayback);
-  if (c.book) store.set("abPos:" + c.book, String(P.index));
+  if (c.book) store.set("abPos:" + c.book, String(Number.isInteger(c.chapter)&&c.chapter!>=0?c.chapter:P.index));
   if (!c.radio && !c.book) addHistory(c);
   if (c.book) { /* above */ }
   else if (c.podcast) {
@@ -429,13 +445,20 @@ export function setShuffle(on: boolean) {
     P.shuffle = false;
     if (P.original.length) {
       const cur = P.queue[P.index];
-      const i = P.original.findIndex((x) => x.src === cur?.src);
+      // the very item (a song can be in the queue twice), not the first one with the same address
+      const i = restoreIndex(P.original, cur);
       P.queue = [...P.original];
-      P.index = i >= 0 ? i : 0;
+      P.index = i;
       P.original = [];
     }
   }
   changed();
+}
+export function updateMusicQueue(action:QueueEdit){
+ const next=editMusicQueue(P.queue,P.index,action);if(next.queue===P.queue)return;
+ P.queue=next.queue;P.index=next.index;
+ // A manually edited order becomes the new queue; toggling shuffle must not resurrect removed items.
+ P.original=[];P.shuffle=false;P.from="";changed();
 }
 export function nextTrack(auto = false) {
   const c = P.queue[P.index];
@@ -459,8 +482,9 @@ export function suspendMusic() {
   if (P.index < 0) return;
   const c = P.queue[P.index];
   // live radio has no place to come back to; it simply stops
-  suspended = c?.radio ? null : { queue: P.queue, original: P.original, index: P.index, shuffle: P.shuffle, from: P.from, time: musicTime };
+  const snapshot = c?.radio ? null : { queue: P.queue, original: P.original, index: P.index, shuffle: P.shuffle, from: P.from, time: musicTime };
   stopMusic();
+  suspended = snapshot;
 }
 /** After the film: the song is loaded again where it was, paused (no headset key starts it during the film). */
 export function resumeSuspendedMusic() {
@@ -486,6 +510,7 @@ export function resumeSuspendedMusic() {
   changed();
 }
 export function stopMusic() {
+  suspended = null;
   loadGeneration++;
   wantsPlayback = false;
   if (P.index < 0) return;
@@ -588,7 +613,7 @@ export type MusicView = "home" | "discover" | "library" | "taste" | "radio" | "p
 // ---------- playlists made in Luna (e.g. from a Spotify list), kept in order ----------
 export type MPlaylist = { id: string; name: string; from?: string; url?: string; cover?: string | null; at: number; items: QItem[] };
 const plSubs = new Set<() => void>();
-export const loadMusicPlaylists = () => store.json<MPlaylist[]>("musicPlaylists", []);
+export const loadMusicPlaylists = ():MPlaylist[] => {const raw=store.json<unknown>("musicPlaylists",[]);return Array.isArray(raw)?raw.filter(validPlaylist):[];};
 /** Music links that once slipped into the film library are taken out again. */
 export function purgeMusicFromFilms(): boolean {
   const music = new Set<string>();
@@ -611,7 +636,10 @@ export function purgeMusicFromFilms(): boolean {
   if (f.length !== rec.length) { store.set("recent", JSON.stringify(f)); changed = true; }
   return changed;
 }
-export function saveMusicPlaylists(l: MPlaylist[]) { store.set("musicPlaylists", JSON.stringify(l)); plSubs.forEach((f) => f()); }
+export function saveMusicPlaylists(l: MPlaylist[]):boolean {
+ try{playlistCollection(JSON.parse(store.get("musicPlaylists")||"[]"));playlistCollection(l);if(!store.set("musicPlaylists",JSON.stringify(l)))throw Error(extraText("Liste kaydedilemedi; önceki kayıt korundu.","Playlist could not be saved; the previous data was kept."));plSubs.forEach(f=>f());return true;}
+ catch(e){window.dispatchEvent(new CustomEvent("luna-playlist-error",{detail:String(e)}));return false;}
+}
 function useMusicPlaylists() {
   const [, bump] = useState(0);
   useEffect(() => { const f = () => bump((n) => n + 1); plSubs.add(f); return () => { plSubs.delete(f); }; }, []);
@@ -757,6 +785,8 @@ function PlaylistPage({ id, onClose }: { id: string; onClose: () => void }) {
   const all = useMusicPlaylists();
   const m = useMusic();
   const [q, setQ] = useState("");
+  const [saveError,setSaveError]=useState("");
+  useEffect(()=>{const f=(e:Event)=>setSaveError(String((e as CustomEvent).detail));window.addEventListener("luna-playlist-error",f);return()=>window.removeEventListener("luna-playlist-error",f);},[]);
   const [drag, setDrag] = useState<number | null>(null);
   const [over, setOver] = useState<number | null>(null);
   const p = all.find((x) => x.id === id);
@@ -764,32 +794,29 @@ function PlaylistPage({ id, onClose }: { id: string; onClose: () => void }) {
     // the first songs are ready before they are clicked
     p?.items.slice(0, 3).forEach((t) => prefetch(t, 3));
     document.body.classList.add("pl-open");
-    const k = (e: KeyboardEvent) => { if (e.key === "Escape" && !(e.target instanceof HTMLInputElement)) { e.stopPropagation(); onClose(); } };
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector(".extra-modal") && !(e.target instanceof HTMLInputElement)) { e.stopPropagation(); onClose(); } };
     window.addEventListener("keydown", k, true);
     return () => { document.body.classList.remove("pl-open"); window.removeEventListener("keydown", k, true); };
   }, []);
-  if (!p) return null;
-  const save = (items: QItem[], patch: Partial<MPlaylist> = {}) => saveMusicPlaylists(loadMusicPlaylists().map((x) => (x.id === id ? { ...x, ...patch, items } : x)));
+  if (!p) return <ExtraModal title={extraText("Listeye erişilemiyor","Playlist unavailable")} close={onClose}><p role="alert" className="playlist-save-error">{saveError||extraText("Liste artık mevcut değil veya kayıt hasarlı. Mevcut verilerin üzerine yazılmadı.","The playlist is no longer available or its data is damaged. Existing data was not overwritten.")}</p></ExtraModal>;
+  const save = (items: QItem[], patch: Partial<MPlaylist> = {}) => {const current=loadMusicPlaylists();if(!current.some(x=>x.id===id)){setSaveError(extraText("Bu liste artık mevcut değil.","This playlist no longer exists."));return false;}const ok=saveMusicPlaylists(current.map(x=>x.id===id?{...x,...patch,items}:x));if(ok){if(P.from===id){P.from="";changed();}setSaveError("");}return ok;};
   const total = p.items.reduce((n, t) => n + (t.duration || 0), 0);
   // this list is the one playing (not just another list that shares the song)
   const ours = !!m.now && m.from === p.id;
   const playing = ours && !m.paused;
-  const needle = q.trim().toLocaleLowerCase();
-  const shown = p.items.map((t, i) => ({ t, i })).filter(({ t }) => !needle || `${t.title} ${t.artist ?? ""}`.toLocaleLowerCase().includes(needle));
+  const needle = searchFold(q);
+  const shown = p.items.map((t, i) => ({ t, i })).filter(({ t }) => matchesSearch(needle, t.title, t.artist, t.album));
+  // the row playing: only in the list the queue was started from, and only that one row when a song is in the list twice
+  const nowAt = playingRowIndex(p.items, m.now, m.index, ours, m.shuffle);
   const playAt = (i: number) => {
-    if (ours && m.now?.src === p.items[i].src) { toggleMusicPause(); return; }
+    if (i === nowAt) { toggleMusicPause(); return; }
     playQueue(p.items, i, false, p.id);
   };
   const bigPlay = () => (ours ? toggleMusicPause() : playQueue(p.items, 0, false, p.id));
-  const move = (from: number, to: number) => {
-    if (from === to) return;
-    const items = [...p.items];
-    const [x] = items.splice(from, 1);
-    items.splice(to, 0, x);
-    save(items);
-  };
-  const rename = () => { const n = prompt(tt("Listenin adı"), p.name)?.trim(); if (n) save(p.items, { name: n }); };
-  const remove = () => { if (confirm(tt("“{0}” listesi silinsin mi?", p.name))) { saveMusicPlaylists(loadMusicPlaylists().filter((x) => x.id !== id)); onClose(); } };
+  const move = (from: number, to: number) => {const items=reorderPlaylist(p.items,from,to);if(items!==p.items)save(items);};
+  const duplicate=()=>{const rows=loadMusicPlaylists();const id=crypto.randomUUID();if(saveMusicPlaylists([{...p,id,name:uniquePlaylistName(p.name,rows),items:p.items.map(q=>({...q})),at:Date.now()},...rows]))setSaveError(extraText("Listenin kopyası kütüphaneye eklendi.","A copy of the playlist was added to your library."));};
+  const rename = () => { const n = prompt(tt("Listenin adı"), p.name)?.trim(); if (n) save(p.items, { name: n.slice(0,120) }); };
+  const remove = () => { if (confirm(tt("“{0}” listesi silinsin mi?", p.name))) { if(saveMusicPlaylists(loadMusicPlaylists().filter((x) => x.id !== id)))onClose(); } };
   // "⋯": the playlist's own link (the address it was imported from) first, then edit/delete
   const moreMenu = (): MenuEntry[] => {
     const link: MenuEntry[] = p.url
@@ -806,7 +833,7 @@ function PlaylistPage({ id, onClose }: { id: string; onClose: () => void }) {
     <>
       <div className="chat-scrim" onMouseDown={onClose} />
       <div className="pl-page pl-card glass page-anim" role="dialog" aria-modal="true" aria-label={p.name}>
-        <div className="pl-bg" style={p.cover ? { backgroundImage: `url(${p.cover})` } : undefined} />
+        <div className="pl-bg-clip"><div className="pl-bg" style={p.cover ? { backgroundImage: `url(${p.cover})` } : undefined} /></div>
         <header className="pl-top">
           <button className="round" aria-label={tt("Geri")} onClick={onClose}><Icon d={I.left} /></button>
         </header>
@@ -832,12 +859,15 @@ function PlaylistPage({ id, onClose }: { id: string; onClose: () => void }) {
           <span className="grow" />
           <label className="pl-search"><Icon d={I.search} size={15} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tt("Listede ara")} /></label>
         </div>
+        <PlaylistUtilities playlist={p} onDuplicate={duplicate} onReplace={items=>save(items)}/>
+        {saveError&&<p className="playlist-save-error" role="status">{saveError}</p>}
+        {needle&&<div className="playlist-search-meta">{shown.length} / {p.items.length} {extraText("parça","tracks")} · {extraText("Çalma ve düzenleme asıl liste sırasını kullanır.","Playback and edits use the original playlist order.")}</div>}
         <div className="pl-table">
           <div className="pl-row pl-th"><span>#</span><span>{tt("Başlık")}</span><span className="pl-alb">{tt("Albüm")}</span><span /><span className="pl-dur"><Icon d="M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" size={15} /></span><span /></div>
           {shown.map(({ t, i }) => {
-            const cur = m.now?.src === t.src;
+            const cur = i === nowAt;
             return (
-              <div key={i} className={"pl-row" + (cur ? " cur" : "") + (over === i && drag != null && drag !== i ? (drag < i ? " drop-after" : " drop-before") : "")}
+              <div key={i} aria-current={cur ? "true" : undefined} className={"pl-row" + (cur ? " cur" : "") + (over === i && drag != null && drag !== i ? (drag < i ? " drop-after" : " drop-before") : "")}
                 draggable={!needle} onDragStart={() => setDrag(i)} onDragEnd={() => { setDrag(null); setOver(null); }} {...hoverSong(t)}
                 onDragOver={(e) => { if (drag != null) { e.preventDefault(); setOver(i); } }}
                 onDrop={(e) => { e.preventDefault(); if (drag != null) move(drag, i); setDrag(null); setOver(null); }}
@@ -855,7 +885,7 @@ function PlaylistPage({ id, onClose }: { id: string; onClose: () => void }) {
                 <span className="pl-alb muted small ellipsis">{t.album ?? ""}</span>
                 <SongVote q={t} />
                 <span className="pl-dur muted small">{t.duration ? fmtTime(t.duration) : ""}</span>
-                <button className="pl-x" aria-label={tt("Listeden çıkar")} title={tt("Listeden çıkar")} onClick={() => save(p.items.filter((_, j) => j !== i))}><Icon d={I.x} size={14} /></button>
+                <div className="playlist-move-actions"><button disabled={i===0} aria-label={extraText(t.title+" listede yukarı taşı","Move "+t.title+" up in playlist")} onClick={()=>move(i,i-1)}>↑</button><button disabled={i===p.items.length-1} aria-label={extraText(t.title+" listede aşağı taşı","Move "+t.title+" down in playlist")} onClick={()=>move(i,i+1)}>↓</button><button className="pl-x" aria-label={tt("Listeden çıkar")} title={tt("Listeden çıkar")} onClick={() => save(p.items.filter((_, j) => j !== i))}><Icon d={I.x} size={14} /></button></div>
               </div>
             );
           })}
@@ -1084,8 +1114,9 @@ function MusicLibrary({ lib, query, onAlbum, onAddFolder }: { lib: Lib; query: s
   const [tab, setTab] = useState<LibTab>(() => (store.get("musicLibTab") as LibTab) || "albums");
   const pick = (t: LibTab) => { setTab(t); store.set("musicLibTab", t); };
   const [artist, setArtist] = useState<string | null>(null);
-  const q = query.trim().toLocaleLowerCase(lang() === "tr" ? "tr" : "en");
-  const hit = (...xs: (string | undefined)[]) => !q || xs.some((x) => x?.toLocaleLowerCase(lang() === "tr" ? "tr" : "en").includes(q));
+  // accents and Turkish dots don't matter ("sarki" finds "Şarkı"); every word may be in a different field (title + artist)
+  const q = searchFold(query);
+  const hit = (...xs: (string | undefined)[]) => matchesSearch(q, ...xs);
   const allLists = useMusicPlaylists();
   // the folder's songs, then those from lists and links (a song that is also a file isn't shown twice)
   const online = useMemo(() => {
@@ -1099,7 +1130,8 @@ function MusicLibrary({ lib, query, onAlbum, onAddFolder }: { lib: Lib; query: s
   const byArtist = new Map<string, Track[]>();
   for (const t of allTracks) { const k = t.albumArtist || t.artist; byArtist.set(k, [...(byArtist.get(k) ?? []), t]); }
   const artists = [...byArtist.keys()].filter((a) => hit(a)).sort((x, y) => x.localeCompare(y));
-  const songs = allTracks.filter((t) => hit(t.title, t.artist, t.album) && (!artist || (t.albumArtist || t.artist) === artist)).slice(0, 500);
+  const songMatches = allTracks.filter((t) => hit(t.title, t.artist, t.album) && (!artist || (t.albumArtist || t.artist) === artist));
+  const songs = songMatches.slice(0, 500);
   const lists = allLists.filter((p) => hit(p.name));
   if (lib.tracks && !lib.tracks.length && !lib.folders.length && tab !== "lists" && tab !== "liked" && tab !== "history" && !lists.length && !online.length) return <NoMusic onAddFolder={onAddFolder} scanning={lib.scanning} />;
   return (
@@ -1121,6 +1153,7 @@ function MusicLibrary({ lib, query, onAlbum, onAddFolder }: { lib: Lib; query: s
             <button aria-label={tt("Kaldır")} title={tt("Kaldır")} onClick={() => lib.setFolders(lib.folders.filter((x) => x !== f))}><Icon d={I.x} size={12} /></button></span>
         ))}
       </div>
+      {lib.scanError && !lib.scanning && <div className="mu-note warn" role="alert"><span>{tt("Müzik klasörleri taranamadı. Sürücü bağlı mı, klasör yerinde mi?")}</span><button className="chip" onClick={lib.rescan}>{tt("Yeniden dene")}</button></div>}
       {tab === "albums" && (
         <>
           {artist && <div className="mu-crumb"><button className="chip" onClick={() => setArtist(null)}>← {tt("Tüm albümler")}</button><b>{artist}</b></div>}
@@ -1151,10 +1184,12 @@ function MusicLibrary({ lib, query, onAlbum, onAddFolder }: { lib: Lib; query: s
         <>
           {artist && <div className="mu-crumb"><button className="chip" onClick={() => setArtist(null)}>← {tt("Tüm şarkılar")}</button><b>{artist}</b></div>}
           <SongList tracks={songs} showAlbum />
+          {songMatches.length > songs.length && <div className="muted small mu-cap-note">{tt("İlk {0} şarkı gösteriliyor ({1} eşleşme). Daraltmak için üstteki arama kutusunu kullan.", songs.length, songMatches.length)}</div>}
         </>
       )}
       {tab === "liked" && <LikedView />}
       {tab === "history" && <HistoryView />}
+      {tab === "lists"&&<MusicPlaylistTools lists={allLists} save={saveMusicPlaylists} open={id=>openPlaylist?.(id)}/>}
       {tab === "lists" && (lists.length || loadLikes().length
         ? <div className="mu-grid"><LikedCard onOpen={() => pick("liked")} />{lists.map((p) => <PlaylistCard key={p.id} p={p} />)}</div>
         : <div className="muted empty-note">{tt("Henüz listen yok. Üstteki bağlantı düğmesine bir Spotify liste linki yapıştır: şarkıların YouTube karşılıkları bulunur ve aynı sırayla buraya liste olarak eklenir.")}</div>)}
@@ -1169,7 +1204,7 @@ function SongList({ tracks, showAlbum }: { tracks: Track[]; showAlbum?: boolean 
       {tracks.map((t, i) => {
         const on = m.now?.src === t.path;
         return (
-          <button key={t.path} className={"mu-song" + (on ? " on" : "")} onClick={() => playQueue(tracks.map(trackItem), i)} {...(t.online ? hoverSong(trackItem(t)) : {})}
+          <button key={t.path} aria-current={on ? "true" : undefined} className={"mu-song" + (on ? " on" : "")} onClick={() => playQueue(tracks.map(trackItem), i)} {...(t.online ? hoverSong(trackItem(t)) : {})}
             onContextMenu={(e) => openMenu(e, songActions(trackItem(t), () => playQueue(tracks.map(trackItem), i)))}>
             <span className="mu-n">{on && m.loading ? <span className="mu-spin sm" aria-label={tt("Yükleniyor…")} /> : on ? <Icon d={NOTE} size={14} /> : showAlbum ? i + 1 : t.track ?? i + 1}</span>
             {showAlbum && <Cover src={t.cover} name={t.album} size={36} radius={6} />}
@@ -1375,6 +1410,7 @@ function RadioPage({ query }: { query: string }) {
   const [scope, setScope] = useState<"local" | "world">("local");
   const [list, setList] = useState<Station[] | null>(null);
   const [err, setErr] = useState(false);
+  const [retry, setRetry] = useState(0);
   useEffect(() => { setQ(query); }, [query]);
   useEffect(() => {
     let alive = true;
@@ -1392,7 +1428,7 @@ function RadioPage({ query }: { query: string }) {
       found.then((l) => alive && setList(l)).catch(() => { if (alive) { setList([]); setErr(true); } });
     }, q.trim() ? 400 : 0);
     return () => { alive = false; clearTimeout(t); };
-  }, [q, scope]);
+  }, [q, scope, retry]);
   const favs = store.json<QItem[]>("musicRadioFav", []);
   const recent = store.json<QItem[]>("musicRecentRadio", []);
   return (
@@ -1415,7 +1451,7 @@ function RadioPage({ query }: { query: string }) {
       )}
       <section className="row">
         <h2>{q.trim() ? tt("“{0}” için istasyonlar", q.trim()) : tt("En sevilen istasyonlar")}</h2>
-        {err && <div className="muted">{tt("Radyo listesi alınamadı; internet bağlantını kontrol et.")}</div>}
+        {err && <div className="mu-note warn" role="alert"><span>{tt("Radyo listesi alınamadı; internet bağlantını kontrol et.")}</span><button className="chip" onClick={() => setRetry((n) => n + 1)}>{tt("Yeniden dene")}</button></div>}
         {list && !list.length && !err && <div className="muted">{tt("İstasyon bulunamadı.")}</div>}
         <div className="mu-stations">
           {list == null && Array.from({ length: 12 }, (_, i) => <div key={i} className="mu-station ghost-card" />)}
@@ -1568,7 +1604,9 @@ const epItem = (e: Episode, s: { title: string; feed: string }, art?: string | n
   ({ src: e.src, title: e.title, artist: s.title, album: s.title, cover: art, duration: e.duration, podcast: s.feed, about: e.about, date: e.date });
 /** An episode from "recently played": the show's episodes are queued from it on (so "Up next" has the rest). */
 async function playEpisodeInShow(q: QItem) {
+  const generation=beginMusicSelection();
   const d = q.podcast ? await episodes(q.podcast).catch(() => null) : null;
+  if(!isMusicSelectionCurrent(generation))return;
   const i = d ? d.eps.findIndex((e) => e.src === q.src) : -1;
   if (!d || i < 0) { playQueue([q]); return; }
   playQueue(d.eps.slice(i).map((e) => epItem(e, { title: q.artist ?? d.show.title ?? "", feed: q.podcast! }, q.cover ?? d.show.art)));
@@ -1602,6 +1640,7 @@ function Podcasts({ query }: { query: string }) {
   const [found, setFound] = useState<Show[] | null>(null);
   const [top, setTop] = useState<Top[] | null>(null);
   const [err, setErr] = useState(false);
+  const [retry, setRetry] = useState(0);
   const [show, setShow] = useState<Show | null>(() => { const p = pendingShow; pendingShow = null; return p; });
   // a podcast link while this page is already open
   useEffect(() => {
@@ -1615,7 +1654,7 @@ function Podcasts({ query }: { query: string }) {
     if (deb) { setFound(null); searchShows(deb).then((l) => alive && setFound(l)).catch(() => alive && setErr(true)); }
     else { setFound(null); topShows().then((l) => alive && setTop(l)).catch(() => alive && setErr(true)); }
     return () => { alive = false; };
-  }, [deb]);
+  }, [deb, retry]);
   // a featured podcast's feed can take a while: say so instead of looking frozen
   const [opening, setOpening] = useState<Top | null>(null);
   const [openErr, setOpenErr] = useState("");
@@ -1644,7 +1683,7 @@ function Podcasts({ query }: { query: string }) {
       <section className="row">
         <h2>{deb ? tt("“{0}” için podcastler", deb) : tt("Öne çıkan podcastler")}</h2>
         {openErr && <div className="muted">{openErr}</div>}
-        {err && <div className="muted">{tt("Podcast listesi alınamadı; internet bağlantını kontrol et.")}</div>}
+        {err && <div className="mu-note warn" role="alert"><span>{tt("Podcast listesi alınamadı; internet bağlantını kontrol et.")}</span><button className="chip" onClick={() => setRetry((n) => n + 1)}>{tt("Yeniden dene")}</button></div>}
         <div className="mu-grid">
           {(deb ? found : top) == null && !err && Array.from({ length: 8 }, (_, i) => <div key={i} className="mu-album ghost-card"><div className="mu-album-art" /></div>)}
           {deb ? found?.map((x) => <ShowCard key={x.feed} s={x} onOpen={() => setShow(x)} />)
@@ -2305,6 +2344,7 @@ export function MusicDock({ mp }: { mp: MP }) {
   useEffect(() => { if (P.volume !== mp.volume) { P.volume = mp.volume; changed(); } }, [mp.volume]);
   useEffect(() => { if (c && !c.radio) musicTime = mp.time; }, [Math.floor(mp.time)]);
   const endedFor = useRef<string | null>(null);
+  const lastVol = useRef(70);
   // mpv may report a YouTube song by the media address yt-dlp resolved, not the page link
   const isNow = (path: string | null) => !!c && !!path && (path === c.src || (!!c.yt && /googlevideo\.com/i.test(path)));
   useEffect(() => {
@@ -2313,11 +2353,10 @@ export function MusicDock({ mp }: { mp: MP }) {
     if (!mp.eof) endedFor.current = null;
   }, [mp.eof, mp.path]);
   useEffect(() => {
-    if (!c?.podcast || mp.path !== c.src || !mp.duration) return;
-    const t = Math.floor(mp.time / 5) * 5;
-    // -1: listened to the end (the last minute, or the last tenth of a short episode)
-    if (t > 0) store.set("podPos:" + c.src, String(mp.duration - mp.time < Math.min(60, mp.duration / 10) ? -1 : t));
-  }, [Math.floor(mp.time / 5), c?.src]);
+    if (!c || (!c.podcast&&!c.book) || mp.path!==c.src || P.loading) return;
+    const position=storedAudioPosition(mp.time,mp.duration);
+    if(position!==null)store.set((c.podcast?"podPos:":"audioPos:")+c.src,String(position));
+  }, [Math.floor(mp.time / 5), c?.src,mp.path,mp.duration,m.loading]);
   // keys while music plays: Space = pause, Ctrl+→/← = next/previous
   useEffect(() => {
     if (!c) return;
@@ -2372,7 +2411,8 @@ export function MusicDock({ mp }: { mp: MP }) {
         </div>
         <div className="mu-dock-right">
           {!c.radio && <button className={"mu-ib mu-ly" + (m.view ? " on" : "")} aria-label={tt("Sözler")} title={tt("Sözler")} onClick={() => setView(!m.view)}><Icon d={LYRICS} size={17} /></button>}
-          <Icon d={I.vol} size={16} />
+          <button className="mu-ib" aria-label={mp.volume > 0 ? tt("Sesi kapat") : tt("Sesi aç")} title={mp.volume > 0 ? tt("Sesi kapat") : tt("Sesi aç")}
+            onClick={() => { if (mp.volume > 0) { lastVol.current = mp.volume; setProp("volume", 0); } else setProp("volume", lastVol.current || 70); }}><Icon d={mp.volume === 0 ? I.mute : I.vol} size={16} /></button>
           <input className="vol mu-vol" type="range" min={0} max={100} value={Math.min(100, mp.volume)} aria-label={tt("Ses düzeyi")}
             onChange={(e) => setProp("volume", Number(e.target.value))} />
           <button className="mu-ib" aria-label={tt("Kapat")} title={tt("Müziği kapat")} onClick={() => { mpv("stop"); stopMusic(); }}><Icon d={I.x} size={16} /></button>
@@ -2390,10 +2430,21 @@ function Seek({ mp, big }: { mp: MP; big?: boolean }) {
     const r = e.currentTarget.getBoundingClientRect();
     mpv("seek", Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * 100, "absolute-percent");
   };
+  // arrows seek 5 s (Shift 15 s), Page Up/Down 30 s, Home the start; Ctrl/Alt/Meta combinations stay with next/previous song and back
+  const key = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.ctrlKey || e.altKey || e.metaKey || !mp.duration) return;
+    if (e.key === "Home") { e.preventDefault(); e.stopPropagation(); mpv("seek", 0, "absolute"); return; }
+    const d = seekKeyDelta(e.key, e.shiftKey);
+    if (d == null) return;
+    e.preventDefault(); e.stopPropagation();
+    mpv("seek", d, "relative");
+  };
   return (
     <div className={"mu-seek" + (big ? " big" : "")}>
       <span>{fmtTime(mp.time)}</span>
-      <div className="mu-bar" onPointerDown={go} onPointerMove={go}><div style={{ width: f * 100 + "%" }} /></div>
+      <div className="mu-bar" role="slider" tabIndex={0} aria-label={tt("Çalma konumu")} aria-valuemin={0} aria-valuemax={Math.max(0, Math.round(mp.duration))}
+        aria-valuenow={Math.max(0, Math.round(mp.time))} aria-valuetext={`${fmtTime(mp.time)} / ${fmtTime(mp.duration)}`}
+        onPointerDown={go} onPointerMove={go} onKeyDown={key}><div style={{ width: f * 100 + "%" }} /></div>
       <span>{fmtTime(mp.duration)}</span>
     </div>
   );
@@ -2404,6 +2455,7 @@ function NowPlaying({ mp, onAir }: { mp: MP; onAir: string | null }) {
   const c = m.now!;
   const lastVol = useRef(70);
   const [tab, setTab] = useState<"lyrics" | "queue">("lyrics");
+  const [queueQuery,setQueueQuery]=useState("");
   const [ly, setLy] = useState<{ synced: Line[]; plain: string } | null | undefined>(undefined);
   const [epAbout, setEpAbout] = useState<string | null | undefined>(undefined);
   useEffect(() => {
@@ -2442,6 +2494,7 @@ function NowPlaying({ mp, onAir }: { mp: MP; onAir: string | null }) {
           </div>
         )}
         {!c.radio && !c.podcast && !c.book && <button className="chip mu-np-like" title={tt("Asistan bu şarkıya benzeyen şarkıları bulur; istersen bir listeni onlarla genişletir ya da yeni liste yapar")} onClick={() => askAssistant(likeThisSongs(c.title, c.artist, loadMusicPlaylists().find((p) => p.id === m.from)?.name), tt("“{0}” gibi şarkılar bul", c.title))}>✦ {tt("Bunun gibi şarkılar bul")}</button>}
+        {(c.podcast||c.book)&&<button className="chip" onClick={()=>{store.set((c.podcast?"podPos:":"audioPos:")+c.src,"0");loadCurrent();}} title={extraText("Bu bölümdeki dinleme konumunu sıfırla","Reset listening position for this chapter")}>{extraText("Bölümü baştan dinle","Restart this chapter")}</button>}
         <button className="round" aria-label={tt("Asistana sor")} title={tt("Asistana sor")} onClick={openAssistant}>
           <Icon d={I.chat} size={19} />
         </button>
@@ -2473,13 +2526,16 @@ function NowPlaying({ mp, onAir }: { mp: MP; onAir: string | null }) {
             )
             : tab === "queue" ? (
               <div className="mu-queue">
-                {m.queue.map((q, i) => (
-                  <button key={i + q.src} className={"mu-song" + (i === m.index ? " on" : "")} onClick={() => { P.index = i; loadCurrent(); }}>
+                <div className="music-queue-tools">{!c.book&&!c.podcast&&!c.radio&&<SaveQueuePlaylist items={m.queue} lists={loadMusicPlaylists} save={saveMusicPlaylists}/>}<label><span>{extraText("Kuyrukta ara","Find in queue")}</span><input value={queueQuery} onChange={e=>setQueueQuery(e.target.value)} placeholder={extraText("Şarkı veya sanatçı…","Song or artist…")}/></label><div><small>{searchQueue(m.queue,queueQuery).length} / {m.queue.length}</small><button className="chip" disabled={m.index>=m.queue.length-1} onClick={()=>updateMusicQueue({kind:"trim"})}>{extraText("Sonrakileri temizle","Clear upcoming")}</button></div><p>{extraText("Düzenleme çalan parçayı kesmez. Sıra değişirse karışık çalma kapanır; kayıtlı listen değişmez.","Editing keeps the current track playing. Manual edits turn shuffle off; your saved playlist stays unchanged.")}</p></div>
+                {searchQueue(m.queue,queueQuery).map(({q,index:i}) => (
+                  <div className={"music-queue-row"+(i===m.index?" is-current":"")} key={i+q.src}>
+                  <button className={"mu-song" + (i === m.index ? " on" : "")} aria-current={i===m.index?"true":undefined} onClick={() => { P.index = i; loadCurrent(); }}>
                     <span className="mu-n">{i === m.index ? <Icon d={NOTE} size={14} /> : i + 1}</span>
                     <span className="mu-song-t"><b className="ellipsis">{q.title}</b><span className="muted small ellipsis">{q.artist}</span></span>
                     <span className="muted small">{q.duration ? fmtTime(q.duration) : ""}</span>
-                  </button>
+                  </button><div className="music-queue-actions"><button disabled={i<=m.index+1} aria-label={extraText(q.title+" yukarı taşı","Move "+q.title+" up")} onClick={()=>updateMusicQueue({kind:"move",at:i,direction:-1})}>↑</button><button disabled={i<=m.index||i===m.queue.length-1} aria-label={extraText(q.title+" aşağı taşı","Move "+q.title+" down")} onClick={()=>updateMusicQueue({kind:"move",at:i,direction:1})}>↓</button><button disabled={i===m.index} aria-label={extraText(q.title+" kuyruktan kaldır","Remove "+q.title+" from queue")} onClick={()=>updateMusicQueue({kind:"remove",at:i})}>×</button></div></div>
                 ))}
+                {!searchQueue(m.queue,queueQuery).length&&<p className="muted">{extraText("Kuyrukta eşleşen parça yok.","No queue entries match.")}</p>}
               </div>
             )
             : ly === undefined ? <div className="muted pulse">{tt("Sözler aranıyor…")}</div>

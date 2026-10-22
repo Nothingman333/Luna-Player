@@ -40,6 +40,28 @@ jobs:
       - name: Film workspace and additional playback regressions
         working-directory: app
         run: npm run test:next
+      - name: Browser, translation and film behaviour checks
+        working-directory: app
+        run: |
+          npm run test:browser
+          npm run test:translation
+          npm run test:film-browser
+          npm run test:extras
+          npm run test:books-profiles
+          npm run test:book-music
+          npm run test:delivery
+          npm run test:assistant-presentation
+          npm run test:workspace
+          npm run test:deep-refinement
+          npm run test:comfort
+          npm run test:reading-experience
+          npm run test:music-workspace
+          npm run test:book-library-view
+          npm run test:quality
+          npm run test:assistant-safety
+          npm run test:claude-integration
+          npm run test:browser-native
+          npm run test:web-notebook
 
   rust:
     name: Rust (build, tests)

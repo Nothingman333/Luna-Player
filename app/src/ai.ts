@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import { store } from "./library";
+import { store, flushSecrets } from "./library";
+import { fromAnthropic, fromOpenAi, providerPayloadError } from "./assistantProviderModel";
 
 /** Which service answers for the assistant. Everything in Luna speaks Gemini's request format;
  *  for the others it is translated here, and the answer translated back. */
@@ -24,7 +25,44 @@ export function aiProfiles(): AiProfile[] {
 }
 export const saveAiProfiles = (l: AiProfile[]) => store.set("aiProfiles", JSON.stringify(l));
 export const aiProfile = (slot: unknown) => aiProfiles().find((x) => String(x.slot) === String(slot)) ?? null;
-const cleanBase = (b: string) => b.trim().replace(/\/+$/, "").replace(/\/chat\/completions$/, "");
+export function normalizeApiBase(raw:string):string {
+  const text=raw.trim();if(!text)return "";
+  const url=new URL(text);
+  if(!["http:","https:"].includes(url.protocol)||url.username||url.password||url.search||url.hash)throw Error("Base URL: geçerli bir HTTP(S) adresi kullan; anahtarı adresin içine yazma.");
+  url.pathname=url.pathname.replace(/\/+$/,"").replace(/\/(?:chat\/completions|models)$/i,"");
+  if(!url.pathname||url.pathname==="/")url.pathname="/v1";
+  return url.href.replace(/\/+$/,"");
+}
+const cleanBase=(b:string)=>{try{return normalizeApiBase(b);}catch{return "";}};
+export function activateAiProfile(slot:string){
+  const profile=slot?aiProfile(slot):null;if(slot&&!profile)throw Error("Profil bulunamadı.");
+  if(profile?.provider==="custom"&&!normalizeApiBase(profile.base))throw Error("Base URL gerekli.");
+  if(!store.set("aiProfile",slot))throw Error("Profil seçimi kaydedilemedi.");
+  window.dispatchEvent(new Event("luna-ai-profile"));
+}
+/** Save keys to Windows first, then publish the non-secret profile metadata. */
+export async function commitAiProfiles(profiles:AiProfile[],keys:Record<number,string>,active:string){
+  const slots=new Set<number>();
+  const next=profiles.map(p=>{
+    if(!Number.isInteger(p.slot)||p.slot<1||p.slot>PROFILE_SLOTS||slots.has(p.slot)||!AI_PROVIDERS.some(x=>x.id===p.provider))throw Error("Geçersiz profil.");slots.add(p.slot);
+    const base=p.provider==="custom"?normalizeApiBase(p.base):p.base.trim();
+    if(p.provider==="custom"&&(!base||!p.model.trim()))throw Error("Özel sağlayıcı için Base URL ve model gerekli.");
+    return {slot:p.slot,provider:p.provider,name:p.name.trim().slice(0,60)||"Profil "+p.slot,base,model:p.model.trim()};
+  });
+  const oldMetadata=store.get("aiProfiles"),oldActive=store.get("aiProfile");
+  const before=Object.fromEntries(Array.from({length:PROFILE_SLOTS},(_,i)=>[i+1,store.get(profileKeyName(i+1))||""]));
+  try{
+    for(let slot=1;slot<=PROFILE_SLOTS;slot++)store.set(profileKeyName(slot),slots.has(slot)?(keys[slot]===undefined?before[slot]:keys[slot]).trim():"");
+    await flushSecrets();
+    if(!saveAiProfiles(next))throw Error("Profiller kaydedilemedi.");
+    if(!store.set("aiProfile",next.some(p=>String(p.slot)===active)?active:""))throw Error("Aktif profil kaydedilemedi.");
+  }catch(error){
+    for(let slot=1;slot<=PROFILE_SLOTS;slot++)store.set(profileKeyName(slot),before[slot]);
+    try{await flushSecrets();if(oldMetadata===null)store.remove("aiProfiles");else store.set("aiProfiles",oldMetadata);if(oldActive===null)store.remove("aiProfile");else store.set("aiProfile",oldActive);}catch{throw Error("Profil kaydı ve geri alma tamamlanamadı; Windows anahtar kasasını kontrol et.");}
+    throw error;
+  }
+  window.dispatchEvent(new Event("luna-ai-profile"));
+}
 /** What actually answers: a service with its key, model and base URL. */
 export type AiUse = { provider: AiProvider; model: string; key: string; base: string; label: string };
 function useOf(pr: AiProfile): AiUse {
@@ -55,6 +93,12 @@ export function aiKey(p: AiProvider = aiProvider()): string {
 export const aiReady = () => !!aiKey();
 export const aiName = () => activeProfile()?.name ?? (aiProvider() === "custom" ? aiBase().replace(/^https?:\/\//, "").split("/")[0] || "Base URL" : spec().name);
 
+/** A turn keeps its provider, model, base URL and key even if Settings change meanwhile. */
+export function captureAiUse():AiUse{
+ const profile=activeProfile();if(profile)return useOf(profile);
+ const provider=aiProvider();return {provider,model:aiModel(provider),key:aiKey(provider),base:aiBase(),label:aiName()};
+}
+
 const URLS = {
   openai: "https://api.openai.com/v1",
   claude: "https://api.anthropic.com/v1",
@@ -63,7 +107,7 @@ const endpoint = (p: AiProvider, base?: string) => (p === "claude" ? URLS.claude
 
 /** The models of a provider, for the settings list. */
 export async function aiModels(p: AiProvider, key: string, base?: string): Promise<string[]> {
-  const url = (p === "custom" ? (base ?? aiBase()).trim().replace(/\/+$/, "") : endpoint(p)) + "/models";
+  const url = (p === "custom" ? normalizeApiBase(base ?? aiBase()) : endpoint(p)) + "/models";
   const ids = await invoke<string[]>("llm_models", { kind: p === "claude" ? "anthropic" : "openai", url, key: key === "-" ? "" : key });
   return ids.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
 }
@@ -174,25 +218,6 @@ function toAnthropic(body: any, model: string) {
   return out;
 }
 
-const parseArgs = (s: any) => { if (typeof s !== "string") return s ?? {}; try { return JSON.parse(s || "{}"); } catch { return {}; } };
-/** The answer back in Gemini's shape: candidates[0].content.parts with text and functionCall. */
-function fromOpenAi(r: any) {
-  const m = r?.choices?.[0]?.message ?? {};
-  const parts: any[] = [];
-  const text = typeof m.content === "string" ? m.content : Array.isArray(m.content) ? m.content.map((c: any) => c.text ?? "").join("") : "";
-  if (text) parts.push({ text });
-  for (const c of m.tool_calls ?? []) if (c.function?.name) parts.push({ functionCall: { name: c.function.name, args: parseArgs(c.function.arguments) } });
-  return { candidates: [{ content: { role: "model", parts } }] };
-}
-function fromAnthropic(r: any) {
-  const parts: any[] = [];
-  for (const b of r?.content ?? []) {
-    if (b.type === "text" && b.text) parts.push({ text: b.text });
-    else if (b.type === "tool_use") parts.push({ functionCall: { name: b.name, args: b.input ?? {} } });
-  }
-  return { candidates: [{ content: { role: "model", parts } }] };
-}
-
 /** One request to the chosen non-Gemini provider, in and out in Gemini's format. Google Search
  *  (a Gemini-only tool) is left out; the caller sees no groundingMetadata and treats it as unsourced. */
 export async function otherAi(body: any, use?: Partial<AiUse> & { provider: AiProvider }): Promise<{ r: any; id: string; noSearch: boolean }> {
@@ -203,11 +228,15 @@ export async function otherAi(body: any, use?: Partial<AiUse> & { provider: AiPr
   const k = use?.key ?? aiKey(p);
   const key = k === "-" ? "" : k;
   if (p === "claude") {
-    const r = await invoke<any>("llm_post", { kind: "anthropic", url: endpoint(p) + "/messages", key, body: toAnthropic(body, model) });
-    return { r: fromAnthropic(r), id: model, noSearch };
+    const raw = await invoke<any>("llm_post", { kind: "anthropic", url: endpoint(p) + "/messages", key, body: toAnthropic(body, model) });
+    const failure = providerPayloadError(raw);
+    if (failure) throw new Error(failure);
+    return { r: fromAnthropic(raw), id: model, noSearch };
   }
-  const r = await invoke<any>("llm_post", { kind: "openai", url: endpoint(p, use?.base) + "/chat/completions", key, body: toOpenAi(body, model) });
-  return { r: fromOpenAi(r), id: model, noSearch };
+  const raw = await invoke<any>("llm_post", { kind: "openai", url: endpoint(p, use?.base) + "/chat/completions", key, body: toOpenAi(body, model) });
+  const failure = providerPayloadError(raw);
+  if (failure) throw new Error(failure);
+  return { r: fromOpenAi(raw), id: model, noSearch };
 }
 
 // ---------- The AI that reads film reviews ("Worth watching?") ----------

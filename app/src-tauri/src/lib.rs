@@ -1,3 +1,4 @@
+mod cache_tools;
 /// Messages in the UI language: `tr!("Türkçe {}", "English {}", arg)` (English unless the UI is Turkish).
 #[macro_export]
 macro_rules! tr {
@@ -15,6 +16,7 @@ fn set_lang(lang: String) {
     UI_TR.store(lang == "tr", std::sync::atomic::Ordering::Relaxed);
 }
 
+mod browser;
 mod clipboard;
 mod files;
 mod preview;
@@ -171,7 +173,7 @@ fn walk(dir: &std::path::Path, out: &mut Vec<String>, depth: u32) {
 async fn music_scan(app: AppHandle, folders: Vec<String>) -> Result<Vec<music::Track>, String> {
     let index = app.path().app_data_dir().map_err(|e| e.to_string())?.join("music-index.json");
     let covers = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("covers");
-    blocking(move || Ok(music::scan(&folders, &index, &covers))).await
+    blocking(move || { let result=music::scan(&folders, &index, &covers); cache_tools::enforce(&app); Ok(result) }).await
 }
 
 /// YouTube results for a song (yt-dlp next to mpv).
@@ -191,6 +193,13 @@ async fn yt_search(app: AppHandle, query: String, n: Option<u32>) -> Result<Vec<
 async fn yt_info(app: AppHandle, url: String) -> Result<Vec<yt::Hit>, String> {
     let ytdlp = mpv::ytdlp_exe(&mpv_exe(&app));
     blocking(move || yt::info(&ytdlp, &url)).await
+}
+
+/// A YouTube video's subtitles as plain text (the assistant summarises the video from them).
+#[tauri::command]
+async fn yt_transcript(app: AppHandle, url: String) -> Result<String, String> {
+    let ytdlp = mpv::ytdlp_exe(&mpv_exe(&app));
+    blocking(move || yt::transcript(&ytdlp, &url)).await
 }
 
 /// The API keys kept in Windows' Credential Manager (see secrets.rs): only the ones asked for.
@@ -257,7 +266,7 @@ async fn yt_stream(app: AppHandle, url: String) -> Result<yt::Stream, String> {
 async fn books_scan(app: AppHandle, folders: Vec<String>) -> Result<Vec<books::Book>, String> {
     let index = app.path().app_data_dir().map_err(|e| e.to_string())?.join("books-index.json");
     let covers = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("covers");
-    blocking(move || Ok(books::scan(&folders, &index, &covers))).await
+    blocking(move || { let result=books::scan(&folders, &index, &covers); cache_tools::enforce(&app); Ok(result) }).await
 }
 
 /// A book file's bytes, for the reader.
@@ -268,6 +277,7 @@ async fn book_bytes(path: String) -> Result<tauri::ipc::Response, String> {
         if len > 300 * 1024 * 1024 {
             return Err(tr!("Dosya çok büyük", "File too big"));
         }
+        books::validate_book_file(std::path::Path::new(&path))?;
         std::fs::read(&path).map(tauri::ipc::Response::new).map_err(|e| e.to_string())
     }).await
 }
@@ -317,7 +327,7 @@ async fn probe_video(app: AppHandle, path: String) -> Result<files::MediaInfo, S
 async fn video_thumbnail(app: AppHandle, path: String) -> Result<String, String> {
     let exe = mpv_exe(&app);
     let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("thumbs");
-    blocking(move || files::thumbnail(&exe, &path, &cache)).await
+    blocking(move || { let result=files::thumbnail(&exe, &path, &cache); cache_tools::enforce(&app); result }).await
 }
 
 #[tauri::command]
@@ -619,6 +629,10 @@ async fn subs_window(app: AppHandle, show: bool) -> Result<(), String> {
     Ok(())
 }
 
+fn valid_state_json(json: &str) -> bool {
+    serde_json::from_str::<std::collections::HashMap<String,String>>(json).is_ok()
+}
+
 fn state_file(app: &AppHandle) -> PathBuf {
     app.path().app_local_data_dir().unwrap_or_default().join("luna-state.json")
 }
@@ -629,6 +643,7 @@ fn state_file(app: &AppHandle) -> PathBuf {
 async fn state_save(app: AppHandle, json: String) -> Result<(), String> {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     static WRITTEN: std::sync::Mutex<u64> = std::sync::Mutex::new(0);
+    if !valid_state_json(&json) { return Err("Invalid Luna state".into()); }
     let ticket = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let path = state_file(&app);
     blocking(move || {
@@ -659,14 +674,14 @@ async fn state_load(app: AppHandle) -> Option<String> {
     blocking(move || {
         if let Some(seed) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("luna-restore.json"))) {
             if let Ok(s) = std::fs::read_to_string(&seed) {
-                if serde_json::from_str::<Value>(&s).is_ok() {
+                if valid_state_json(&s) {
                     let _ = std::fs::rename(&seed, seed.with_extension("json.used"));
                     return Ok(Some(s));
                 }
                 // a broken restore file must not hide the real saved state
                 let _ = std::fs::rename(&seed, seed.with_extension("json.bad"));
             }        }
-        let valid = |p: PathBuf| std::fs::read_to_string(p).ok().filter(|s| serde_json::from_str::<Value>(s).is_ok());
+        let valid = |p: PathBuf| std::fs::read_to_string(p).ok().filter(|s| valid_state_json(s));
         Ok(valid(path.clone()).or_else(|| valid(path.with_extension("json.bak"))))
     })
     .await
@@ -700,36 +715,29 @@ pub(crate) fn forward_pgs(app: &AppHandle) {
 #[tauri::command]
 fn pgs_prepare(app: AppHandle, file: String, track: u64) {
     let key = format!("{file}#{track}");
-    if pgs::loaded_key().as_deref() == Some(key.as_str()) {
-        let _ = app.emit("pgs-ready", key);
-        return;
-    }
-    pgs::clear();
+    let (generation,cached)=pgs::begin_load(&key);
+    if cached {pgs::with_current(generation,||{let _=app.emit("pgs-ready",&key);});return;}
+    pgs::with_current(generation,||{let _ = app.emit_to("subs","luna-subs-pics",Vec::<pgs::Pic>::new());});
     let cache = app.path().app_cache_dir().unwrap_or_default().join("pgs");
     std::thread::spawn(move || {
-        let a2 = app.clone();
-        let progress = move |p: f32| {
-            let _ = a2.emit("pgs-progress", p);
-        };
-        match pgs::load(&file, track, &cache, &progress) {
-            Ok(t) => {
-                upscaler_log(&app)(format!("PGS hazir: {} altyazi ({key})", t.cues.len()));
-                pgs::set_track(key.clone(), t);
-                let _ = app.emit("pgs-ready", key);
-                forward_pgs(&app);
-            }
-            Err(e) => {
-                upscaler_log(&app)(format!("PGS hatasi: {e}"));
-                let _ = app.emit("pgs-error", e);
-            }
+        // Only one decoder owns the packet budget/cache writer. Superseded workers exit when dequeued.
+        let _worker=pgs::LOAD_WORKER.lock().unwrap();
+        if !pgs::current(generation){return;}
+        let a2=app.clone();
+        let progress=move|p:f32|pgs::with_current(generation,||{let _=a2.emit("pgs-progress",p);});
+        match pgs::load(&file,track,&cache,&progress,&||!pgs::current(generation)){
+            Ok(t)=>{let count=t.cues.len();pgs::finish_load(generation,key.clone(),t,||{
+                upscaler_log(&app)(format!("PGS hazir: {count} altyazi ({key})"));
+                let _=app.emit("pgs-ready",&key);forward_pgs(&app);
+            });}
+            Err(e)=>pgs::with_current(generation,||{upscaler_log(&app)(format!("PGS hatasi: {e}"));let _=app.emit("pgs-error",e);}),
         }
     });
 }
 
 #[tauri::command]
 fn pgs_clear(app: AppHandle) {
-    pgs::clear();
-    let _ = app.emit_to("subs", "luna-subs-pics", Vec::<pgs::Pic>::new());
+    pgs::clear(||{let _ = app.emit_to("subs", "luna-subs-pics", Vec::<pgs::Pic>::new());});
 }
 
 static LAST_SUB: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
@@ -737,9 +745,17 @@ static LAST_SUB: std::sync::Mutex<String> = std::sync::Mutex::new(String::new())
 pub(crate) fn forward_sub_text(app: &AppHandle, text: &str) {
     *LAST_SUB.lock().unwrap() = text.to_string();
     if SUBS_ON.load(std::sync::atomic::Ordering::SeqCst) {
-        let ok = app.emit_to("subs", "luna-subs-text", text.to_string()).is_ok();
-        upscaler_log(app)(format!("satir gonderildi ok={ok}: {:?}", text.chars().take(30).collect::<String>()));
+        let _ = app.emit_to("subs", "luna-subs-text", text.to_string());
     }
+}
+
+const MAX_EXPORT_TOTAL:u64=128*1024*1024;
+fn read_export_text(reader:impl std::io::Read,remaining:&mut u64)->Result<String,String>{
+    let limit=(*remaining).min(50_000_000);
+    let mut text=String::new();
+    std::io::Read::take(reader,limit+1).read_to_string(&mut text).map_err(|e|e.to_string())?;
+    if text.len() as u64>limit{return Err("Export exceeds its CSV or total byte budget".into());}
+    *remaining-=text.len() as u64;Ok(text)
 }
 
 /// The CSV files of a data export (Letterboxd): every .csv inside a .zip, or the .csv files themselves.
@@ -748,18 +764,19 @@ async fn read_export(paths: Vec<String>) -> Result<Vec<(String, String)>, String
     blocking(move || {
         const MAX: u64 = 50_000_000;
         let mut out = Vec::new();
+        let mut remaining=MAX_EXPORT_TOTAL;
+        if paths.len()>64{return Err("Too many export files (maximum 64)".into());}
         for p in paths {
             let path = std::path::Path::new(&p);
             if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")) {
                 let mut z = zip::ZipArchive::new(std::fs::File::open(path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+                if z.len()>10_000{return Err("Export archive has too many entries".into());}
                 for i in 0..z.len() {
                     let mut f = z.by_index(i).map_err(|e| e.to_string())?;
-                    if !f.name().to_lowercase().ends_with(".csv") || f.size() > MAX {
-                        continue;
-                    }
+                    if !f.name().to_lowercase().ends_with(".csv") {continue;}
+                    if f.size()>MAX || f.size()>remaining || out.len()>=200{return Err("Export exceeds its CSV count or byte budget".into());}
                     let name = f.name().replace('\\', "/");
-                    let mut text = String::new();
-                    std::io::Read::take(&mut f, MAX).read_to_string(&mut text).map_err(|e| e.to_string())?;
+                    let text=read_export_text(&mut f,&mut remaining)?;
                     out.push((name, text));
                 }
             } else {
@@ -768,9 +785,7 @@ async fn read_export(paths: Vec<String>) -> Result<Vec<(String, String)>, String
                     return Err(tr!("Dosya çok büyük", "File too big"));
                 }
                 let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                let mut text = String::new();
-                std::io::Read::take(std::fs::File::open(path).map_err(|e| e.to_string())?, MAX)
-                    .read_to_string(&mut text).map_err(|e| e.to_string())?;
+                let text=read_export_text(std::fs::File::open(path).map_err(|e|e.to_string())?,&mut remaining)?;
                 out.push((name, text));
             }
         }
@@ -1137,6 +1152,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(update::Pending::default())
+        .manage(browser::BrowserState::default())
+        .manage(browser::Downloads::default())
         .setup(|app| {
             let win = app.get_webview_window("main").expect("main window");
             let hwnd = win.hwnd()?.0 as isize;
@@ -1155,7 +1172,24 @@ pub fn run() {
             let _ = MPV.set(mpv::start(app.handle().clone(), exe, hwnd, fonts));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(|invoke| {
+            // Application commands must never be callable by a website, even if a capability changes.
+            if invoke.message.webview_ref().label().starts_with("luna-web-") {
+                invoke.resolver.reject("Web pages cannot invoke Luna commands");
+                return true;
+            }
+            let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+            cache_tools::cache_tools,
+            browser::browser_create,
+            browser::debug_log,
+            browser::browser_download_open,
+            browser::browser_extensions,
+            browser::browser_action,
+            browser::browser_bounds,
+            browser::browser_bubble,
+            browser::browser_read,
+            browser::browser_position,
+            browser::browser_translation,
             set_lang,
             system_check,
             mpv_command,
@@ -1169,6 +1203,7 @@ pub fn run() {
             books_scan,
             yt_search,
             yt_info,
+            yt_transcript,
             yt_stream,
             tts_speak,
             tts_voices,
@@ -1236,7 +1271,9 @@ pub fn run() {
             backup_read,
             text_file_read,
             clipboard_offer
-        ])
+            ];
+            handler(invoke)
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
@@ -1266,4 +1303,12 @@ mod tests {
         assert!(!super::is_sample(Path::new(r"D:\Sample Collection\Inception.2010.mkv")));
         assert!(!super::is_sample(Path::new(r"D:\Films\Samplers.2019.mkv")));
     }
+}
+
+#[cfg(test)]
+mod export_budget_tests{
+    use super::read_export_text;
+    #[test]fn csv_reads_share_one_total_budget(){let mut left=6;assert_eq!(read_export_text(&b"abc"[..],&mut left).unwrap(),"abc");assert_eq!(left,3);assert_eq!(read_export_text(&b"def"[..],&mut left).unwrap(),"def");assert_eq!(left,0);assert!(read_export_text(&b"x"[..],&mut left).is_err());}
+    #[test]fn csv_over_budget_is_rejected_instead_of_truncated(){let mut left=3;assert!(read_export_text(&b"abcd"[..],&mut left).is_err());assert_eq!(left,3);}
+    #[test]fn csv_invalid_utf8_is_an_error(){let mut left=10;assert!(read_export_text(&[255u8][..],&mut left).is_err());}
 }

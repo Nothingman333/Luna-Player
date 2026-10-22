@@ -57,8 +57,10 @@ its English translation is added to `app/src/i18n-en.ts`. Rust messages use `tr!
 
 ## Release process
 
-Releases are built by `.github/workflows/release.yml` on a `v*` tag. It builds the NSIS setup and the portable
-zip, then attaches both to the GitHub release. The same steps can be run locally:
+Releases are built manually with `.github/workflows/release.yml` (Actions → Release → Run workflow).
+Tag pushes do not start this workflow. Supply the target version; all version fields are synchronized before building.
+The existing updater signing key must be configured as repository secrets. Optional publication creates a draft release.
+See BUILDING.md for signing, updater artifacts and final publication. The build steps can also be run locally:
 
 ```powershell
 ./scripts/fetch-mpv.ps1      # only when app/src-tauri/mpv is empty

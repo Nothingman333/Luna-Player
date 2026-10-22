@@ -1,0 +1,7 @@
+import {validReading,webAddress}from"./extrasModel";
+import type{WebReading}from"./extrasModel";
+export type PageNote={url:string;text:string;at:number};
+export const validPageNote=(x:any):x is PageNote=>{try{return !!x&&webAddress(x.url)===x.url&&typeof x.text==="string"&&x.text.length<=5000&&Number.isFinite(x.at);}catch{return false;}};
+export function browserRows<T>(storage:Pick<Storage,"getItem">,key:string,valid:(v:any)=>v is T):T[]{const raw=storage.getItem(key);if(raw===null)return[];let data:unknown;try{data=JSON.parse(raw);}catch{throw Error("Stored browser data is damaged; export a backup first: "+key);}if(!Array.isArray(data)||!data.every(valid))throw Error("Stored browser data is damaged; export a backup first: "+key);return data;}
+export function mergeReadingEntry(rows:WebReading[],entry:WebReading):WebReading[]{if(!validReading(entry))throw Error("Invalid reading position");if(rows.length>=300&&!rows.some(x=>x.url===entry.url))throw Error("Reading list full (300)");const old=rows.find(x=>x.url===entry.url);return[{...entry,done:old?.done??entry.done},...rows.filter(x=>x.url!==entry.url)];}
+export function mergePageNote(rows:PageNote[],url:string,text:string,at:number):PageNote[]{webAddress(url);const value=text.trim();if(value&&!validPageNote({url,text:value,at}))throw Error("Invalid page note");if(value&&rows.length>=500&&!rows.some(n=>n.url===url))throw Error("Notes full (500)");return[...rows.filter(n=>n.url!==url),...(value?[{url,text:value,at}]:[])];}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { store } from "./library";
+import { matchKey } from "./textMatch";
 import { tt, locale } from "./i18n";
 import { ASPECTS, cleanProfile } from "./filmReviewModel";
 import type { Aspect } from "./filmReviewModel";
@@ -65,7 +66,7 @@ function sourceOf(kind: TasteKind) {
   } as Extra };
 }
 type Extra = { title: string; sub: string; rows: [string, number][]; hours?: number[]; songs?: number; heard?: number; month?: number };
-const norm = (t: string) => t.toLocaleLowerCase("tr").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+const norm = (t: string) => matchKey(t).replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 /** a run's title: saved with it, or (older runs) read from its Letterboxd address */
 const titleOf = (run: AiRun) => run.title || (run.url.split("/").filter(Boolean).pop() ?? "").replace(/-\d{4}$/, "").replace(/-/g, " ");
 const n1 = (x: number) => x.toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 });

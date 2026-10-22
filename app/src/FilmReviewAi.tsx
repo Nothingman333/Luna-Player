@@ -285,6 +285,7 @@ export function ReviewAiCard({ film, profile, mood, setMood, label, onReviews, o
         {run.siteScore != null && <div className="la-score"><span>1000Kitap</span><strong>{num(run.siteScore)}</strong>{run.readers ? <em className="-plain">{tt("{0} okur", run.readers.toLocaleString(locale()))}</em> : null}</div>}
         <span className={"la-verdict -" + v.lean}>{toneLabel(v.lean)}</span>
       </div>
+      <p className="la-muted la-basis">{tt("Bu özet, okunan {0} yorumdan yapay zekâyla çıkarıldı. Puanlar ve yüzdeler yaklaşık bir okumadır; doğruluk garantisi vermez ve gerçek bir topluluk anketi değildir.", run.count)}</p>
       {mine && (mine.notes.length > 0 || learned) && <p className="la-why">
         {mine.notes.map((n) => n.kind === "strong" ? tt("{0} çok güçlü, senin için önemli", label(n.aspect)) : n.kind === "weak" ? tt("{0} zayıf, senin için önemli", label(n.aspect)) : tt("{0} eleştiriliyor, uyarılmak istemiştin", label(n.aspect))).join(" · ")}
         {mine.notes.length > 0 && learned ? " · " : ""}
