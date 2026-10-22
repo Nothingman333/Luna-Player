@@ -8,11 +8,11 @@ const tests = [], test = (name, run) => tests.push({ name, run });
 const PAGE = ['# Dune: Part Two', 'Paul Atreides unites with Chani and the Fremen.', 'Paul Atreides unites with Chani and the Fremen.', '## Cast', '- Timothée Chalamet as Paul', '- Zendaya as Chani',
   'Role | Actor', 'Paul | Timothée Chalamet', '### İstanbul gösterimi', 'Gösterim İSTANBUL ve Ankara’da; ıssız bir çöl.', '#### Footnote level four', ''].join('\n');
 
-test('Page text becomes headings, paragraphs, list items and table rows; repeated lines are dropped', () => {
+test('Page text becomes headings, paragraphs, list items and table rows; intentional repeated lines are kept', () => {
   const b = R.readerBlocks(PAGE);
-  assert.deepEqual(b.map(x => x.kind), ['h', 'p', 'h', 'li', 'li', 'row', 'row', 'h', 'p', 'h']);
-  assert.equal(b[0].level, 1); assert.equal(b[2].level, 2); assert.equal(b[9].level, 4);
-  assert.deepEqual(b[5].cells, ['Role', 'Actor']); assert.equal(b[3].text, 'Timothée Chalamet as Paul');
+  assert.deepEqual(b.map(x => x.kind), ['h', 'p', 'p', 'h', 'li', 'li', 'row', 'row', 'h', 'p', 'h']);
+  assert.equal(b[0].level, 1); assert.equal(b[3].level, 2); assert.equal(b[10].level, 4);
+  assert.deepEqual(b[6].cells, ['Role', 'Actor']); assert.equal(b[4].text, 'Timothée Chalamet as Paul');
   assert.equal(new Set(b.filter(x => x.kind === 'h').map(x => x.id)).size, 4);
   for (const bad of [null, undefined, 5, {}]) assert.deepEqual(R.readerBlocks(bad), []);
   assert.equal(R.readerBlocks(Array.from({ length: 50 }, (_, i) => 'line ' + i).join('\n'), 10).length, 10);
@@ -35,7 +35,7 @@ test('Find ignores case, accents and the Turkish dotted/dotless i, and maps back
   assert.deepEqual(hits.map(h => R.blockText(b[h.block]).slice(h.start, h.end)), ['İstanbul', 'İSTANBUL']);
   assert.deepEqual(R.findInBlocks(b, 'TIMOTHEE').map(h => R.blockText(b[h.block]).slice(h.start, h.end)), ['Timothée', 'Timothée']);
   assert.deepEqual(R.findInBlocks(b, 'issiz').map(h => R.blockText(b[h.block]).slice(h.start, h.end)), ['ıssız']);
-  assert.deepEqual(R.findInBlocks(b, 'chani').map(h => h.block), [1, 4]);
+  assert.deepEqual(R.findInBlocks(b, 'chani').map(h => h.block), [1, 2, 5]);
   assert.deepEqual(R.findInBlocks(b, '   '), []); assert.deepEqual(R.findInBlocks(b, null), []);
   assert.equal(R.findInBlocks(R.readerBlocks('a a a a a a'), 'a', 3).length, 3);
   const emoji = R.readerBlocks('x 😀 ﬁne y'); const e = R.findInBlocks(emoji, 'fine');

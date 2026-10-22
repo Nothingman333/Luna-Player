@@ -213,7 +213,7 @@ test('reading progress before the page positions exist comes from the chapter an
   assert.equal(r.spineProgress(undefined, 10), undefined); assert.equal(r.spineProgress(2, 0), undefined);
   assert.equal(r.spineProgress(0, 10, 1, 4), 0); assert.equal(r.spineProgress(2, 10, 1, 4), 0.2);
   assert.equal(r.spineProgress(2, 10, 3, 4), 0.25); assert.equal(r.spineProgress(9, 10, 4, 4, true), 1);
-  assert(r.spineProgress(99, 10, 1, 1) <= 1);
+  assert.equal(r.spineProgress(99, 10, 1, 1), undefined);
 });
 
 // ---------------- books: lists and shelves ----------------

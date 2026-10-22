@@ -71,7 +71,7 @@ export function searchedWords(url: string): string | null {
   try {
     const u = new URL(url), host = u.hostname.replace(/^www\./, "");
     const key = host === "yandex.com" ? "text" : host === "youtube.com" ? "search_query" : host === "themoviedb.org" ? "query" : /(^|\.)wikipedia\.org$/.test(host) ? "search" : "q";
-    const isResults = /(^|\.)(google\.[a-z.]+|bing\.com|duckduckgo\.com|search\.brave\.com|startpage\.com|ecosia\.org|yandex\.com)$/.test(host)
+    const isResults = /(^|\.)(google\.[a-z.]+|bing\.com|duckduckgo\.com|search\.brave\.com|startpage\.com|ecosia\.org|yandex\.com|kagi\.com)$/.test(host)
       || (host === "youtube.com" && u.pathname === "/results") || (host === "themoviedb.org" && u.pathname.startsWith("/search"))
       || (/(^|\.)wikipedia\.org$/.test(host) && u.pathname === "/w/index.php");
     const words = isResults ? u.searchParams.get(key) : null;
