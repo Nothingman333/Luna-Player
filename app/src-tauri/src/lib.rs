@@ -17,6 +17,10 @@ fn set_lang(lang: String) {
 }
 
 mod browser;
+mod browser_extensions;
+mod browser_downloads;
+mod extension_package;
+mod extension_signature;
 mod clipboard;
 mod files;
 mod preview;
@@ -1153,7 +1157,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(update::Pending::default())
         .manage(browser::BrowserState::default())
-        .manage(browser::Downloads::default())
+        .manage(browser_downloads::Downloads::default())
+        .manage(browser_extensions::Extensions::default())
         .setup(|app| {
             let win = app.get_webview_window("main").expect("main window");
             let hwnd = win.hwnd()?.0 as isize;
@@ -1182,14 +1187,17 @@ pub fn run() {
             cache_tools::cache_tools,
             browser::browser_create,
             browser::debug_log,
-            browser::browser_download_open,
-            browser::browser_extensions,
+            browser::diagnostic_snapshot,
+            browser_downloads::browser_downloads,
+            browser_extensions::browser_extension_prepare,
+            browser_extensions::browser_extension_manage,
             browser::browser_action,
             browser::browser_bounds,
             browser::browser_bubble,
             browser::browser_read,
             browser::browser_position,
             browser::browser_translation,
+            browser::browser_find,
             set_lang,
             system_check,
             mpv_command,

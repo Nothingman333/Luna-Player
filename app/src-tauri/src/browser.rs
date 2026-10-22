@@ -1,8 +1,8 @@
 //! Remote pages live in separate WebView2 storage and receive no Luna command access.
-use std::{collections::HashSet, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}};
+use std::{collections::{BTreeSet, HashSet}, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, Webview, WebviewBuilder, WebviewUrl};
-use tauri::webview::{DownloadEvent, NewWindowResponse, PageLoadEvent, PermissionKind};
+use tauri::webview::{NewWindowResponse, PageLoadEvent, PermissionKind};
 use std::io::Write as _;
 
 /// Luna Web's detailed log (luna-debug.log in Luna's data folder): what the page layer, the bubble,
@@ -26,52 +26,6 @@ pub fn debug_log(app: AppHandle, caller: Webview, lines: Vec<String>) -> Result<
     Ok(())
 }
 
-/// Files the tabs downloaded in this run: only these can be opened or shown from Luna.
-#[derive(Default)]
-pub struct Downloads(pub Mutex<HashSet<std::path::PathBuf>>);
-
-const RISKY: [&str; 14] = ["exe", "msi", "bat", "cmd", "ps1", "vbs", "js", "jse", "wsf", "scr", "com", "lnk", "hta", "reg"];
-
-/// Opens a finished download (not programs or scripts: those are only shown in their folder) or shows it in Explorer.
-#[tauri::command]
-pub fn browser_download_open(app: AppHandle, caller: Webview, path: String, reveal: bool) -> Result<(), String> {
-    trusted(&caller)?;
-    let p = std::path::PathBuf::from(&path);
-    if !app.state::<Downloads>().0.lock().map_err(|e| e.to_string())?.contains(&p) { return Err("Unknown download".into()); }
-    if !p.exists() { return Err("Dosya artık yok".into()); }
-    let ext = p.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-    dlog(&app, &format!("download open reveal={reveal} {path}"));
-    let mut cmd = std::process::Command::new("explorer.exe");
-    if reveal || RISKY.contains(&ext.as_str()) { cmd.arg(format!("/select,{}", p.display())); } else { cmd.arg(&p); }
-    cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
-}
-
-/// Unpacked browser extensions (Chrome/Edge style folders with a manifest.json) that every tab loads.
-fn extensions_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let d = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("web-extensions");
-    std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
-    Ok(d)
-}
-
-#[tauri::command]
-pub fn browser_extensions(app: AppHandle, caller: Webview, action: String) -> Result<serde_json::Value, String> {
-    trusted(&caller)?;
-    let dir = extensions_dir(&app)?;
-    if action == "open-folder" {
-        std::process::Command::new("explorer.exe").arg(&dir).spawn().map_err(|e| e.to_string())?;
-        return Ok(serde_json::Value::Null);
-    }
-    let mut out = vec![];
-    for e in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
-        let m = e.path().join("manifest.json");
-        let Ok(text) = std::fs::read_to_string(&m) else { continue };
-        let j: serde_json::Value = serde_json::from_str(text.trim_start_matches('\u{feff}')).unwrap_or_default();
-        let folder = e.file_name().to_string_lossy().to_string();
-        let name = j["name"].as_str().filter(|n| !n.starts_with("__MSG_")).map(String::from).unwrap_or_else(|| folder.clone());
-        out.push(serde_json::json!({ "name": name, "version": j["version"].as_str().unwrap_or(""), "folder": folder }));
-    }
-    Ok(serde_json::json!({ "dir": dir.display().to_string(), "items": out }))
-}
 use tauri::Url;
 
 #[path = "browser_url.rs"]
@@ -87,6 +41,13 @@ fn trusted(caller: &Webview) -> Result<(), String> {
 fn label(id: u32) -> String { format!("luna-web-{id}") }
 fn tab(app: &AppHandle, id: u32) -> Result<Webview, String> {
     app.get_webview(&label(id)).ok_or_else(|| "Tab closed".into())
+}
+/// Tabs the user muted from Luna's tab strip. Showing a tab again keeps them silent; hiding a tab
+/// always mutes it (a hidden page must not keep playing behind the library).
+static USER_MUTED: Mutex<BTreeSet<u32>> = Mutex::new(BTreeSet::new());
+fn user_muted(id: u32) -> bool { USER_MUTED.lock().map(|set| set.contains(&id)).unwrap_or(false) }
+fn set_user_muted(id: u32, muted: bool) {
+    if let Ok(mut set) = USER_MUTED.lock() { if muted { set.insert(id); } else { set.remove(&id); } }
 }
 fn mute(view: &Webview, muted: bool) -> Result<(), String> {
     // Native muting also covers cross-origin video frames, unlike DOM pause().
@@ -105,7 +66,7 @@ fn mute(view: &Webview, muted: bool) -> Result<(), String> {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BrowserEvent { id: u32, kind: &'static str, value: String }
-fn event(app: &AppHandle, id: u32, kind: &'static str, value: String) {
+pub(crate) fn event(app: &AppHandle, id: u32, kind: &'static str, value: String) {
     let _ = app.emit_to("main", "luna-browser-event", BrowserEvent { id, kind, value });
 }
 /// Runs a call on the tab's own CoreWebView2 (not page script, so it also works on error pages).
@@ -193,7 +154,76 @@ fn watch(view: &Webview, app: AppHandle, id: u32) -> Result<(), String> {
             Ok(())
         }));
         let _ = unsafe { controller.add_ZoomFactorChanged(&handler_5, &mut token) };
+        // Native user context menu: link/selection are data; actions are chosen in the trusted Luna UI.
+        if let Ok(menu_core) = core.cast::<webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_11>() {
+            let menu_app=app.clone();
+            let handler=webview2_com::ContextMenuRequestedEventHandler::create(Box::new(move |_,args| {
+                let Some(args)=args else{return Ok(())};
+                let target=unsafe{args.ContextMenuTarget()?};
+                let (mut has_link,mut has_selection,mut editable)=(Default::default(),Default::default(),Default::default());
+                unsafe{target.HasLinkUri(&mut has_link)?;target.HasSelection(&mut has_selection)?;target.IsEditable(&mut editable)?;}
+                let (has_link,has_selection,editable):(bool,bool,bool)=(has_link.into(),has_selection.into(),editable.into());
+                if editable || (!has_link&&!has_selection){return Ok(())}
+                let(mut link,mut text,mut page)=(PWSTR::null(),PWSTR::null(),PWSTR::null());
+                if has_link{unsafe{target.LinkUri(&mut link)?;}}
+                if has_selection{unsafe{target.SelectionText(&mut text)?;}}
+                unsafe{target.PageUri(&mut page)?;}
+                let link=if has_link{take_pwstr(link)}else{String::new()};
+                let text=if has_selection{take_pwstr(text)}else{String::new()};
+                let page=take_pwstr(page);
+                let mut point=Default::default();unsafe{args.Location(&mut point)?;args.SetHandled(true)?;}
+                event(&menu_app,id,"context",serde_json::json!({"url":link.chars().take(2048).collect::<String>(),"text":text.chars().take(8000).collect::<String>(),"page":page,"x":point.x,"y":point.y}).to_string());
+                Ok(())
+            }));
+            let _=unsafe{menu_core.add_ContextMenuRequested(&handler,&mut token)};
+        }
+        let fullscreen_app=app.clone();
+        let fullscreen=webview2_com::ContainsFullScreenElementChangedEventHandler::create(Box::new(move |sender,_|{
+            let Some(core)=sender else{return Ok(())};let mut value=Default::default();unsafe{core.ContainsFullScreenElement(&mut value)?;}
+            let on:bool=value.into();event(&fullscreen_app,id,"fullscreen",if on{"1"}else{"0"}.into());Ok(())
+        }));
+        let _=unsafe{core.add_ContainsFullScreenElementChanged(&fullscreen,&mut token)};
+        // Luna Web's own shortcuts while the page has the keyboard (Ctrl+T, Ctrl+W, Ctrl+L, Ctrl+F…):
+        // only the combinations in `page_shortcut` are taken from the page; every other key stays its own.
+        let key_app = app.clone();
+        let handler_6 = webview2_com::AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
+            use webview2_com::Microsoft::Web::WebView2::Win32::{COREWEBVIEW2_KEY_EVENT_KIND, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN, COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN};
+            #[link(name = "user32")]
+            unsafe extern "system" { fn GetKeyState(key: i32) -> i16; }
+            let Some(args) = args else { return Ok(()) };
+            let (mut kind, mut key) = (COREWEBVIEW2_KEY_EVENT_KIND(-1), 0u32);
+            unsafe { args.KeyEventKind(&mut kind)?; args.VirtualKey(&mut key)?; }
+            if kind.0 != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN.0 && kind.0 != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN.0 { return Ok(()) }
+            let down = |vk: i32| unsafe { GetKeyState(vk) } < 0;
+            if let Some(name) = page_shortcut(key, down(0x11), down(0x10), down(0x12)) {
+                unsafe { args.SetHandled(true)?; }
+                event(&key_app, id, "key", name.into());
+            }
+            Ok(())
+        }));
+        let _ = unsafe { controller.add_AcceleratorKeyPressed(&handler_6, &mut token) };
     }).map_err(|e| e.to_string())
+}
+
+/// The Luna Web shortcuts a focused page hands over to Luna (virtual-key code + Ctrl/Shift/Alt).
+/// AltGr arrives as Ctrl+Alt, so no Ctrl combination with Alt is taken: typed characters stay safe.
+fn page_shortcut(key: u32, ctrl: bool, shift: bool, alt: bool) -> Option<&'static str> {
+    const DIGITS: [&str; 9] = ["ctrl+1", "ctrl+2", "ctrl+3", "ctrl+4", "ctrl+5", "ctrl+6", "ctrl+7", "ctrl+8", "ctrl+9"];
+    match (ctrl, shift, alt) {
+        (true, false, false) => match key {
+            0x54 => Some("ctrl+t"), 0x57 => Some("ctrl+w"), 0x4C => Some("ctrl+l"), 0x46 => Some("ctrl+f"), 0x48 => Some("ctrl+h"),
+            0x44 => Some("ctrl+d"), 0x4B => Some("ctrl+k"), 0x4D => Some("ctrl+m"), 0x4A => Some("ctrl+j"), 0x09 => Some("ctrl+tab"), 0x21 => Some("ctrl+pageup"), 0x22 => Some("ctrl+pagedown"),
+            0x31..=0x39 => Some(DIGITS[(key - 0x31) as usize]),
+            _ => None,
+        },
+        (true, true, false) => match key {
+            0x54 => Some("ctrl+shift+t"), 0x09 => Some("ctrl+shift+tab"), 0x52 => Some("ctrl+shift+r"), 0x41 => Some("ctrl+shift+a"), 0x2E => Some("ctrl+shift+delete"), 0x21 => Some("ctrl+shift+pageup"), 0x22 => Some("ctrl+shift+pagedown"),
+            _ => None,
+        },
+        (false, false, true) => if key == 0x24 { Some("alt+home") } else { None },
+        (false, false, false) => match key { 0x75 => Some("f6"), 0x78 => Some("f9"), 0x70 => Some("f1"), _ => None },
+        _ => None,
+    }
 }
 
 /// A tiny, transparent app-owned view is above native page content. No bottom bar is needed.
@@ -259,7 +289,7 @@ pub async fn browser_create(app: AppHandle, caller: Webview, id: u32, url: Strin
     let result = (|| {
         let profile = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("web-profile");
         std::fs::create_dir_all(&profile).map_err(|e| e.to_string())?;
-        let nav_app = app.clone(); let load_app = app.clone(); let title_app = app.clone(); let popup_app = app.clone(); let download_app = app.clone(); let permission_app = app.clone();
+        let nav_app = app.clone(); let load_app = app.clone(); let title_app = app.clone(); let popup_app = app.clone(); let permission_app = app.clone();
         // The tab starts on about:blank and only then navigates. Tauri derives a webview's protocol
         // origin from its FIRST address: a site opened first would otherwise be the CORS origin of
         // this tab's asset.localhost responses (library thumbnails, covers, fonts) and could read them.
@@ -269,7 +299,7 @@ pub async fn browser_create(app: AppHandle, caller: Webview, id: u32, url: Strin
         let started = Arc::new(AtomicBool::new(false)); let nav_started = started.clone();
         let builder = WebviewBuilder::new(label(id), WebviewUrl::External(blank))
             .data_directory(profile).disable_drag_drop_handler().focused(false)
-            .browser_extensions_enabled(true).extensions_path(extensions_dir(&app)?)
+            .browser_extensions_enabled(true)
             .on_navigation(move |url| {
                 if url.scheme() == "about" { return !nav_started.load(Ordering::SeqCst); }
                 let allowed = checked_url(url.as_str()).is_ok();
@@ -285,28 +315,13 @@ pub async fn browser_create(app: AppHandle, caller: Webview, id: u32, url: Strin
                 if checked_url(url.as_str()).is_ok() { event(&popup_app, id, "popup", url.to_string()); }
                 NewWindowResponse::Deny
             })
-            .on_download(move |_, ev| {
-                match ev {
-                    DownloadEvent::Requested { url, destination } => {
-                        dlog(&download_app, &format!("download start tab={id} {url} -> {}", destination.display()));
-                        if let Ok(mut set) = download_app.state::<Downloads>().0.lock() { set.insert(destination.clone()); }
-                        event(&download_app, id, "download-start", serde_json::json!({ "url": url.to_string(), "path": destination.display().to_string() }).to_string());
-                    }
-                    DownloadEvent::Finished { url, path, success } => {
-                        dlog(&download_app, &format!("download done tab={id} ok={success} {url} {:?}", path));
-                        if let Some(p) = &path { if let Ok(mut set) = download_app.state::<Downloads>().0.lock() { set.insert(p.clone()); } }
-                        event(&download_app, id, "download-done", serde_json::json!({ "url": url.to_string(), "path": path.map(|p| p.display().to_string()), "success": success }).to_string());
-                    }
-                    _ => {}
-                }
-                true
-            })
             // Site permissions stay denied; the UI only explains what was refused.
             .on_permission_request(move |_, kind| { event(&permission_app, id, "permission", permission_name(kind).into()); tauri::webview::PermissionResponse::Deny });
         let main = app.get_webview("main").ok_or("Main UI closed")?;
         let view = main.window().add_child(builder, tauri::PhysicalPosition::new(0, 0), tauri::PhysicalSize::new(1, 1)).map_err(|e| e.to_string())?;
         // Optional signals: an older WebView2 runtime without them still browses normally.
         let _ = watch(&view, app.clone(), id);
+        crate::browser_downloads::watch(&view, app.clone(), id)?;
         view.hide().map_err(|e| e.to_string())?;
         started.store(true, Ordering::SeqCst);
         view.navigate(url).map_err(|e| e.to_string())
@@ -320,11 +335,16 @@ pub async fn browser_create(app: AppHandle, caller: Webview, id: u32, url: Strin
 }
 
 #[tauri::command]
-pub async fn browser_action(app: AppHandle, caller: Webview, id: u32, action: String, url: Option<String>, zoom: Option<f64>) -> Result<(), String> {
+pub async fn browser_action(app: AppHandle, caller: Webview, id: u32, action: String, url: Option<String>, zoom: Option<f64>, force: Option<bool>) -> Result<(), String> {
     trusted(&caller)?;
     if action == "close" {
+        if force.unwrap_or(false) {crate::browser_downloads::abort_tab(&app,id).await?;}
+        if app.state::<crate::browser_downloads::Downloads>().0.lock().map_err(|e|e.to_string())?.iter().any(|row|row.tab==id&&(matches!(row.state.as_str(),"running"|"paused")||row.can_resume)) {
+            return Err("Bu sekmede indirme sürüyor. Önce İndirmeler ekranından iptal et veya tamamlanmasını bekle.".into());
+        }
         if let Some(view) = app.get_webview(&label(id)) { view.close().map_err(|e| e.to_string())?; }
         app.state::<BrowserState>().0.lock().map_err(|e| e.to_string())?.remove(&id);
+        set_user_muted(id, false);
         return Ok(());
     }
     let view = tab(&app, id)?;
@@ -335,6 +355,7 @@ pub async fn browser_action(app: AppHandle, caller: Webview, id: u32, action: St
         "forward" => with_core(&view, |core| { let _ = unsafe { core.GoForward() }; }),
         // Cancels the pending navigation; an uncommitted request leaves the previous page in place.
         "stop" => with_core(&view, |core| { let _ = unsafe { core.Stop() }; }),
+        "exit-fullscreen" => view.eval("if(document.fullscreenElement)void document.exitFullscreen().catch(()=>{})").map_err(|e|e.to_string()),
         "reload" => view.reload().map_err(|e| e.to_string()),
         "zoom" => {
             let factor = zoom.filter(|z| z.is_finite() && (0.25..=5.0).contains(z)).ok_or("Invalid zoom")?;
@@ -343,6 +364,14 @@ pub async fn browser_action(app: AppHandle, caller: Webview, id: u32, action: St
         // Cookies, cache and site storage of the separate web profile shared by all tabs. Luna's own
         // favourites, notes and reading list live in the main UI's storage and are not touched.
         "clear-data" => view.clear_all_browsing_data().map_err(|e| e.to_string()),
+        // Tab mute from the tab strip (WebView2 IsMuted: also silences cross-origin frames).
+        "mute" | "unmute" => {
+            let muted = action == "mute";
+            set_user_muted(id, muted);
+            mute(&view, muted)
+        },
+        // The page's own print preview (WebView2 shows it inside the tab).
+        "print" => view.eval("window.print()").map_err(|e| e.to_string()),
         "hide" => {
             mute(&view, true)?;
             let _ = view.eval("document.querySelectorAll('video,audio').forEach(m=>m.pause())");
@@ -356,7 +385,7 @@ pub async fn browser_action(app: AppHandle, caller: Webview, id: u32, action: St
 #[derive(Deserialize)]
 pub struct BrowserOverlay { x: f64, y: f64, width: f64, height: f64, radius: f64 }
 
-async fn floating_chat_region(view: &Webview, width: i32, height: i32, overlay: Option<(i32, i32, i32, i32, i32)>) -> Result<(), String> {
+async fn floating_chat_region(view: &Webview, width: i32, height: i32, overlays: Vec<(i32, i32, i32, i32, i32)>) -> Result<(), String> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     view.with_webview(move |platform| {
         #[link(name = "user32")]
@@ -371,19 +400,15 @@ async fn floating_chat_region(view: &Webview, width: i32, height: i32, overlay: 
         let result = (|| unsafe {
             let mut hwnd = Default::default();
             platform.controller().ParentWindow(&mut hwnd).map_err(|e| e.to_string())?;
-            let region = if let Some((left, top, right, bottom, radius)) = overlay {
-                let full = CreateRectRgn(0, 0, width, height);
-                let cutout = CreateRoundRectRgn(left, top, right, bottom, radius * 2, radius * 2);
-                if full == 0 || cutout == 0 {
-                    if full != 0 { DeleteObject(full); }
-                    if cutout != 0 { DeleteObject(cutout); }
-                    return Err("Could not allocate floating chat region".to_string());
-                }
-                let combined = CombineRgn(full, full, cutout, 4); // RGN_DIFF
-                DeleteObject(cutout);
-                if combined == 0 { DeleteObject(full); return Err("Could not shape floating chat region".to_string()); }
-                full
-            } else { 0 };
+            let region=if overlays.is_empty(){0}else{
+                let full=CreateRectRgn(0,0,width,height);if full==0{return Err("Could not allocate page region".to_string())}
+                for(left,top,right,bottom,radius)in overlays{
+                    let cut=CreateRoundRectRgn(left,top,right,bottom,radius*2,radius*2);
+                    if cut==0{DeleteObject(full);return Err("Could not allocate overlay region".to_string())}
+                    let result=CombineRgn(full,full,cut,4);DeleteObject(cut);
+                    if result==0{DeleteObject(full);return Err("Could not shape page region".to_string())}
+                }full
+            };
             // The OS owns the region after success. Only the chat rectangle is excluded;
             // the actual page viewport and all its layout dimensions stay unchanged.
             if SetWindowRgn(hwnd.0 as isize, region, 1) == 0 {
@@ -400,13 +425,16 @@ async fn floating_chat_region(view: &Webview, width: i32, height: i32, overlay: 
 }
 
 #[tauri::command]
-pub async fn browser_bounds(app: AppHandle, caller: Webview, id: u32, x: f64, y: f64, width: f64, height: f64, overlay: Option<BrowserOverlay>) -> Result<(), String> {
+pub async fn browser_bounds(app: AppHandle, caller: Webview, id: u32, x: f64, y: f64, width: f64, height: f64, overlay: Option<BrowserOverlay>, overlays: Option<Vec<BrowserOverlay>>) -> Result<(), String> {
     trusted(&caller)?;
     let view = tab(&app, id)?;
     let size = caller.window().inner_size().map_err(|e| e.to_string())?;
     if ![x, y, width, height].iter().all(|v| v.is_finite()) || x < 0. || y < 0. || width < 1. || height < 1.
         || x + width > size.width as f64 + 2. || y + height > size.height as f64 + 2. { return Err("Invalid browser bounds".into()); }
-    let overlay = match overlay {
+    let mut cuts=Vec::new();
+    let mut requested=overlays.unwrap_or_default();if let Some(o)=overlay{requested.insert(0,o);}
+    if requested.len()>8{return Err("Too many overlays".into())}
+    for entry in requested { let overlay = match Some(entry) {
         Some(o) => {
             if ![o.x, o.y, o.width, o.height, o.radius].iter().all(|v| v.is_finite())
                 || o.x.abs() > size.width as f64 * 2. || o.y.abs() > size.height as f64 * 2.
@@ -418,11 +446,12 @@ pub async fn browser_bounds(app: AppHandle, caller: Webview, id: u32, x: f64, y:
         }
         None => None,
     };
-    dlog(&app, &format!("bounds id={id} x={x} y={y} w={width} h={height} cut={:?}", overlay));
+    if let Some(cut)=overlay{cuts.push(cut);} }
+    dlog(&app, &format!("bounds id={id} x={x} y={y} w={width} h={height} cut={:?}", cuts));
     view.set_position(tauri::PhysicalPosition::new(x as i32, y as i32)).map_err(|e| e.to_string())?;
     view.set_size(tauri::PhysicalSize::new(width as u32, height as u32)).map_err(|e| e.to_string())?;
-    floating_chat_region(&view, width as i32, height as i32, overlay).await?;
-    mute(&view, false)?;
+    floating_chat_region(&view, width as i32, height as i32, cuts).await?;
+    mute(&view, user_muted(id))?;
     view.show().map_err(|e| e.to_string())
 }
 
@@ -509,6 +538,34 @@ pub async fn browser_position(app:AppHandle, caller:Webview, id:u32, action:Stri
     Ok(serde_json::json!({"url":before.as_str(),"progress":value}))
 }
 
+fn find_action(action: &str) -> bool { matches!(action, "find" | "next" | "prev" | "clear") }
+
+/// Find in page (Ctrl+F). The script paints matches with CSS highlights and returns only a count and
+/// the current position; the query is passed as a JSON string literal, never spliced as code.
+#[tauri::command]
+pub async fn browser_find(app: AppHandle, caller: Webview, id: u32, action: String, query: Option<String>, match_case: Option<bool>) -> Result<serde_json::Value, String> {
+    trusted(&caller)?;
+    if !find_action(&action) { return Err("Unknown find action".into()); }
+    let query: String = query.unwrap_or_default().chars().take(200).collect();
+    let view = tab(&app, id)?;
+    checked_url(view.url().map_err(|e| e.to_string())?.as_str())?;
+    let source = include_str!("../../src/browserFindPage.js").replace("export function", "function");
+    let script = format!("(()=>{{ try {{ {source}; return browserFindPage({}, {}, {}); }} catch(e) {{ return {{count:0,index:0,capped:false}}; }} }})()",
+        serde_json::to_string(&action).map_err(|e| e.to_string())?, serde_json::to_string(&query).map_err(|e| e.to_string())?, match_case.unwrap_or(false));
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let tx = Mutex::new(Some(tx));
+    view.eval_with_callback(script, move |value| {
+        if let Ok(mut sender) = tx.lock() { if let Some(sender) = sender.take() { let _ = sender.send(value); } }
+    }).map_err(|e| e.to_string())?;
+    let raw = tokio::time::timeout(std::time::Duration::from_secs(4), rx).await.map_err(|_| "Find timed out")?.map_err(|_| "Tab closed")?;
+    if raw.len() > 2_000 { return Err("Invalid find result".into()); }
+    let value: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let count = value.get("count").and_then(|v| v.as_u64()).unwrap_or(0).min(1000);
+    let index = value.get("index").and_then(|v| v.as_u64()).unwrap_or(0).min(count);
+    let capped = value.get("capped").and_then(|v| v.as_bool()).unwrap_or(false);
+    Ok(serde_json::json!({ "count": count, "index": index, "capped": capped }))
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -518,4 +575,42 @@ mod tests {
         }
         assert!(super::checked_url("https://example.com/a?q=1").is_ok());
     }
+    #[test]
+    fn page_shortcuts_take_only_luna_combinations() {
+        use super::page_shortcut as k;
+        assert_eq!(k(0x54, true, false, false), Some("ctrl+t"));
+        assert_eq!(k(0x54, true, true, false), Some("ctrl+shift+t"));
+        assert_eq!(k(0x39, true, false, false), Some("ctrl+9"));
+        assert_eq!(k(0x24, false, false, true), Some("alt+home"));
+        assert_eq!(k(0x75, false, false, false), Some("f6"));
+        assert_eq!(k(0x78, false, false, false), Some("f9"));
+        assert_eq!(k(0x21, true, false, false), Some("ctrl+pageup"));
+        assert_eq!(k(0x22, true, true, false), Some("ctrl+shift+pagedown"));
+        assert_eq!(k(0x54, true, false, true), None); // AltGr+T types a character
+        assert_eq!(k(0x43, true, false, false), None); // Ctrl+C stays the page's copy
+        assert_eq!(k(0x41, false, false, false), None);
+    }
+    #[test]
+    fn find_actions_and_user_mute() {
+        for ok in ["find", "next", "prev", "clear"] { assert!(super::find_action(ok), "{ok}"); }
+        for bad in ["", "eval", "Find", "next;"] { assert!(!super::find_action(bad), "{bad}"); }
+        super::set_user_muted(77, true); assert!(super::user_muted(77));
+        super::set_user_muted(77, false); assert!(!super::user_muted(77));
+    }
+}
+
+/// Only the trusted UI can request these two bounded log tails. Export redaction happens before display/save.
+#[tauri::command]
+pub fn diagnostic_snapshot(app:AppHandle,caller:Webview)->Result<serde_json::Value,String>{
+    trusted(&caller)?;use std::io::{Read,Seek,SeekFrom};
+    let dir=app.path().app_local_data_dir().map_err(|e|e.to_string())?;let mut logs=Vec::new();
+    for name in ["luna-debug.log","luna-debug.old.log"]{
+        if let Ok(mut file)=std::fs::File::open(dir.join(name)){
+            let size=file.metadata().map_err(|e|e.to_string())?.len();let start=size.saturating_sub(32768);file.seek(SeekFrom::Start(start)).map_err(|e|e.to_string())?;
+            let mut bytes=Vec::new();file.take(32768).read_to_end(&mut bytes).map_err(|e|e.to_string())?;
+            let text=String::from_utf8_lossy(&bytes).to_string();let text=if start>0{text.split_once('\n').map(|(_,tail)|tail.to_string()).unwrap_or_default()}else{text};
+            logs.push(serde_json::json!({"name":name,"text":text}));
+        }
+    }
+    Ok(serde_json::json!({"version":app.package_info().version.to_string(),"os":std::env::consts::OS,"arch":std::env::consts::ARCH,"logs":logs}))
 }

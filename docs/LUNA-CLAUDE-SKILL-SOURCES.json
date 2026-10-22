@@ -1,0 +1,99 @@
+{
+  "preparedAt": "2026-10-22",
+  "skills": [
+    {
+      "name": "frontend-design",
+      "kind": "adapted upstream",
+      "repository": "anthropics/skills",
+      "commit": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "sourcePath": "skills/frontend-design",
+      "sourceUrl": "https://github.com/anthropics/skills/tree/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/frontend-design",
+      "license": "Apache-2.0",
+      "upstreamSkillSha256": "d91970639e9f5c37682ac7ab60094d35f1c7c1f38d731bd56396563aee10c1d3",
+      "activeSkillSha256": "e953e5060a48b0d3758ee72ce4ca796419aa1fc713fdfcebf260bf13ace719e9"
+    },
+    {
+      "name": "webapp-testing",
+      "kind": "adapted upstream",
+      "repository": "anthropics/skills",
+      "commit": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+      "sourcePath": "skills/webapp-testing",
+      "sourceUrl": "https://github.com/anthropics/skills/tree/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/webapp-testing",
+      "license": "Apache-2.0",
+      "upstreamSkillSha256": "51b7349e77ec63b7744a6f63647e7566a0b4d2e301121cc10e8c2113af6556a2",
+      "activeSkillSha256": "b321de939921024c0b01c742ea4c2c7b58bdf62c1843a832a1027fd2ffbd8751"
+    },
+    {
+      "name": "vercel-react-best-practices",
+      "kind": "adapted upstream",
+      "repository": "vercel-labs/agent-skills",
+      "commit": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "sourcePath": "skills/react-best-practices",
+      "sourceUrl": "https://github.com/vercel-labs/agent-skills/tree/063bee94c3f4df8453406c830b0a7df0f2860278/skills/react-best-practices",
+      "license": "MIT (declared upstream)",
+      "upstreamSkillSha256": "71ed7794962fa6e803ee83030517b5b93a9f70fbfeb431ec4535c5480a8d8355",
+      "activeSkillSha256": "591b0f04227ad2569380564976716c97ccd3966bb74fcef0c1e33ee7aa3fac98"
+    },
+    {
+      "name": "systematic-debugging",
+      "kind": "adapted upstream",
+      "repository": "obra/superpowers",
+      "commit": "2ce8aa15d05bd57213e6f746f953aafb7ded7a8b",
+      "sourcePath": "skills/systematic-debugging",
+      "sourceUrl": "https://github.com/obra/superpowers/tree/2ce8aa15d05bd57213e6f746f953aafb7ded7a8b/skills/systematic-debugging",
+      "license": "MIT",
+      "upstreamSkillSha256": "51c6435d98c83c42c96ba7c35725a0b2c376cd487fb1a4e6bd0ddbe7e33ef202",
+      "activeSkillSha256": "ecfcf4fca54dda7d5e27d52750f1eacf96f90e7e91270592802811cd185053c2"
+    },
+    {
+      "name": "verification-before-completion",
+      "kind": "adapted upstream",
+      "repository": "obra/superpowers",
+      "commit": "2ce8aa15d05bd57213e6f746f953aafb7ded7a8b",
+      "sourcePath": "skills/verification-before-completion",
+      "sourceUrl": "https://github.com/obra/superpowers/tree/2ce8aa15d05bd57213e6f746f953aafb7ded7a8b/skills/verification-before-completion",
+      "license": "MIT",
+      "upstreamSkillSha256": "2befe7fc55bcadaa3d97dd9e8efeb633d2561c0ebe74c5a8b17c4d9e7e4520b3",
+      "activeSkillSha256": "c6f13438fe0409c263baa166ba4b751d7315197f6258507163629c491fb6643c"
+    },
+    {
+      "name": "luna-project-workflow",
+      "kind": "Luna-specific original guidance",
+      "license": "Project LICENSE applies to local guidance; upstream resources retain their own licenses",
+      "activeSkillSha256": "a01d61af746f526a8610d2525d43652149e3831fe3f6052d18ff4040d2271424"
+    },
+    {
+      "name": "luna-tauri-browser",
+      "kind": "Luna-specific original guidance",
+      "license": "Project LICENSE applies to local guidance; upstream resources retain their own licenses",
+      "activeSkillSha256": "a51fdb3b78f2c21aa4501cb6c58c5e021c1136d20fdfea2bec0aa9043e00e234"
+    },
+    {
+      "name": "luna-assistant-library",
+      "kind": "Luna-specific original guidance",
+      "license": "Project LICENSE applies to local guidance; upstream resources retain their own licenses",
+      "activeSkillSha256": "1891a4575cc62a432fc7f715ebe2a08cef0d2047e689d288c36e82fa9071ada4"
+    },
+    {
+      "name": "luna-ui-consistency",
+      "kind": "Luna-specific original guidance",
+      "license": "Project LICENSE applies to local guidance; upstream resources retain their own licenses",
+      "activeSkillSha256": "c70a4b89c67a2bdb7a40b173582909e944b8818221302e8fb6c8165b5b8d96a9"
+    }
+  ],
+  "notBundled": [
+    {
+      "repository": "pedronauck/skills",
+      "commit": "9a5254eba0a80d1245214f0ce476622fb23d762c",
+      "path": "skills/curated/tauri-v2",
+      "reason": "No applicable license declaration/file found in the inspected tree; source is linked for independent evaluation, not copied. Luna-specific Tauri guidance was authored from this project and official documentation instead."
+    }
+  ],
+  "docs": [
+    "https://code.claude.com/docs/en/skills",
+    "https://support.claude.com/en/articles/12512180-use-skills-in-claude",
+    "https://v2.tauri.app/security/capabilities/",
+    "https://v2.tauri.app/develop/calling-rust/",
+    "https://react.dev/reference/react/useEffect"
+  ]
+}

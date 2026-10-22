@@ -62,6 +62,11 @@ jobs:
           npm run test:claude-integration
           npm run test:browser-native
           npm run test:web-notebook
+          npm run test:web-plus
+          npm run test:browser-suggest
+          npm run test:browser-reader
+          npm run test:browser-magic
+          npm run test:everyday
 
   rust:
     name: Rust (build, tests)

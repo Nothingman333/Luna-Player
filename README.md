@@ -1,3 +1,7 @@
+> Yeni tur: [12 günlük kullanım geliştirmesi ve doğrulama](docs/LUNA-GUNLUK-GELISTIRMELER.md).
+
+> Yerel birleşik teslim (22 Ekim 2026): [birleştirme ve doğrulama raporu](docs/CLAUDE-BIRLESTIRME-20261022.md). Eklenti/indirme işlemleri için güncel [Luna Web yönetim belgesini](docs/LUNA-BROWSER-EKLENTI-INDIRME.md) esas alın.
+
 <p align="center">
   <img src="logo/luna-icon-256.png" width="96" alt="Luna Player logo">
 </p>
@@ -60,6 +64,21 @@ and Luna can read a book aloud. Classics from open libraries (Project Gutenberg,
 click, and free audiobooks from LibriVox play right away.
 
 ![Books](docs/screenshots/books.jpg)
+
+### Web
+
+**A small browser inside Luna.** Open **◎ Web** at the top for tabs, favourites and your own start page. Type a word
+to search with the engine you like, or use shortcuts: `!yt dune trailer` goes straight to YouTube, `!w Moon` to
+Wikipedia, `!lb` to Letterboxd. Suggestions come from your open tabs, favourites and history. History stays on your
+computer and has a pause switch. Find in a page (**Ctrl+F**), a calm reading view (**Ctrl+Shift+R**) with themes and
+read-aloud, mute a tab (**Ctrl+M**), and one click on **Play in Luna** opens a video page in Luna's own player.
+
+![Luna Web start page](docs/screenshots/web-start.jpg)
+
+
+### Web
+
+**A small browser of its own.** The **Web** tab opens real web pages next to your films, songs and books, with tabs, favourites, downloads, page zoom, page translation and a reading list. The address bar suggests open tabs, favourites and pages you visited recently while you type (arrow keys and Enter; the typed text always comes first), and searches with Google, DuckDuckGo, Bing, Brave, Startpage, Ecosia or Yandex, your choice. Right-click a tab for reload, duplicate, copy link and "close others". Press **F9** for a calm **reading view** of any article (themes, text size, contents, and Ctrl+F to find inside it), zoom is remembered per site, and the start page offers to **continue reading** where you stopped. The recently visited list stays on your computer, can be cleared at any time or switched off, and **F1** in Web shows every shortcut. **Ctrl+K** opens a command palette: in Web it finds commands, open tabs, favourites and history; in the library it jumps between Film, Music, Books and Web and finds any film or series you own. Type `!yt dune`, `dune !w` or `!tmdb dune` for quick searches on YouTube, Wikipedia, TMDB, Letterboxd, Goodreads, Spotify, Maps and more. Pin tabs, drag them into the order you like, and press **Ctrl+H** for your history by day. The start page greets you with the time and tonight's real moon, and keeps the sites you visit most. In the reading view, **Listen** reads the article aloud with your system voices and lights the paragraph being read.
 
 ## An assistant that sees what's open
 
@@ -124,6 +143,11 @@ Your keys and your library stay on your own computer.
 | S | Subtitle timeline |
 | Q | AI upscaling on / off (needs Lossless Scaling) |
 | Esc | Close a window or panel, then leave the film |
+| Ctrl+T / Ctrl+W | New / close a tab in Web |
+| Ctrl+L, Ctrl+F, Ctrl+H | Address bar, find in page, history in Web |
+| Ctrl+Shift+R, Ctrl+M | Reading view, mute the tab in Web |
+
+| Ctrl+L / F1 (in Web) | Focus the address bar / show all Web shortcuts |
 
 ## For developers
 

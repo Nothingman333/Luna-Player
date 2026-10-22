@@ -1,4 +1,4 @@
-export type BrowserIconName = "back" | "forward" | "reload" | "search" | "close" | "plus" | "star" | "home" | "external" | "translate" | "more" | "arrow" | "lock" | "spark" | "book" | "film" | "globe" | "speaker";
+export type BrowserIconName = "arrow" | "back" | "book" | "clock" | "close" | "command" | "copy" | "download" | "duplicate" | "external" | "film" | "find" | "forward" | "globe" | "grid" | "history" | "home" | "keyboard" | "lock" | "moon" | "more" | "music" | "muted" | "pin" | "play" | "plus" | "print" | "reader" | "reload" | "search" | "settings" | "spark" | "speaker" | "star" | "translate" | "trash" | "warning" | "zoom";
 const paths: Record<BrowserIconName, string> = {
   back: "m14 6-6 6 6 6", forward: "m10 6 6 6-6 6", reload: "M20 8V3l-3 3a8 8 0 1 0 2.2 9M20 3h-5",
   search: "M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z", close: "m6 6 12 12M6 18 18 6", plus: "M12 5v14M5 12h14",
@@ -10,6 +10,26 @@ const paths: Record<BrowserIconName, string> = {
   book: "M12 6C8 3 4 4 2 5v15c3-2 6-2 10 0 4-2 7-2 10 0V5c-2-1-6-2-10 1Zm0 0v14", film: "M3 3h18v18H3ZM7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4",
   globe: "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z",
   speaker: "M4 9h4l5-4v14l-5-4H4ZM16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11",
+  muted: "M4 9h4l5-4v14l-5-4H4ZM16.5 9.5l5 5M21.5 9.5l-5 5",
+  print: "M7 9V3h10v6M7 17H4a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-3M7 14h10v7H7Z",
+  history: "M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2",
+  play: "M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5Z",
+  warning: "M12 3 2 20h20ZM12 9v5M12 17h.01",
+  trash: "M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3",
+  download: "M12 3v12M7 10l5 5 5-5M4 20h16",
+  copy: "M8 8h12v12H8ZM16 8V4H4v12h4",
+  reader: "M5 4h14v16H5ZM8 8h8M8 12h8M8 16h5",
+  find: "M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14ZM21 21l-5-5M8.5 11h5",
+  duplicate: "M8 8h12v12H8ZM16 8V4H4v12h4M14 11v6M11 14h6",
+  pin: "M9 3h6l-1 6 4 3v2H6v-2l4-3ZM12 14v7",
+  keyboard: "M3 6h18v12H3ZM7 10h.01M11 10h.01M15 10h.01M18 10h.01M7 14h10",
+  clock: "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM12 7v5l3 2",
+  command: "M9 9V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V9Z",
+  grid: "M4 4h7v7H4ZM13 4h7v7h-7ZM4 13h7v7H4ZM13 13h7v7h-7Z",
+  moon: "M20 14.5A8.5 8.5 0 1 1 9.5 4a6.6 6.6 0 0 0 10.5 10.5Z",
+  music: "M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z",
+  settings: "M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4",
+  zoom: "M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0ZM10 7v6M7 10h6",
 };
 export function BrowserIcon({ name, size = 18 }: { name: BrowserIconName; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.65} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>;

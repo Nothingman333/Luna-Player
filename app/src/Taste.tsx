@@ -4326,7 +4326,7 @@ export function ChatPanel({ browserMode = false, onReadBrowserPage, onTranslateP
   onTranslatePage?: (target: string) => Promise<TranslationSummary>;
   browserPage?: BrowserPage; onClearBrowserPage?: () => void;
   /** the Web tab a page question would read right now (null: the start page, nothing to read) */
-  browserTab?: { title: string; url: string; loading: boolean } | null;
+  browserTab?: { id?:number;revision?:number;title: string; url: string; loading: boolean } | null;
   items: Item[]; recent: Recent[]; onClose: () => void; viewing?: Item; onPlay?: (path: string) => void; onOpenSource?: (src: string) => void;
   /** the film or episode playing in the player */
   watching?: { title: string; item?: Item };
@@ -4481,18 +4481,21 @@ export function ChatPanel({ browserMode = false, onReadBrowserPage, onTranslateP
   /** Stops the running turn. The request already handed to the provider cannot be recalled from here (the native
    *  command has no cancel handle): its answer is dropped and no further tool runs. A tool that is already
    *  running may finish; whatever ran is reported with its undo. */
-  const stopTurn = (reason: "user" | "switch" = "user") => {
+  const stopTurn = (reason: "user" | "switch" | "page" = "user") => {
     const t = turnRef.current;
     if (!t || t.cancelled) return;
     t.cancelled = true; turnRef.current = null;
     cancelPendingCards(); busyRef.current = false; setBusy(false); setSteps([]);
-    const msg: Msg = { role: "model", local: true, stopped: true, text: reason === "user"
+    const msg: Msg = { role: "model", local: true, stopped: true, text: reason === "page" ? extraText("Sayfa veya sekme değiştiği için önceki istek durduruldu. Geç gelen yanıt bu sayfada gösterilmeyecek.","The page or tab changed, so the earlier request was stopped. A late answer will not appear on this page.") : reason === "user"
       ? extraText("Durduruldu. Sağlayıcıya gönderilmiş istek arka planda bitebilir; yanıtı kullanılmayacak ve başka işlem çalıştırılmayacak. Şu an çalışan bir işlem varsa tamamlanabilir, sonucu ayrıca gösterilir.",
         "Stopped. A request already sent to the provider may still finish in the background; its answer will not be used and nothing else will run. A tool that is already running may complete; its result is shown separately.")
       : extraText("Sohbet değiştirildiği için bu istek durduruldu; yanıtı kullanılmadı.", "This request was stopped because you switched conversations; its answer was not used.") };
-    if (reason === "user" && convRef.current === t.conv) setMsgs((l) => [...l, msg]);
+    if (reason !== "switch" && convRef.current === t.conv) setMsgs((l) => [...l, msg]);
     else { const c = loadConvs().find((x) => x.id === t.conv); if (c) { saveConv({ ...c, at: Date.now(), msgs: [...c.msgs, msg].slice(-60) }); bumpHist((n) => n + 1); } }
   };
+  const activeBrowserIdentity=browserMode?`${browserTab?.id??""}:${browserTab?.revision??0}:${browserTab?.url||""}`:"";
+  const previousBrowserIdentity=useRef(activeBrowserIdentity);
+  useEffect(()=>{if(previousBrowserIdentity.current!==activeBrowserIdentity){previousBrowserIdentity.current=activeBrowserIdentity;if(browserMode){stopTurn("page");onClearBrowserPage?.();}}},[activeBrowserIdentity]);
   const newChat = () => { stopTurn("switch");cancelPendingCards();rememberView();setInput("");setStash("");const id=Date.now().toString(36)+Math.random().toString(36).slice(2,5);convRef.current=id;setMsgs([]);setConvId(id);setErr("");focusSoon(); };
   const openConv = (c: Conv) => { if (c.id === convId) return;stopTurn("switch");cancelPendingCards();rememberView();setInput(conversationDrafts.current.get(c.id)||"");setStash("");convRef.current=c.id;setMsgs(c.msgs);setConvId(c.id);setErr("");focusSoon(); };
   const delConv = (id: string) => {
@@ -4948,11 +4951,20 @@ export function ChatPanel({ browserMode = false, onReadBrowserPage, onTranslateP
               step("think", tt("Onayını bekliyorum"));
             }
             if(gone())return;
+            const shelfCalls=rest.filter(c=>c.functionCall.name==="organize_books");
+            const shelfGroups:AskGroup[]=[];
+            for(let si=0;si<shelfCalls.length;si++){
+              const call=shelfCalls[si],resolved=resolveBookAssignments(await loadBookLibrary(),call.functionCall.args.assignments);
+              if(gone())return;
+              shelfGroups.push({head:extraText("Kitap rafı değişiklikleri","Book shelf changes"),items:resolved.map((row,ri)=>({key:`shelf:${si}:${ri}`,title:row.book.title,sub:row.book.author,note:[row.shelves.join(", "),row.readLater===true?extraText("Okunacaklar","To read"):row.readLater===false?extraText("Okuma planından çıkar","Remove from reading plan"):""].filter(Boolean).join(" · ")}))});
+            }
             const v = await confirmCalls(rest.some((c) => CHANGES.has(c.functionCall.name)) ? "change" : "open", rest.map((c) => describeTool(c.functionCall.name, c.functionCall.args)), undefined, undefined,
-              colls.flatMap((c, ci) => collectionGroups(c.functionCall.args, ci)));
+              [...colls.flatMap((c, ci) => collectionGroups(c.functionCall.args, ci)),...shelfGroups]);
             if (v === "cancel") rest.forEach((c) => refused.add(c));
-            // what was unticked stays out
-            else colls.forEach((c, ci) => { c.functionCall.args = dropCollectionItems(c.functionCall.args, ci, askOffRef.current); });
+            else {
+              colls.forEach((c, ci) => { c.functionCall.args = dropCollectionItems(c.functionCall.args, ci, askOffRef.current); });
+              shelfCalls.forEach((c,si)=>{c.functionCall.args={...c.functionCall.args,assignments:c.functionCall.args.assignments.filter((_:unknown,ri:number)=>!askOffRef.current.has(`shelf:${si}:${ri}`))};if(!c.functionCall.args.assignments.length)refused.add(c);});
+            }
           }
         }
         // the approved (possibly edited) arguments are what runs
@@ -5083,7 +5095,7 @@ export function ChatPanel({ browserMode = false, onReadBrowserPage, onTranslateP
   const phaseText = phase === "waiting" ? extraText("Onayını bekliyorum", "Waiting for your answer") : phase === "tools" ? extraText("İşlem yapılıyor", "Working on it") : extraText("Yanıt hazırlanıyor", "Preparing the reply");
   const body = (
     <div className="chat-body" ref={bodyRef} data-peek={peek ? 1 : undefined} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 140;setAwayFromBottom(!stick.current); }}>
-      {browserPage ? <div className="browser-page-context"><span title={browserPage.url}>✧ {browserPage.title} · {lang() === "tr" ? "Sayfa metni" : "Page text"} · {new Date(browserPage.capturedAt).toLocaleTimeString()} {browserPage.truncated ? (lang() === "tr" ? "· Kısaltıldı" : "· Truncated") : ""}</span><button className="chip" onClick={onClearBrowserPage}>{lang() === "tr" ? "Ayır" : "Detach"}</button></div>
+      {browserPage ? <div className="browser-page-context"><span title={browserPage.url}>✧ {browserPage.title} · {browserPage.selection===browserPage.text?extraText("Yalnız seçili metin","Selected text only"):extraText("Sayfa metni","Page text")} · {new Date(browserPage.capturedAt).toLocaleTimeString()} {browserPage.truncated ? (lang() === "tr" ? "· Kısaltıldı" : "· Truncated") : ""}</span><span className="context-actions"><button className="chip" disabled={busy||!onReadBrowserPage} onClick={()=>{window.dispatchEvent(new Event("luna-browser-refresh-context"));void onReadBrowserPage?.().catch(e=>setErr(safeAiError(e,[key])));}}>{extraText("Bu sayfayla güncelle","Refresh from this page")}</button><button className="chip" onClick={onClearBrowserPage}>{lang() === "tr" ? "Ayır" : "Detach"}</button></span></div>
         : browserMode && <div className={"browser-page-context" + (browserTab ? "" : " is-empty")} role="status"><span title={browserTab ? browserTab.url : undefined}>{browserTab
           ? `✧ ${browserTab.title || browserTab.url} · ${lang() === "tr" ? "Her soruda bu sekmenin güncel metni okunur; video ve ses okunmaz" : "Each question reads this tab's current text; video and audio are not read"}${browserTab.loading ? (lang() === "tr" ? " · yükleniyor" : " · loading") : ""}`
           : lang() === "tr" ? "Açık sayfa yok. Bir sayfa hakkında sormak için önce bir site aç." : "No page open. Open a site to ask about a page."}</span></div>}

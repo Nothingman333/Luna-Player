@@ -1,7 +1,10 @@
+import { LibraryScanNotice } from "./EverydayTools";
 import { ttsActive, ttsStop } from "./ReadAloud";
 import { BulkRelink, MediaNotebook } from "./Extras";
 import { readActiveBrowserPage, translateActiveBrowser } from "./browserTranslation";
 import { Browser } from "./Browser";
+import { CommandPalette } from "./CommandPalette";
+import type { PaletteCommand } from "./CommandPalette";
 import { episodeNeighbor, leftBehind, recordableProgress } from "./playbackModel";
 import type { Progress } from "./playbackModel";
 import type { ActiveWebTab } from "./Browser";
@@ -76,6 +79,8 @@ export default function App() {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [showUi, setShowUi] = useState(true);
   const [settings, setSettings] = useState(false);
+  // Command palette (Ctrl+K): every part, page and film of the library from one box. Luna Web has its own.
+  const [palette, setPalette] = useState(false);
   const [mine, setMine] = useState<MineTab | null>(null);
   const [mineOpen, setMineOpen] = useState<string | null>(null);
   const [tour, setTour] = useState(() => !tourSeen());
@@ -251,6 +256,16 @@ export default function App() {
   const playing = !!s.path && !isMusic;
   // a film starting (from the assistant too) closes the collections page, so it doesn't come back after the film
   useEffect(() => { if (playing) { setMine(null); setMineOpen(null); } }, [playing]);
+  useEffect(() => {
+    const onPalette = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "k") return;
+      if (playing || browserOpen) return; // the player keeps its own keys; Luna Web opens its own palette
+      if (document.querySelector('.modal-bg,.lp-backdrop,[role="dialog"]')) return;
+      e.preventDefault(); setPalette(true);
+    };
+    window.addEventListener("keydown", onPalette); return () => window.removeEventListener("keydown", onPalette);
+  }, [playing, browserOpen]);
+  useEffect(() => { if (playing) setPalette(false); }, [playing]);
 
   // Remember the dub / subtitle picked for this video (only this one).
   useEffect(() => {
@@ -1240,6 +1255,38 @@ export default function App() {
     }
   };
 
+  /** The library's command palette: parts, their pages, Luna's own panels and every film or series in the library. */
+  function paletteCommands(): PaletteCommand[] {
+    const part = (m: Mode) => { setBrowserOpen(false); setBrowserPage(undefined); setModeState(m); store.set("mode", m); setQuery(""); setDetailsKey(null); };
+    const parts = tt("Luna bölümleri"), pages = tt("Sayfalar"), luna = "Luna", films = tt("Filmlerin ve dizilerin");
+    const rows: PaletteCommand[] = [
+      { id: "part-film", group: parts, title: tt("Film"), detail: mode === "film" && !browserOpen ? tt("Şu an burada") : undefined, icon: "film", keywords: "movie series dizi", run: () => part("film") },
+      { id: "part-music", group: parts, title: tt("Müzik"), detail: mode === "music" && !browserOpen ? tt("Şu an burada") : undefined, icon: "music", keywords: "music sarki song", run: () => part("music") },
+      { id: "part-books", group: parts, title: tt("Kitaplar"), detail: mode === "books" && !browserOpen ? tt("Şu an burada") : undefined, icon: "book", keywords: "books reader okuma", run: () => part("books") },
+      { id: "part-web", group: parts, title: "Luna Web", detail: tt("Sekmeler, favoriler ve okuma görünümü"), icon: "globe", keywords: "browser tarayici internet", run: () => { setBrowserMounted(true); setBrowserOpen(true); setBrowserPage(undefined); } },
+    ];
+    const filmPages: [View, string][] = [["home", tt("Ana sayfa")], ["discover", tt("Keşfet")], ["movies", tt("Filmler")], ["shows", tt("Diziler")], ["recs", tt("Öneriler")], ["folders", tt("Klasörler")], ["downloads", tt("İndirmeler")]];
+    const musicPages: [string, string][] = [["home", tt("Ana sayfa")], ["discover", tt("Keşfet")], ["library", tt("Kütüphanem")], ["taste", tt("Zevk profilim")], ["radio", tt("Radyo")], ["podcast", tt("Podcast")]];
+    const bookPages: [string, string][] = [["home", tt("Ana sayfa")], ["discover", tt("Keşfet")], ["library", tt("Kitaplığım")], ["taste", tt("Zevk profilim")], ["audio", tt("Sesli kitaplar")]];
+    for (const [v, name] of filmPages) rows.push({ id: "film-" + v, group: pages, title: tt("Film") + " · " + name, icon: "film", run: () => { part("film"); setView(v); } });
+    for (const [v, name] of musicPages) rows.push({ id: "music-" + v, group: pages, title: tt("Müzik") + " · " + name, icon: "music", run: () => { part("music"); setMusicView(v as MusicView); } });
+    for (const [v, name] of bookPages) rows.push({ id: "books-" + v, group: pages, title: tt("Kitaplar") + " · " + name, icon: "book", run: () => { part("books"); setBooksView(v as BooksView); } });
+    rows.push(
+      { id: "assistant", group: luna, title: tt("Asistan"), detail: tt("Sor, öner, çal"), hint: "Alt+A", icon: "spark", keywords: "assistant ai sohbet chat", run: () => setChat(true) },
+      { id: "settings", group: luna, title: tt("Ayarlar"), icon: "settings", keywords: "settings tercih anahtar key", run: () => setSettings(true) },
+      { id: "collections", group: luna, title: tt("Koleksiyonlar"), icon: "grid", keywords: "collections", run: () => setMine("collections") },
+      { id: "history", group: luna, title: tt("Geçmiş"), detail: tt("İzlediklerin, dinlediklerin, okudukların"), icon: "clock", keywords: "history", run: () => setMine("history") },
+      { id: "open", group: luna, title: tt("Dosya aç"), hint: "Ctrl+O", icon: "plus", keywords: "open file", run: () => { void (mode === "music" ? openMusicFiles : mode === "books" ? openBookFile : openFile)(); } },
+      { id: "link", group: luna, title: tt("Bağlantı ya da torrent aç"), hint: mode === "film" ? "Ctrl+N" : undefined, icon: "external", keywords: "link url magnet torrent stream", run: () => { if (mode === "film") setTorrentDlg(true); else setPartLink(mode); } },
+      { id: "tour", group: luna, title: tt("Tanıtım turu"), icon: "moon", keywords: "tour help yardim", run: () => { setTourNew(false); setTour(true); } },
+    );
+    for (const it of lib.items.slice(0, 1500)) {
+      const name = it.meta?.title || it.parsed.title, year = it.meta?.year || (it.parsed.year ? String(it.parsed.year) : "");
+      rows.push({ id: "item-" + it.key, group: films, title: name, detail: [year, (it.meta?.kind ?? it.parsed.kind) === "tv" ? tt("Dizi") : tt("Film"), ...(it.meta?.genres ?? []).slice(0, 2)].filter(Boolean).join(" · "), icon: "film", keywords: it.parsed.title + " " + (it.meta?.genres ?? []).join(" "), run: () => { part("film"); setDetailsKey(it.key); } });
+    }
+    return rows;
+  }
+
   return (
     <div className={"root" + (playing ? " playing" : "") + (uiVisible ? "" : " idle") + (music.now && !playing ? " has-dock" : "")} data-mode={mode}
       onDoubleClick={(e) => playing && e.target === e.currentTarget && toggleFull()}
@@ -1282,6 +1329,7 @@ export default function App() {
             scanning={mode === "film" && lib.scanning} onSettings={() => setSettings(true)}
             onOpen={mode === "music" ? openMusicFiles : mode === "books" ? openBookFile : openFile}
             onTorrent={() => (mode === "film" ? setTorrentDlg(true) : setPartLink(mode))} downloading={torrents.filter((t) => !t.finished).length} onMine={() => setMine("collections")} />
+          {mode === "film" && !browserOpen && <LibraryScanNotice summary={lib.scanSummary} scanning={lib.scanning} retry={lib.refresh}/>}
           {mode === "music" ? (
             <div className="shell-body" key={"music:" + musicView}>
               <MusicPage view={musicView} setView={setMusicView} query={query} />
@@ -1315,7 +1363,7 @@ export default function App() {
           )}
         </div>
       )}
-      {browserMounted && <Browser onAssistant={() => setChat(true)} active={browserOpen && !playing} onClose={() => { setBrowserOpen(false); setBrowserPage(undefined); }} onInvalidate={invalidateBrowserPage} onActiveTab={setBrowserTab} onPage={page => { setBrowserPage(page); setChat(true); }} />}
+      {browserMounted && <Browser items={lib.items} onLibraryOpen={key=>{setBrowserOpen(false);setBrowserPage(undefined);setModeState("film");store.set("mode","film");setQuery("");setDetailsKey(key);}} onAssistant={() => setChat(true)} onPlay={url => load(url)} active={browserOpen && !playing} onClose={() => { setBrowserOpen(false); setBrowserPage(undefined); }} onInvalidate={invalidateBrowserPage} onActiveTab={setBrowserTab} onPage={page => { setBrowserPage(page); setChat(true); }} />}
       {/* over the collections page the real music bar comes along, on top of it (volume, seek, shuffle…) */}
       {!playing && music.now && (mine ? createPortal(<div className="mu-dock-over"><MusicDock mp={sRaw} /></div>, document.body) : <MusicDock mp={sRaw} />)}
       <MenuHost />
@@ -1346,7 +1394,9 @@ export default function App() {
       {!chat && !playing && <button className="ai-bubble" aria-label={tt("Luna Asistan")} title={tt("Luna Asistan · Alt+A")} onClick={() => setChat(true)}>
         <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-4-.9L3 20l1.1-4A8.4 8.4 0 1 1 21 11.5z" /><path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01" strokeWidth="2.6" /></svg>
       </button>}
-      {chat && <ChatPanel browserMode={browserOpen && !playing} onReadBrowserPage={browserOpen && !playing ? readActiveBrowserPage : undefined} onTranslatePage={browserOpen && !playing ? translateActiveBrowser : undefined} browserPage={browserOpen && !playing ? browserPage : undefined} browserTab={browserOpen && !playing ? browserTab : null} onClearBrowserPage={invalidateBrowserPage} onRemove={assistantRemove} mode={mode} onMode={(m) => { setBrowserOpen(false); setBrowserPage(undefined); setModeState(m); store.set("mode", m); setDetailsKey(null); }} key={"chat:" + (browserOpen && !playing ? "web" : mode === "film" ? detailsItem?.key ?? chatTopic?.key ?? "general" : "general")} items={lib.items} recent={recent} viewing={mode === "film" ? detailsItem ?? chatTopic ?? undefined : undefined}
+      {palette && !playing && <CommandPalette commands={paletteCommands()} onClose={() => setPalette(false)} title={tt("Komut paleti")}
+        placeholder={tt("Bir bölüm, sayfa, film ya da komut yaz…")} footer="Ctrl+K"/>}
+      {chat && <ChatPanel browserMode={browserOpen && !playing} onReadBrowserPage={browserOpen && !playing ? async()=>{const page=await readActiveBrowserPage();setBrowserPage(page);return page;} : undefined} onTranslatePage={browserOpen && !playing ? translateActiveBrowser : undefined} browserPage={browserOpen && !playing ? browserPage : undefined} browserTab={browserOpen && !playing ? browserTab : null} onClearBrowserPage={()=>{window.dispatchEvent(new Event("luna-browser-refresh-context"));invalidateBrowserPage();}} onRemove={assistantRemove} mode={mode} onMode={(m) => { setBrowserOpen(false); setBrowserPage(undefined); setModeState(m); store.set("mode", m); setDetailsKey(null); }} key={"chat:" + (browserOpen && !playing ? "web" : mode === "film" ? detailsItem?.key ?? chatTopic?.key ?? "general" : "general")} items={lib.items} recent={recent} viewing={mode === "film" ? detailsItem ?? chatTopic ?? undefined : undefined}
         watching={playing ? { title: displayTitle, item: current } : undefined} onClose={() => { setChat(false); setChatTopic(null); }}
         onPlay={(p) => { setDetailsKey(null); load(p); }} onOpenSource={(src) => { setDetailsKey(null); setChat(false); openTorrent(src); }} />}
       {cardMenu && !playing && (

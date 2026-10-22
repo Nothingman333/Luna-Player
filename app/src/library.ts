@@ -1,3 +1,5 @@
+import { scanChanges } from "./everydayModel";
+import type { ScanSummary } from "./everydayModel";
 import { naturalPath } from "./playbackModel";
 import { locale, DEC } from "./i18n";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
@@ -176,6 +178,7 @@ export const customMeta = (title: string, kind: "movie" | "tv"): Meta => ({
   id: 0, kind, title, year: "", overview: "", poster: null, backdrop: null, rating: 0, genres: [], cast: [],
 });
 export type Meta = {
+  locked?: boolean; provenance?: "tmdb" | "manual"; editedAt?: number;
   id: number;
   kind: "movie" | "tv";
   title: string;
@@ -431,12 +434,13 @@ export function useLibrary(opened: string[] = []) {
   const [missing, setMissing] = useState<Set<string>>(new Set());
   const [, bump] = useState(0);
   useEffect(() => {
-    const f = () => { setPinned(loadPinned()); setFiles(store.json("files", [])); setFoldersState(store.json("folders", [])); setKinds(loadFolderKinds()); bump((n) => n + 1); };
+    const f = () => { setPinned(loadPinned()); setFiles(store.json("files", [])); setFoldersState(store.json("folders", [])); setKinds(loadFolderKinds()); setMeta(store.json("meta", {})); bump((n) => n + 1); };
     window.addEventListener("luna-library", f);
     return () => window.removeEventListener("luna-library", f);
   }, []);
   const [meta, setMeta] = useState<Record<string, Meta | null>>(() => store.json("meta", {}));
   const [scanning, setScanning] = useState(false);
+  const [scanSummary, setScanSummary] = useState<ScanSummary | null>(null);
   const [tick, setTick] = useState(0);
 
   const setFolders = (f: string[]) => {
@@ -463,10 +467,12 @@ export function useLibrary(opened: string[] = []) {
         f = [...new Set([...f, ...keep])].sort();
       }
       if (!alive) return;
+      const summary=scanChanges(store.json<string[]>("files",[]),f,folders.filter((_,i)=>ok[i]===false));
+      setScanSummary(summary);
       store.set("files", JSON.stringify(f));
       setFiles(f);
       checkSidecarSubs([...f, ...loadPinned()]);
-    })().catch(() => {}).finally(() => alive && setScanning(false));
+    })().catch(error => { if(alive)setScanSummary({at:Date.now(),added:[],removed:[],relinked:[],offline:[],metadata:[],error:String(error).slice(0,500)}); }).finally(() => alive && setScanning(false));
     return () => { alive = false; };
   }, [folders, tick]);
 
@@ -519,8 +525,9 @@ export function useLibrary(opened: string[] = []) {
         if (res.every((r) => r === undefined)) continue;
         setMeta((m) => {
           const next = { ...m };
-          batch.forEach((it, j) => { if (res[j] !== undefined) next[it.key] = res[j]!; });
+          batch.forEach((it, j) => { if (res[j] !== undefined && !next[it.key]?.locked) next[it.key] = res[j] ? {...res[j]!,provenance:"tmdb"} : null; });
           store.set("meta", JSON.stringify(next));
+          setScanSummary(current=>current?{...current,metadata:[...new Set([...current.metadata,...batch.filter((it,j)=>res[j]!==undefined&&!m[it.key]?.locked).map(it=>it.parsed.title)])]}:current);
           return next;
         });
       }
@@ -543,13 +550,13 @@ export function useLibrary(opened: string[] = []) {
 
   const setOneMeta = (key: string, m: Meta | null) =>
     setMeta((cur) => {
-      const next = { ...cur, [key]: m };
+      const next = { ...cur, [key]: m ? {...m,locked:true,provenance:m.id>0?"tmdb" as const:"manual" as const,editedAt:Date.now()} : null };
       store.set("meta", JSON.stringify(next));
       return next;
     });
 
   return {
-    folders, setFolders, items, scanning, kinds, setFolderKind,
+    folders, setFolders, items, scanning, scanSummary, kinds, setFolderKind,
     /** Adds a library folder from the Films or the Series side. */
     addFolder: (dir: string, k: FolderKind) => {
       setFolderKind(dir, k);
@@ -564,6 +571,7 @@ export function useLibrary(opened: string[] = []) {
     missing,
     forgetFiles: (paths: string[]) => {
       const f = files.filter((x) => !paths.includes(x));
+
       store.set("files", JSON.stringify(f));
       setFiles(f);
       const p = loadPinned().filter((x) => !paths.includes(x));

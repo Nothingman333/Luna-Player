@@ -12,6 +12,8 @@ export function missingWebTabs(saved:SavedWebTab[],open:SavedWebTab[],capacity=8
 
 export const browserTabSearch=(text:string)=>text.normalize("NFKD").replace(/[\u0300-\u036f]/g,"").replace(/ı/g,"i").toLowerCase();
 export function matchingWebTabs<T extends SavedWebTab>(tabs:T[],query:string):T[]{const words=browserTabSearch(query).trim().split(/\s+/).filter(Boolean);return tabs.filter(t=>words.every(w=>browserTabSearch(t.title+" "+t.url).includes(w)));}
+/** Drag and drop in the tab strip: the dragged tab takes the place of the tab it was dropped on. */
+export function placeWebTab<T extends {id:number}>(tabs:T[],id:number,targetId:number):T[]{const from=tabs.findIndex(t=>t.id===id),to=tabs.findIndex(t=>t.id===targetId);if(from<0||to<0||from===to)return tabs;const next=[...tabs];const[tab]=next.splice(from,1);next.splice(to,0,tab);return next;}
 export function moveWebTab<T extends {id:number}>(tabs:T[],id:number,direction:1|-1):T[]{const at=tabs.findIndex(t=>t.id===id),to=at+direction;if(at<0||to<0||to>=tabs.length)return tabs;const next=[...tabs];[next[at],next[to]]=[next[to],next[at]];return next;}
 
 /** Explicit import: validate the complete file before changing any stored favourites. */

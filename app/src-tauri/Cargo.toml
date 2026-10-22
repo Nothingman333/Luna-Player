@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.6.3"
+version = "1.6.4"
 description = "Luna Player"
 authors = ["you"]
 edition = "2024"
@@ -38,6 +38,8 @@ png = "0.17"
 tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 sha2 = "0.10"
+ring = "0.17"
+base64 = "0.22"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

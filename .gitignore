@@ -12,7 +12,9 @@ backups/
 luna-restore.json
 luna-restore.json.used
 murat-ilerleme.md
-.claude/
+# Share project skills, keep local Claude settings and sessions private
+.claude/*
+!.claude/skills/
 app/.claude/
 
 *.log

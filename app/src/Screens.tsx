@@ -1,3 +1,5 @@
+import { FilmMetadataPanel, DiagnosticTools } from "./EverydayTools";
+import { editionLabels } from "./everydayModel";
 import { GeneralExtras, BulkRelink, PlaybackPreferences, SeriesTracker, MediaNotebook, extraText } from "./Extras";
 import { defaultSubLangs, lang, setLang, tt, DEC } from "./i18n";
 import { BUILD_AGENT, BUILD_AGENT_NAMES, VERSION_LABEL } from "./version";
@@ -673,7 +675,7 @@ function CopyChip({ path, on, gone, onPick, onMenu }: { path: string; on: boolea
   return (
     <button className={"copy" + (on ? " on" : "") + (gone ? " gone" : "")} role="radio" aria-checked={on} onClick={onPick} onContextMenu={onMenu} title={path}>
       <span className="copy-top"><Badges path={path} compact />{info?.size ? <span className="muted small">{fmtSize(info.size)}</span> : null}</span>
-      <span className="copy-name ellipsis">{gone ? tt("Dosya yok · ") : remote ? extraText("İndirilmedi · ", "Not downloaded · ") : ""}{fileName(path)}</span>
+      <span className="copy-edition">{editionLabels(path).join(" · ")}</span><span className="copy-name ellipsis">{gone ? tt("Dosya yok · ") : remote ? extraText("İndirilmedi · ", "Not downloaded · ") : ""}{fileName(path)}</span>
       <span className="copy-facts">
         {info?.audioCodec ? <span>{extraText("Ses", "Audio")}: {info.audioCodec.toUpperCase()}</span> : null}
         <span>{subs > 0 ? extraText(`Altyazı: ${subs} yan dosya`, `Subtitles: ${subs} side file${subs === 1 ? "" : "s"}`) : extraText("Altyazı: yan dosya yok", "Subtitles: no side file")}</span>
@@ -697,7 +699,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
   const filmPaths = isTv ? it.files.map((f) => f.path) : copies.length ? copies : it.files.map((f) => f.path);
   const allDone = isTv ? it.files.every((f) => isFinished(f.path)) : filmPaths.some((p) => isFinished(p));
   const [pick, setPick] = useState<string | null>(null);
-  const chosen = copies.length > 1 ? pick ?? recent.find((r) => copies.includes(r.path))?.path ?? copies[0] : null;
+  const chosen = copies.length > 1 ? pick ?? (copies.includes(store.get("lunaPreferredCopy:"+(m?.id?m.kind+":"+m.id:it.key))||"") ? store.get("lunaPreferredCopy:"+(m?.id?m.kind+":"+m.id:it.key)) : null) ?? recent.find((r) => copies.includes(r.path))?.path ?? copies[0] : null;
   const { file, rec } = chosen ? { file: { path: chosen }, rec: recent.find((r) => r.path === chosen) } as { file: { path: string; season?: number; episode?: number }; rec?: Recent } : resumeTarget(it, recent);
   const [season, setSeason] = useState(file.season ?? seasons[0] ?? 1);
   const [eps, setEps] = useState<Episode[]>([]);
@@ -747,7 +749,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
             <div className="copies">
               <div className="muted small">{tt("Bu filmden {0} kopya var; izlemek istediğini seç:", copies.length)}</div>
               <div className="copy-list" role="radiogroup" aria-label={tt("Kopyalar")}>
-                {copies.map((p) => <CopyChip key={p} path={p} on={p === file.path} gone={a.missing.has(p)} onPick={() => setPick(p)} onMenu={(e) => a.menu(e, { path: p, item: it })} />)}
+                {copies.map((p) => <CopyChip key={p} path={p} on={p === file.path} gone={a.missing.has(p)} onPick={() => {setPick(p);store.set("lunaPreferredCopy:"+(m?.id?m.kind+":"+m.id:it.key),p);}} onMenu={(e) => a.menu(e, { path: p, item: it })} />)}
               </div>
               <div className="copy-help">{extraText("Hangi kopyayı izleyeceğini sen seçersin. Ses ve altyazı dili oynatırken seçilir; dosyanın içindeki parçalar burada okunmaz. Kesik çerçeveli etiketler dosya adından tahmindir, dosya okununca gerçek değerle değişir.", "You choose which copy to watch. Audio and subtitle language are chosen while playing; the tracks inside a file are not read here. Dashed labels are guessed from the file name and are replaced by the real values once the file is read.")}</div>
             </div>
@@ -795,6 +797,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
               <Icon d={I.more} size={22} />
             </button>
           </div>
+          <FilmMetadataPanel item={it}/>{copies.length>1&&<button className="chip" onClick={()=>{store.remove("lunaPreferredCopy:"+(m?.id?m.kind+":"+m.id:it.key));setPick(null);rerender(n=>n+1);}}>{extraText("Hatırlanan sürüm seçimini sıfırla","Reset preferred version")}</button>}
           {missingPanel}
 
           {download}
@@ -1413,7 +1416,7 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                   <div className="set-card"><SourceSettings /></div>
                 </>
               )}
-              {sec === "backup" && <><BackupSettings /><BulkRelink /></>}
+              {sec === "backup" && <><BackupSettings /><BulkRelink /><DiagnosticTools /></>}
               {sec === "downloads" && (
                 <div className="set-card">
                   <div className="field">

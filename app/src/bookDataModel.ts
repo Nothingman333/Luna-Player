@@ -1,4 +1,4 @@
-export type BookDetails = { title:string;author:string;isbn:string;cover:string;description:string;subjects:string[];source?:string;url?:string;year?:number };
+export type BookDetails = { locked?:boolean;editedAt?:number; title:string;author:string;isbn:string;cover:string;description:string;subjects:string[];source?:string;url?:string;year?:number };
 export type BookCandidate = BookDetails & { id:string;work?:string;isbns:string[] };
 export function validIsbn(raw:string):string {
  const value=raw.replace(/^(?:urn:)?isbn:?/i,"").replace(/[\s-]/g,"").toUpperCase();

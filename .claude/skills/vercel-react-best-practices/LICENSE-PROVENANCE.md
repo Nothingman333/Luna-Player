@@ -1,0 +1,1 @@
+Upstream declares MIT in SKILL.md and in its repository README. No separate repository LICENSE file exists at this pinned revision. Original author metadata and all available notices are preserved; the repository README is included. Local additions are marked in LOCAL-ADAPTATIONS.md.

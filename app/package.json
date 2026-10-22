@@ -1,7 +1,7 @@
 {
   "name": "app",
   "private": true,
-  "version": "1.6.3",
+  "version": "1.6.4",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -29,7 +29,15 @@
     "test:assistant-safety": "node scripts/assistant-safety-regression.cjs",
     "test:claude-integration": "node scripts/claude-integration-regression.cjs",
     "test:browser-native": "node scripts/browser-native-regression.cjs",
-    "test:web-notebook": "node scripts/web-notebook-regression.cjs"
+    "test:web-notebook": "node scripts/web-notebook-regression.cjs",
+    "test:web-plus": "node scripts/web-plus-regression.cjs",
+    "test:web-ui": "node scripts/web-ui-e2e.cjs",
+    "test:find-page": "node scripts/find-page-e2e.cjs",
+    "test:browser-suggest": "node scripts/browser-suggest-regression.cjs",
+    "test:browser-reader": "node scripts/browser-reader-regression.cjs",
+    "test:browser-magic": "node scripts/browser-magic-regression.cjs",
+    "test:everyday": "node scripts/everyday-regression.cjs",
+    "test:everyday-ui": "node scripts/everyday-ui-e2e.cjs"
   },
   "dependencies": {
     "@fontsource/ibm-plex-sans": "^5.3.0",
