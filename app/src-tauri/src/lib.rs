@@ -21,6 +21,7 @@ mod preview;
 mod fonts;
 mod indexers;
 mod letterboxd;
+mod kitap;
 mod books;
 mod mpv;
 mod music;
@@ -964,9 +965,20 @@ async fn letterboxd_read(app: AppHandle, url: String, max_pages: Option<u32>, li
 
 /// Up to `count` Letterboxd reviews of a film, for the "Worth watching?" card.
 #[tauri::command]
-async fn letterboxd_reviews(app: AppHandle, tmdb: Option<u64>, tv: Option<bool>, title: String, year: Option<String>, count: Option<usize>) -> Result<letterboxd::Reviews, String> {
+async fn letterboxd_reviews(app: AppHandle, tmdb: Option<u64>, tv: Option<bool>, title: String, year: Option<String>, count: Option<usize>, spoilers: Option<bool>) -> Result<letterboxd::Reviews, String> {
+    let app2 = app.clone();
     let say = move |m: String| { let _ = app.emit("lb-reviews-progress", m); };
-    letterboxd::reviews(tmdb, tv.unwrap_or(false), &title, year.as_deref(), count.unwrap_or(50), &say).await
+    let found = move |r: &[letterboxd::Review]| { let _ = app2.emit("lb-reviews-found", r.to_vec()); };
+    letterboxd::reviews(tmdb, tv.unwrap_or(false), &title, year.as_deref(), count.unwrap_or(50), spoilers.unwrap_or(true), &say, &found).await
+}
+
+/// Up to `count` 1000Kitap reviews of a book, for Luna Analiz on a book's page.
+#[tauri::command]
+async fn book_reviews(app: AppHandle, title: String, author: Option<String>, count: Option<usize>) -> Result<kitap::BookReviews, String> {
+    let app2 = app.clone();
+    let say = move |m: String| { let _ = app.emit("lb-reviews-progress", m); };
+    let found = move |r: &[letterboxd::Review]| { let _ = app2.emit("lb-reviews-found", r.to_vec()); };
+    kitap::reviews(&title, author.as_deref(), count.unwrap_or(30), &say, &found).await
 }
 
 #[tauri::command]
@@ -1039,6 +1051,20 @@ fn clipboard_offer(on: bool) {
 #[tauri::command]
 async fn backup_write(path: String, json: String) -> Result<(), String> {
     blocking(move || std::fs::write(&path, json).map_err(|e| tr!("Yedek kaydedilemedi: {}", "Couldn't save the backup: {}", e))).await
+}
+
+/// A playlist file (.m3u / .m3u8) on disk, as text.
+#[tauri::command]
+async fn text_file_read(path: String) -> Result<String, String> {
+    blocking(move || {
+        let size = std::fs::metadata(&path).map_err(|e| e.to_string())?.len();
+        if size > 30_000_000 {
+            return Err(tr!("Dosya çok büyük", "The file is too big"));
+        }
+        let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1182,6 +1208,7 @@ pub fn run() {
             read_export,
             letterboxd_read,
             letterboxd_reviews,
+            book_reviews,
             plugins_list,
             plugins_add,
             plugins_remove,
@@ -1207,6 +1234,7 @@ pub fn run() {
             fit_window,
             backup_write,
             backup_read,
+            text_file_read,
             clipboard_offer
         ])
         .build(tauri::generate_context!())

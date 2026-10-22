@@ -5,7 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 // ---------- small persistent store ----------
 /** API keys: kept by Windows (Credential Manager), held here in memory, never in localStorage, the
  *  state file or a backup. */
-export const SECRET_KEYS = ["geminiKey", "tmdbKey", "osKey", "openaiKey", "claudeKey", "customAiKey"];
+/** (aiProfileKey1…8: the keys of the API profiles, see ai.ts) */
+export const SECRET_KEYS = ["geminiKey", "tmdbKey", "osKey", "openaiKey", "claudeKey", "customAiKey", ...Array.from({ length: 8 }, (_, i) => "aiProfileKey" + (i + 1))];
 const secrets = new Map<string, string>();
 const secretWrites = new Map<string, Promise<void>>();
 function queueSecret(key: string, value: string) {
@@ -196,6 +197,20 @@ async function tmdb(path: string, params: Record<string, string> = {}) {
 }
 
 export type SearchHit = { id: number; kind: "movie" | "tv"; title: string; year: string; poster: string | null; rating?: number; backdrop?: string | null; overview?: string };
+
+/** A film's genres by its name and year (for films that came from Letterboxd without them); [] when not found. */
+export async function tmdbGenresOf(title: string, year?: string): Promise<string[]> {
+  const ck = "tmdbGenreNames:" + locale();
+  let names = store.json<Record<string, string> | null>(ck, null);
+  if (!names) {
+    const r = await tmdb("/genre/movie/list", { language: locale() });
+    names = Object.fromEntries((r.genres ?? []).map((g: any) => [String(g.id), String(g.name)]));
+    store.set(ck, JSON.stringify(names));
+  }
+  const r = await tmdb("/search/movie", { query: title, language: locale(), ...(year ? { year: year.slice(0, 4) } : {}) });
+  const hit = r.results?.[0];
+  return hit ? (hit.genre_ids ?? []).map((id: number) => names![String(id)]).filter(Boolean) : [];
+}
 
 const toHit = (h: any, kind?: "movie" | "tv"): SearchHit => ({
   id: h.id, kind: kind ?? (h.media_type === "tv" ? "tv" : "movie"), title: h.title ?? h.name,

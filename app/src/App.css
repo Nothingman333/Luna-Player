@@ -116,7 +116,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .titem.link { color: var(--accent-soft); font-size: 13px; margin-top: 8px; }
 
 /* ---------- right-click menu ---------- */
-.cm-bg { position: fixed; inset: 0; z-index: 310; }
+.cm-bg { position: fixed; inset: 0; z-index: 1500; }
 .cm {
   position: absolute; padding: 6px; border-radius: 8px; background: rgba(28,28,32,0.98);
   border: 1px solid var(--line); box-shadow: 0 10px 30px rgba(0,0,0,0.55); display: flex; flex-direction: column;
@@ -2056,6 +2056,12 @@ body.ws-open .chat-scrim { background: rgba(4,4,7,.18); }
   color: var(--text); padding: 0 12px; font: inherit; font-size: 14px; min-width: 0;
 }
 .set-ws input:focus { outline: none; border-color: var(--accent); }
+.set-ws textarea { width: 100%; box-sizing: border-box; border-radius: 10px; border: 1px solid rgba(255,255,255,.12); background: rgba(0,0,0,.28); color: var(--text); padding: 10px 12px; font: inherit; font-size: 14px; line-height: 1.5; resize: vertical; }
+.set-ws textarea:focus { outline: none; border-color: var(--accent); }
+.set-ws textarea::placeholder { color: rgba(255,255,255,.35); }
+.set-row-switch { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.set-row-switch > div { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.set-row-switch span { color: var(--muted); font-size: 12px; }
 .set-ws .sub-look { padding: 0; }
 .set-ws .dir { background: rgba(0,0,0,.28); }
 .set-key { display: flex; flex-direction: column; gap: 6px; }
@@ -2425,18 +2431,8 @@ body.pl-open .mu-dock {
   bottom: calc(var(--pl-y) + 10px); height: 68px; border-radius: 16px; padding: 0 14px; gap: 10px;
   animation: none;
 }
-/* the assistant opens inside the playlist window, above the dock when one is there */
-body.pl-open .chat-panel {
-  top: auto; left: auto;
-  right: calc(var(--pl-x) + 22px);
-  bottom: calc(var(--pl-y) + 22px);
-  width: min(400px, calc(var(--pl-w) - 96px));
-  height: min(600px, calc(var(--pl-h) - 160px));
-}
-body.pl-open .root.has-dock .chat-panel {
-  bottom: calc(var(--pl-y) + 96px);
-  height: min(560px, calc(var(--pl-h) - 220px));
-}
+/* the assistant keeps its usual corner (bottom right, above the dock) even over a playlist window */
+body.pl-open .chat-panel { z-index: 330; }
 body.pl-open .mu-np { z-index: 306; }
 /* the songs are read over it: the page behind (covers) only shows through as a dark blur, also once the cover backdrop has scrolled away */
 .pl-page.pl-card.glass {
@@ -2463,7 +2459,7 @@ body.pl-open .mu-np { z-index: 306; }
 .pl-search { display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 36px; border-radius: 18px; background: rgba(255,255,255,0.06); color: var(--muted, #a9a9b2); }
 .pl-search input { background: none; border: 0; color: var(--text); font: inherit; font-size: 14px; width: 180px; outline: none; }
 .pl-table { position: relative; padding: 0 40px; }
-.pl-row { display: grid; grid-template-columns: 44px minmax(0, 1.6fr) minmax(0, 1fr) 64px 32px; align-items: center; gap: 14px; padding: 6px 8px; border-radius: 8px; }
+.pl-row { display: grid; grid-template-columns: 44px minmax(0, 1.6fr) minmax(0, 1fr) 64px 64px 32px; align-items: center; gap: 14px; padding: 6px 8px; border-radius: 8px; }
 .pl-row:not(.pl-th):hover { background: rgba(255,255,255,0.06); }
 .pl-th { color: var(--muted, #a9a9b2); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid rgba(255,255,255,0.08); border-radius: 0; margin-bottom: 8px; padding-bottom: 10px; }
 .pl-th > :first-child { text-align: center; }
@@ -2484,7 +2480,7 @@ body.pl-open .mu-np { z-index: 306; }
 .pl-eq i { width: 3px; background: var(--accent); border-radius: 1px; animation: plEq 0.9s ease-in-out infinite; }
 .pl-eq i:nth-child(2) { animation-delay: -0.3s; } .pl-eq i:nth-child(3) { animation-delay: -0.6s; }
 @keyframes plEq { 0%, 100% { height: 4px; } 50% { height: 14px; } }
-@media (max-width: 760px) { .pl-alb { display: none; } .pl-row { grid-template-columns: 40px minmax(0, 1fr) 56px 30px; } .pl-head { flex-direction: column; align-items: flex-start; padding: 0 20px 20px; } .pl-bar, .pl-table { padding-left: 16px; padding-right: 16px; } }
+@media (max-width: 760px) { .pl-alb { display: none; } .pl-row { grid-template-columns: 40px minmax(0, 1fr) 60px 56px 30px; } .pl-head { flex-direction: column; align-items: flex-start; padding: 0 20px 20px; } .pl-bar, .pl-table { padding-left: 16px; padding-right: 16px; } }
 
 /* the assistant asks before it acts */
 .ask-card { border: 1px solid rgba(var(--acc-rgb), 0.45); background: rgba(var(--acc-rgb), 0.07); border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
@@ -2827,3 +2823,173 @@ body.mine-open .chat-scrim.mine-layer { background: rgba(4,4,7,.22); backdrop-fi
 .chat-panel .title-acts .ta-pop { flex-wrap: wrap; width: max-content; max-width: 300px; white-space: normal; }
 .chat-panel .title-acts .ta-pop button { white-space: nowrap; }
 .chat-panel .chat-body { overflow-x: hidden; } /* an open menu never scrolls the answer sideways */
+/* Settings › API profiles */
+.set-prof{display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(0,0,0,.12)}
+.set-prof-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.set-prof-top .set-prof-name{flex:1;min-width:140px}
+.set-prof-top select{color-scheme:dark;background:rgba(255,255,255,0.07);color:var(--text);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:8px 10px;font:inherit}
+.set-prof-top select option{background:#1a1a1f}
+.set-radio{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer}
+/* "+ Listeye": lists grouped under each friend */
+.lp { position: relative; display: inline-flex; }
+.lp-btn { height: 40px; display: inline-flex; align-items: center; gap: 8px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--text); font: inherit; font-size: 14px; cursor: pointer; transition: border-color .15s, background .15s; }
+.lp-btn span { font-size: 11px; color: var(--muted); }
+.lp-btn:hover, .lp-btn.on { border-color: var(--accent); background: rgba(var(--acc-rgb), .08); }
+.lp .round.on { border-color: var(--accent); color: var(--accent); }
+.lp-menu { position: fixed; z-index: 2000; max-height: 380px; overflow-y: auto; padding: 8px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 18px 50px rgba(0,0,0,.6); animation: lp-pop .16s ease both; }
+@keyframes lp-pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.lp-search { width: 100%; box-sizing: border-box; height: 36px; margin-bottom: 6px; border-radius: 10px; border: 1px solid var(--line); background: rgba(0,0,0,.25); color: var(--text); padding: 0 12px; font: inherit; font-size: 13px; }
+.lp-search:focus { outline: none; border-color: var(--accent); }
+.lp-head { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 10px 10px 4px; }
+.lp-item { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 0; border-radius: 10px; background: transparent; color: var(--text); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+.lp-item:hover, .lp-item.on { background: rgba(var(--acc-rgb), .12); }
+.lp-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lp-item small { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; flex: none; }
+.lp-item b { color: var(--muted); font-size: 11px; font-weight: 400; }
+.lp-item.-sub { padding-left: 46px; font-size: 13px; }
+.lp-face { width: 26px; height: 26px; border-radius: 50%; flex: none; display: grid; place-items: center; font-style: normal; font-weight: 700; font-size: 12px; color: #fff; background: var(--accent); }
+.lp-subs { animation: lp-pop .14s ease both; }
+/* big "now playing": volume at the right of the controls */
+.mu-np-ctl .mu-ctl.big { position: relative; width: 100%; justify-content: center; }
+.mu-np-vol { position: absolute; right: 0; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 8px; }
+.mu-np-vol .vol { width: 130px; }
+.mu-np-vol .mu-ib { position: relative; }
+.mu-mute { position: absolute; left: 50%; top: 50%; width: 22px; height: 2px; background: currentColor; transform: translate(-50%, -50%) rotate(-45deg); border-radius: 2px; }
+.mu-np-volnum { width: 26px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) { .mu-np-vol { position: static; transform: none; } .mu-np-ctl .mu-ctl.big { flex-wrap: wrap; } }
+/* a list's own picture, made from its songs */
+.pl-art { position: relative; overflow: hidden; display: grid; place-items: center; color: rgba(255,255,255,.8); background: linear-gradient(135deg, hsl(var(--h) 60% 42%), hsl(calc(var(--h) + 50) 55% 22%)); }
+.pl-art-grid { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.pl-art-grid img, .pl-art-one { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pl-art-one { position: absolute; inset: 0; }
+.pl-art-one + .pl-art-name, .pl-art-fill + .pl-art-name { position: absolute; left: 10%; right: 10%; bottom: 9%; font-family: Sora, sans-serif; font-weight: 700; font-size: clamp(14px, 1.6vw, 22px); line-height: 1.1; color: #fff; text-shadow: 0 2px 12px rgba(0,0,0,.6); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.pl-art-one + .pl-art-name::before { content: ""; position: absolute; inset: -200% -20% -30%; background: linear-gradient(transparent, rgba(0,0,0,.65)); z-index: -1; }
+.pl-art-fill { position: absolute; inset: 0; background: radial-gradient(circle at 80% 15%, hsla(calc(var(--h) + 90), 70%, 60%, .45), transparent 55%); }
+.sp-wait { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* text you may want to copy (right click › Kopyala) can be selected */
+.msg, .msg *, .la-rv-text, .la-summary, .la-foryou p, .la-quote, .td-ov, .fp-ov, .pod-about p, .lyrics.plain { user-select: text; }
+.msg { cursor: text; }
+/* the assistant's bubble */
+.ai-bubble { position: fixed; right: 24px; bottom: 24px; z-index: 250; width: 56px; height: 56px; border-radius: 50%; border: 0; display: grid; place-items: center; cursor: pointer;
+  color: #111; background: var(--accent); box-shadow: 0 10px 30px rgba(0,0,0,.5), 0 0 0 0 rgba(var(--acc-rgb), .5); animation: ai-bubble-in .35s cubic-bezier(.2,.9,.3,1.2) both; transition: transform .18s, box-shadow .2s; }
+.ai-bubble:hover { transform: translateY(-2px) scale(1.06); box-shadow: 0 14px 34px rgba(0,0,0,.55), 0 0 0 6px rgba(var(--acc-rgb), .18); }
+@keyframes ai-bubble-in { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: none; } }
+.root:has(.mu-dock) .ai-bubble { bottom: 104px; }
+/* the assistant's "/" commands over the input */
+.slash-list { display: flex; flex-direction: column; gap: 2px; padding: 6px; margin-bottom: 8px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); max-height: 260px; overflow-y: auto; }
+.slash-list button { display: flex; align-items: baseline; gap: 12px; padding: 8px 10px; border: 0; border-radius: 10px; background: transparent; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.slash-list button:hover { background: rgba(var(--acc-rgb), .12); }
+.slash-list b { min-width: 120px; color: var(--accent-soft); font-weight: 600; }
+.slash-list span { color: var(--muted); }
+/* .m3u channel list */
+.m3u { display: flex; flex-direction: column; gap: 12px; max-height: 86vh; }
+.m3u-head { display: flex; align-items: center; gap: 12px; }
+.m3u-head h2 { margin: 0; }
+.m3u-search { height: 40px; border-radius: 12px; border: 1px solid var(--line); background: rgba(0,0,0,.25); color: var(--text); padding: 0 14px; font: inherit; }
+.m3u-search:focus { outline: none; border-color: var(--accent); }
+.m3u-groups { display: flex; gap: 6px; flex-wrap: wrap; max-height: 84px; overflow-y: auto; }
+.m3u-list { flex: 1; min-height: 120px; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px; align-content: start; }
+.m3u-ch { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; border: 1px solid transparent; background: rgba(255,255,255,.03); color: var(--text); font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.m3u-ch:hover { border-color: var(--accent); background: rgba(var(--acc-rgb), .08); }
+.m3u-ch img, .m3u-ph { width: 40px; height: 40px; flex: none; border-radius: 8px; object-fit: contain; background: rgba(255,255,255,.06); display: grid; place-items: center; font-weight: 700; color: var(--muted); }
+.m3u-ch-t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.m3u-play { color: var(--accent); opacity: 0; transition: opacity .15s; }
+.m3u-ch:hover .m3u-play { opacity: 1; }
+.m3u-recent { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+/* "+ Listeye": a new list right from the menu */
+.lp-item.-new span { color: var(--accent); font-weight: 600; }
+.lp-newf { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.lp-newf .lp-search { margin: 0; flex: 1; }
+
+/* assistant header: name with the model under it; three equal round buttons that never squeeze or clip */
+.chat-who { display: flex; flex-direction: column; min-width: 0; line-height: 1.15; }
+.chat-who small { font-size: 11px; color: var(--accent-soft, var(--accent)); max-width: 150px; opacity: .9; }
+.chat-head > .round { flex: 0 0 34px; width: 34px; height: 34px; padding: 0; display: grid; place-items: center; }
+.chat-head > .round svg { width: 18px; height: 18px; }
+.glass-ib.hl { box-shadow: inset 0 1px 0 rgba(255,255,255,.12); }
+.chat-head .chat-ctx { min-width: 0; }
+@media (max-width: 1100px) { .chat-head .chat-ctx { max-width: 110px; } .chat-head .chip { padding: 5px 9px; } }
+/* 8: a bit higher so it stays clear of timestamps and list edges */
+.ai-bubble { bottom: 44px; }
+.root:has(.mu-dock) .ai-bubble { bottom: 120px; }
+
+/* a title's poster while the pointer rests on it in the chat */
+.chat-peek { position: fixed; z-index: 2000; width: 160px; height: 240px; object-fit: cover; border-radius: 12px; box-shadow: 0 18px 50px rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.14); pointer-events: none; animation: bubble-in .18s ease both; }
+
+/* a title's pictures, big: about the size of the assistant's big window */
+.fp-hero.-gal, .td-hero.-gal { cursor: zoom-in; }
+.gal-bg { position: fixed; inset: 0; z-index: 1400; background: rgba(0,0,0,.72); backdrop-filter: blur(6px); display: grid; place-items: center; animation: bubble-in .2s ease both; }
+.gal { position: relative; width: min(1200px, 90vw); height: min(820px, 88vh); background: #0d0c12; border: 1px solid rgba(255,255,255,.1); border-radius: 20px; box-shadow: 0 30px 90px rgba(0,0,0,.7); display: flex; flex-direction: column; overflow: hidden; }
+.gal-main { position: relative; flex: 1; min-height: 0; display: grid; place-items: center; background: #000; }
+.gal-main img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.gal-x { position: absolute; top: 12px; right: 12px; z-index: 2; }
+.gal-nav { position: absolute; top: 50%; transform: translateY(-50%); font-size: 26px; line-height: 1; }
+.gal-nav.-l { left: 14px; } .gal-nav.-r { right: 14px; }
+.gal-strip { display: flex; gap: 8px; padding: 10px 12px; overflow-x: auto; flex: 0 0 auto; }
+.gal-strip img { height: 64px; border-radius: 8px; cursor: pointer; opacity: .55; border: 2px solid transparent; flex: 0 0 auto; }
+.gal-strip img.on, .gal-strip img:hover { opacity: 1; border-color: var(--accent); }
+
+/* a featured podcast opening */
+.mu-pod-wait { min-height: 46vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; }
+.mu-pod-spin { width: 44px; height: 44px; border-radius: 50%; border: 3px solid rgba(255,255,255,.12); border-top-color: var(--accent); animation: spin .9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* sharing a list */
+.share-l { position: relative; display: inline-flex; }
+.share-pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 40; width: 280px; padding: 6px; border-radius: 12px; background: #17161c; border: 1px solid rgba(255,255,255,.12); box-shadow: 0 16px 40px rgba(0,0,0,.5); display: flex; flex-direction: column; }
+.share-msg { padding: 6px 10px; }
+/* the name block keeps its width; the page chip gives way */
+.chat-head .chat-who { flex: 0 0 auto; }
+.chat-head .chat-ctx { flex: 0 1 auto; overflow: hidden; }
+/* small panel: the page the chat is about gets its own line under the name; "General" needs none */
+.chat-panel .chat-head { flex-wrap: wrap; row-gap: 8px; }
+.chat-panel .chat-head .chat-ctx { order: 10; flex: 0 1 auto; max-width: 100%; margin-left: 20px; }
+.chat-panel .chat-head .chat-ctx:not(.page) { display: none; }
+.chat-panel .chat-head:has(.chat-ctx.page)::after { content: ""; order: 9; flex-basis: 100%; height: 0; }
+.lp-empty { padding: 6px 12px 10px; }
+.lp-friends { margin-top: 6px; border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; }
+.share-pop .lp-item { flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; height: auto; padding: 9px 12px; }
+.share-pop .lp-item span { white-space: normal; overflow: visible; }
+.share-pop .lp-item small { margin: 0; }
+.share-pop { position: fixed; top: auto; right: auto; z-index: 2000; }
+/* the big music screen has its own assistant button: no bubble over its controls */
+body:has(.mu-np) .ai-bubble { display: none; }
+.mu-np-like { white-space: nowrap; }
+
+/* the big player: the small assistant sits above the timeline and the play buttons, not over them */
+body:has(.mu-np) .chat-panel { bottom: 150px; height: min(600px, calc(100vh - 236px)); }
+
+/* the reader's music popup: closes with a fade, volume as a drop-down */
+.bk-panel.-out { animation: bk-out .18s ease both; pointer-events: none; }
+@keyframes bk-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-6px) scale(.98); } }
+.mini-vol { position: relative; }
+.mini-vol-pop { position: absolute; right: -8px; top: calc(100% + 8px); z-index: 3; display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px 6px;
+  border-radius: 14px; background: #221b31; border: 1px solid #332a48; box-shadow: 0 14px 34px rgba(0,0,0,.45); animation: pop .16s ease both; }
+.mini-vol-pop .vol { width: 150px; }
+.mini-vol-n { min-width: 26px; text-align: right; font-size: 12px; color: #b9b2c9; font-variant-numeric: tabular-nums; }
+
+/* like / dislike on song rows: on hover, or always once set */
+.mu-vote { display: inline-flex; gap: 2px; flex: none; opacity: .55; transition: opacity .15s; }
+.mu-song:hover .mu-vote, .pl-row:hover .mu-vote, .mu-vote.set, .mu-vote:focus-within { opacity: 1; }
+.mu-vote .mu-vote-b { width: 30px; height: 30px; cursor: pointer; }
+.mu-vote .mu-vote-b:not(.on) { color: #9a9aa6; }
+.mu-vote .mu-vote-b.mu-dis.on { color: #e5707a; }
+.mu-vote.set .mu-vote-b:not(.on) { opacity: .45; }
+.mu-np-votes { display: inline-flex; gap: 4px; align-self: flex-start; }
+.mu-dis.big { width: 44px; height: 44px; color: var(--muted, #a9a9b2); }
+.mu-dis.big.on { color: #e5707a; }
+/* the songs card: a new list or an existing one grown */
+.mu-to { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 10px; }
+.mu-to-in { flex: 1 1 200px; min-width: 0; height: 32px; padding: 0 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05); color: var(--text); font: inherit; font-size: 13px; }
+.mu-to-in:focus { outline: none; border-color: var(--accent); }
+.mu-to-in option { background: #17171c; }
+.music-add .nowrap { white-space: nowrap; margin-left: auto; }
+.taste-sum-sub { font-family: inherit; font-weight: 400; margin-left: 8px; }
+
+/* points out of 10 on songs, like films */
+.mu-ib .vote-n { position: absolute; right: -2px; bottom: -2px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; background: var(--accent); color: #0b0b0d; font-size: 10px; font-weight: 700; line-height: 15px; text-align: center; }
+.song-rate { position: fixed; z-index: 400; width: 320px; display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 14px; background: #17171c; border: 1px solid rgba(255,255,255,.12); box-shadow: 0 18px 50px rgba(0,0,0,.55); animation: pop .16s ease both; }
+.song-rate-n { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; }
+.song-rate-n .seg { padding: 0; height: 30px; min-width: 0; }
+.song-rate-b { display: flex; justify-content: flex-end; gap: 6px; }
+.mu-dis .vote-n { background: #e5707a; color: #fff; }

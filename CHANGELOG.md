@@ -1,3 +1,45 @@
+## 1.6.0CC — 2026-10-22 (beta)
+- Books and music get the films' full taste profile in a "My taste" tab (taste map, weights, genres/authors/artists, rating spread or listening hours, most played, gaps).
+- Songs: thumbs-up / thumbs-down on every row and "out of 10?" after a vote; the points feed the music taste.
+- Liked or disliked books and songs get six-topic scores and genres from the AI once (twenty per message, only new ones, "Measuring…" while it runs); films unchanged.
+- Own Letterboxd updates itself daily and follows changed or removed ratings and hearts; missing genres from TMDB; update button on the taste profile.
+- Same tab order in every part; the assistant shows a song playing on another part's page and lets you pick it or a general chat.
+- "Find songs like this" opens a songs card (new list or grow an existing one); reader music popup has a volume drop-down and popups fade out.
+- Luna Analiz: settings, Stop and the running button in order; smoother reading animation. Big player: the assistant stays above the timeline; mouse back closes it.
+
+## 1.5.4CC – 1.5.2CC — 2026-10-22 (beta, tried with Luna Dev.cmd)
+- Separate book and music taste, own lists only in "+ Add to list" with a new list, friends' lists read-only, picture gallery, poster preview, share/import lists, podcast fixes.
+
+## 1.5.1CC — 2026-10-21 (beta, not built yet: try it with Luna Dev.cmd)
+
+- Luna Analiz: real half stars; similar titles open their page; Luna-style switches; (i) explains My taste; a settings button (how many reviews, spoilers in or out); the Settings card restyled.
+- "+ Add to list": lists grouped under each friend, with search.
+- Recommendations: "All films" for a friend (all their lists and picks in one wall).
+- Your taste profile: taste map, weights and where they come from, avoided topics, genres, rating spread, what stands out in liked titles, trends across analyses, how generous you rate, gaps, latest analyses.
+- Books: Luna Analiz reads 1000Kitap reviews; "In-depth review" asks the assistant for reviews, videos, essays and thinkers' readings with sources.
+- Music: volume in the big player; "Liked" always first; playlists get a picture from their songs; Spotify import can be stopped or cancelled; "playlist of songs like this".
+- Assistant: a bubble at the bottom right (hidden while a film plays), minimise button, right-click Copy / Ask on selected text (and Cut/Copy/Paste in text boxes), "/" commands with /help that work with every AI, a tool-less retry for models that reject tools.
+- .m3u / .m3u8: IPTV lists open as a channel list; HLS streams play directly.
+
+## 1.5.0CC — 2026-10-21 (beta, not built yet: try it with Luna Dev.cmd)
+
+- **"Worth watching?" is now Luna Analiz**, laid out like the rest of the details page: a plain section with Luna's headings, chips and the mode's colour instead of a boxed card. Big "For you" score next to Luna Analiz, review tone, TMDB and Letterboxd; agreement with bars; praise and criticism; topics with score bars.
+- **Long reviews are read whole:** Letterboxd cuts long reviews short in its lists (about 470 characters); Luna now fetches the rest. In the feed they open with "Read more"; spoilers stay hidden behind "show".
+- **My taste (was "Preferences")**, built like the shared review-analysis app: the importance you set counts 35%, the topics you marked as reasons in titles you liked count 65%, the reasons for dislikes pull a topic down. The "For you" score blends the community score with these, and says why ("Pace is very strong, and it matters to you"). Each topic shows its effective weight, where it was learned from and this title's score; "Apply" takes the suggested importance.
+- "After watching" (reasons, note, draft) and the local keyword scan are tidy fold-out sections under it.
+
+## 1.4.9CC — 2026-10-21 (beta, not built yet: try it with Luna Dev.cmd)
+
+- **"Worth watching?" › Letterboxd, live:** the reviews scroll into the card one by one as they are fetched. The AI then reads them in groups of ten: the group being read lights up, and each review gets its tone, topic and a one-line gist. Spoiler reviews stay blurred until clicked. "Stop" cancels.
+- **A much more detailed analysis** (the method of the shared "review analysis" app):
+  - AI score with what pulls it up and down, and a community score from the reviews' tone and depth plus the stars;
+  - what most reviewers agree on, with shares, and where they split;
+  - a critic's note, themes, feelings, who it is for, similar titles, a score per topic;
+  - the positive / mixed / negative / no-stance split, and every review read, filterable by tone.
+- **Taste learning:** each analysis keeps the topic scores. Once three analysed titles are liked or disliked, Luna suggests preference weights ("Apply"), shows "Fits your taste %", and the analysis and the assistant use it.
+- **API profiles** (Settings › Accounts and keys): save several services with their own key, model and base URL (up to 8). The assistant and the review analysis can each use a profile. Keys stay in Windows' credential store.
+- "Worth watching?" is now also on Discover and recommendation pages.
+
 ## 1.4.8CC — 2026-10-21 (beta)
 
 - **AI connection fixed:**

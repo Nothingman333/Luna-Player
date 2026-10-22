@@ -11,6 +11,13 @@ import { I, Icon, MenuEntry, openMenu } from "./Screens";
 import { askAssistant, openAssistant, TrText } from "./Taste";
 import { MiniMusic, playQueue, QItem, useMusic } from "./Music";
 import { collectEntry } from "./Mine";
+import { ReviewAiCard } from "./FilmReviewAi";
+import { cleanProfile, filmKey } from "./filmReviewModel";
+import { ReasonPicker, TastePanel } from "./TastePanel";
+import { TasteProfile } from "./TasteProfile";
+import { aspectsOf, profileKeyOf } from "./reviewTaste";
+import type { Aspect } from "./filmReviewModel";
+import "./FilmDecision.css";
 import { attachTts, loadVoices, voiceChoices, setRate, setSleep, setVoice, setTtsVolume, setTtsMuted, Sleep, takeHeard, TTS_CSS, ttsNoted, ttsPause, ttsSkip, ttsStart, ttsStop, ttsToggle, useTts, Voice } from "./ReadAloud";
 import { addSource, SourceHelp, fetchFeed, gutenbergBooks, gutenbergPopular, gutenbergSearch, kindOf, loadSources, OEntry, OFeed, saveSources, searchUrl, Source } from "./Opds";
 import literata400 from "@fontsource/literata/files/literata-latin-400-normal.woff2?url";
@@ -274,6 +281,7 @@ const ASK = "✦  ";
 const bookAsks = (b: { title: string; author: string }): [string, string][] => {
   const who = b.author ? ` (${b.author})` : "";
   return [
+    [tt("Ayrıntılı inceleme"), tt("“{0}”{1} kitabı hakkında ayrıntılı bir inceleme yaz. Şunları ayrı başlıklarla ver: 1) internetteki inceleme ve yorumların ortak görüşü (Goodreads, 1000Kitap, gazete ve dergi incelemeleri); 2) bu kitap üzerine öne çıkan YouTube inceleme videoları; 3) makaleler ve akademik yorumlar; 4) büyük düşünürlerin ve eleştirmenlerin bu kitap hakkındaki çıkarımları (kim ne demiş, hangi açıdan bakmış); 5) kitabın neden önemli olduğu ve kimlere hitap ettiği. Her bilginin kaynağını bağlantısıyla göster; olay örgüsünün sonunu verme, spoiler gerekiyorsa önce uyar.", b.title, who)],
     [tt("Bu kitap ne hakkında?"), tt("“{0}”{1} kitabı ne hakkında? Spoiler vermeden anlat", b.title, who)],
     [tt("Bu kitabın filmi ya da dizisi var mı?"), tt("“{0}”{1} kitabının filmi ya da dizisi var mı?", b.title, who)],
     [tt("Buna benzer kitaplar"), tt("“{0}”{1} kitabına benzer kitaplar öner; kitaplığımda olanları önce söyle", b.title, who)],
@@ -334,7 +342,7 @@ function showBook(v: typeof onScreen) {
 }
 
 // ---------- pages ----------
-export type BooksView = "home" | "library" | "discover" | "audio";
+export type BooksView = "home" | "library" | "taste" | "discover" | "audio";
 export function BooksPage({ view, setView, query }: { view: BooksView; setView: (v: BooksView) => void; query: string }) {
   const lib = useBookLibrary();
   const [reading, setReading] = useState<Book | null>(null);
@@ -358,6 +366,10 @@ export function BooksPage({ view, setView, query }: { view: BooksView; setView: 
       {view === "library" && <BookLibrary lib={lib} query={query} onOpen={openBook} onDetail={setDetail} onAddFolder={addFolder} />}
       {detail && <BookDetail b={detail} onClose={() => setDetail(null)} onRead={() => { setDetail(null); openBook(detail); }} />}
       {view === "discover" && <Catalogs query={query} onFetch={fetchBook} />}
+      {view === "taste" && <>
+        <TasteProfile kind="book" page />
+        <section className="la mu-taste"><TastePanel kind="book" open={false} /></section>
+      </>}
       {view === "audio" && <Audiobooks query={query} />}
       {reading && <Reader key={reading.path} b={reading} onClose={() => setReading(null)} />}
     </div>
@@ -890,7 +902,10 @@ async function artFor(b: { title: string; author: string }, subjects: string[]):
   return out;
 }
 
+/** Luna Analiz names the six topics for books. */
+const BOOK_ASPECTS: Record<Aspect, string> = { story: "Kurgu", pace: "Tempo", acting: "Üslup", visuals: "Atmosfer ve dünya", emotion: "Karakter ve duygu", sound: "Fikirler ve derinlik" };
 function BookDetail({ b, onClose, onRead }: { b: Book; onClose: () => void; onRead: () => void }) {
+  const bookProfile = cleanProfile(store.json(profileKeyOf("book"), null));
   const [info, setInfo] = useState<OlInfo | null | undefined>(undefined);
   const [, bump] = useState(0);
   const note = loadBookNotes()[bkKey(b)];
@@ -983,6 +998,19 @@ function BookDetail({ b, onClose, onRead }: { b: Book; onClose: () => void; onRe
       {info?.subjects.length ? (
         <section className="row"><h2>{tt("Konular")}</h2><div className="bk-d-subs">{info.subjects.map((s) => <span key={s} className="chip">{s}</span>)}</div></section>
       ) : null}
+      {/* Luna Analiz: what 1000Kitap's readers say, read one by one */}
+      <section className="row la bk-la">
+        <ReviewAiCard medium="book" author={b.author || undefined} film={{ title: b.title, year: info?.year ?? undefined }} profile={bookProfile} mood="any" setMood={() => {}}
+          label={(a) => tt(BOOK_ASPECTS[a])} onReviews={() => {}} onRun={() => bump((n) => n + 1)} />
+        {/* the reading taste: only books, kept apart from films and music */}
+        <details className="la-sec" open={!!note?.vote}>
+          <summary><h3>{tt("Okuduktan sonra")}</h3><span>{note?.vote === "like" ? tt("Beğendin") : note?.vote === "dislike" ? tt("Beğenmedin") : tt("Önce yukarıdan beğen ya da beğenme")}</span></summary>
+          {note?.vote
+            ? <ReasonPicker kind="book" itemKey={filmKey({ title: b.title, year: info?.year ?? undefined })} vote={note.vote} name={b.title + (b.author ? " — " + b.author : "")} />
+            : <p className="la-muted">{tt("Kitabı beğendiğini ya da beğenmediğini işaretleyince, seni neyin etkilediğini burada seçersin; kitap zevkin bundan öğrenir.")}</p>}
+        </details>
+        <TastePanel kind="book" open={false} scores={aspectsOf({ title: b.title, year: info?.year ?? undefined }, "book") ?? {}} />
+      </section>
       <section className="row">
         <h2>{tt("Asistana sor")}</h2>
         <div className="bk-d-subs">{bookAsks(b).map(([l, q]) => <button key={l} className="chip" onClick={() => { onClose(); askAssistant(q); }}>✦ {l}</button>)}</div>
@@ -1073,7 +1101,17 @@ type Side = "" | "toc" | "marks" | "notes" | "find";
 function Reader({ b, onClose }: { b: Book; onClose: () => void }) {
   const [set, setSetState] = useState<ReaderSet>(loadSet);
   const setSet = (p: Partial<ReaderSet>) => setSetState((s) => { const n = { ...s, ...p }; store.set("readerSet", JSON.stringify(n)); return n; });
-  const [panel, setPanel] = useState<"" | "aa" | "music" | "side">("");
+  const [panel, setPanelNow] = useState<"" | "aa" | "music" | "side">("");
+  // a popup that closes fades out instead of vanishing
+  const [leaving, setLeaving] = useState<"" | "aa" | "music">("");
+  const leaveT = useRef(0);
+  const setPanel = (v: "" | "aa" | "music" | "side") => {
+    if (panel !== v && (panel === "aa" || panel === "music")) {
+      setLeaving(panel); clearTimeout(leaveT.current);
+      leaveT.current = window.setTimeout(() => setLeaving(""), 180);
+    }
+    setPanelNow(v);
+  };
   const [side, setSide] = useState<Side>("toc");
   const [here, setHere] = useState<Here>({ pct: getPos(b.path)?.pct ?? 0, label: "" });
   // this sitting goes into the reading history when the book is closed
@@ -1249,9 +1287,9 @@ function Reader({ b, onClose }: { b: Book; onClose: () => void }) {
         </div>
       )}
 
-      {panel === "music" && <div className="bk-panel bk-music-panel"><MiniMusic /></div>}
-      {panel === "aa" && (
-        <div className="bk-panel bk-aa">
+      {(panel === "music" || leaving === "music") && <div className={"bk-panel bk-music-panel" + (panel !== "music" ? " -out" : "")}><MiniMusic /></div>}
+      {(panel === "aa" || leaving === "aa") && (
+        <div className={"bk-panel bk-aa" + (panel !== "aa" ? " -out" : "")}>
           {b.kind !== "cbz" && (
             <div className="bk-size2">
               <button aria-label={b.kind === "pdf" ? tt("Uzaklaştır") : tt("Yazıyı küçült")} onClick={() => setSet({ size: Math.max(70, set.size - 10) })}><span style={{ fontSize: 15 }}>A</span></button>

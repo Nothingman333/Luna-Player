@@ -106,16 +106,36 @@
               { name: "Watchlist", kind: "watchlist", url: "", films: [{ title: "Prisoners", year: "2013" }, { title: "Sicario", year: "2015" }] },
               ...(args.lists === false ? [] : [{ name: "Favourites", kind: "list", url: args.url + "/list/fav/", films: [{ title: "Inception", year: "2010" }, { title: "Heat", year: "1995" }, { title: "Arrival", year: "2016" }] }])];
           }
+          if (cmd === "book_reviews") {
+            const all = Array.from({ length: args.count }, (_, i) => ({ author: "okur" + i, stars: null, spoiler: false, text: ["Raskolnikov'un iç dünyası beni sarstı; ilk yüz sayfa ağır ama sonra bırakamadım.", "Üslubu yoğun, bazen fazla uzun buldum.", "Suçluluk ve vicdan üzerine okuduğum en derin kitap."][i % 3] + " #" + i }));
+            window.__emit("lb-reviews-progress", "1000Kitap'ta aranıyor");
+            for (let p = 0; p < all.length; p += 10) { await new Promise((r) => setTimeout(r, 400)); window.__emit("lb-reviews-found", all.slice(p, p + 10)); }
+            return { url: "https://1000kitap.com/kitap/suc-ve-ceza--121", reviews: all, rating: 9.2, readers: 169889 };
+          }
           if (cmd === "letterboxd_reviews") {
             window.__lbr = args;
-            for (const m of ["Looking on Letterboxd", "12 reviews read", "48 reviews read"]) { await new Promise((r) => setTimeout(r, 500)); window.__emit("lb-reviews-progress", m); }
-            if (/nothing/i.test(args.title)) throw "This title wasn't found on Letterboxd";
-            return { url: "https://letterboxd.com/film/inception", reviews: Array.from({ length: args.count }, (_, i) => ({ author: "user" + i, stars: i % 3 ? 4 + (i % 2) / 2 : null, spoiler: i % 7 === 0, text: ["The pacing is relentless and the score is huge.", "Great acting, but the story is too convoluted.", "Visuals are stunning; characters feel thin."][i % 3] + " #" + i })) };
+            if (/nothing/i.test(args.title)) { await new Promise((r) => setTimeout(r, 500)); throw "This title wasn't found on Letterboxd"; }
+            const all = Array.from({ length: args.count }, (_, i) => ({ author: "user" + i, stars: i % 3 ? 4 + (i % 2) / 2 : (i % 5 === 0 ? 1.5 : null), spoiler: i % 7 === 0, text: ["The pacing is relentless and the score is huge. I couldn't look away for a second, and the last act left me breathless. " + "Every scene feeds the next one and the editing never lets go; even the quiet moments hum with tension, and the way the music swells under the final sequence turns a clever puzzle into something that actually moves you. I went in expecting spectacle and came out thinking about grief, memory and how much we choose to believe. ".repeat(2), "Great acting, but the story is too convoluted.", "Visuals are stunning; characters feel thin. Pretty, but I felt nothing."][i % 3] + " #" + i }));
+            window.__emit("lb-reviews-progress", "Looking on Letterboxd");
+            for (let p = 0; p < all.length; p += 12) { await new Promise((r) => setTimeout(r, 450)); window.__emit("lb-reviews-found", all.slice(p, p + 12)); window.__emit("lb-reviews-progress", Math.min(all.length, p + 12) + " reviews read"); }
+            return { url: "https://letterboxd.com/film/inception", reviews: all };
           }
-          if (cmd === "llm_post" && /Letterboxd/.test(JSON.stringify(args.body.messages?.[0] ?? args.body.system ?? ""))) {
+          if (cmd === "llm_post" && /reviews one by one|already labelled/.test(JSON.stringify(args.body))) {
             window.__llm = args;
-            const v = { lean: "positive", summary: "İzleyiciler temponun ve müziğin gücünü öne çıkarıyor; hikâyeyi karmaşık bulanlar da var.", forYou: "Tempoya ve görselliğe önem veriyorsun; bu ikisi en çok övülen yanları.", likeIf: "Yoğun, kafa yoran gerilimleri seviyorsan.", skipIf: "Karakter derinliği arıyorsan.", praise: ["Tempo", "Müzik", "Görsellik"], criticism: ["Karmaşık hikâye", "İnce karakterler"], aspects: [{ aspect: "pace", tone: "positive", note: "Neredeyse herkes temposunu övüyor." }, { aspect: "story", tone: "mixed", note: "Kimine zekice, kimine fazla karışık." }, { aspect: "bogus", tone: "x", note: "" }] };
+            await new Promise((r) => setTimeout(r, 700));
+            const user = JSON.stringify(args.body.messages?.slice(-1)[0] ?? "");
+            let v;
+            if (/label each/.test(JSON.stringify(args.body))) {
+              const nums = [...user.matchAll(/\[(\d+)\]/g)].map((m) => +m[1]);
+              v = { items: nums.map((n) => ({ n, tone: ["positive", "mixed", "negative", "neutral"][n % 4 === 3 && n % 2 ? 3 : n % 3], quality: 1 + (n % 5), topic: ["pace", "acting", "visuals"][n % 3], gist: ["Tempo ve müzik onu koltuğa çiviliyor.", "Oyunculuk güçlü ama hikâye fazla karışık.", "Görsellik büyüleyici, karakterler sığ."][n % 3] })), best: [nums[0]], worst: [nums[2]] };
+            } else v = { lean: "positive", score: 7.6, scoreWhy: "Tempo ve müzik puanı yukarı çekiyor; karmaşık hikâye ve ince karakterler aşağı.", summary: "İzleyiciler temponun ve müziğin gücünü öne çıkarıyor; hikâyeyi karmaşık bulanlar da var.", editorNote: "Herkesin övdüğü tempo, aslında karakterlerin boşluğunu örtmek için koşuyor.", forYou: "Tempoya ve görselliğe önem veriyorsun; bu ikisi en çok övülen yanları.", likeIf: "Yoğun, kafa yoran gerilimleri seviyorsan.", skipIf: "Karakter derinliği arıyorsan.", praise: ["Tempo", "Müzik", "Görsellik"], criticism: ["Karmaşık hikâye", "İnce karakterler"], consensus: [{ point: "Temposu nefes aldırmıyor", share: 64, tone: "positive" }, { point: "Müzik filmi taşıyor", share: 41, tone: "positive" }, { point: "Karakterler sığ kalıyor", share: 28, tone: "negative" }], debates: ["Hikâye: kimine zekice kurgulanmış, kimine gereksiz karmaşık."], themes: [{ name: "Rüya ve gerçek", share: 60 }, { name: "Yas", share: 40 }], emotions: [{ name: "Heyecan", share: 70 }, { name: "Hüzün", share: 30 }], audience: ["Kafa yoran gerilim sevenler"], similar: [{ title: "Tenet", why: "Aynı yönetmen, benzer kurgu oyunları." }], aspects: [{ aspect: "pace", tone: "positive", score: 8.4, note: "Neredeyse herkes temposunu övüyor." }, { aspect: "story", tone: "mixed", score: 6.1, note: "Kimine zekice, kimine fazla karışık." }, { aspect: "bogus", tone: "x", note: "" }] };
             const text = "```json\n" + JSON.stringify(v) + "\n```";
+            return args.kind === "anthropic" ? { content: [{ type: "text", text }] } : { choices: [{ message: { content: text } }] };
+          }
+          if (cmd === "llm_post" && /uzmanısın/.test(JSON.stringify(args.body))) {
+            window.__fill = (window.__fill ?? 0) + 1;
+            const n = (JSON.stringify(args.body.messages?.slice(-1)[0] ?? "").match(/\\n|\d+\. /g) ?? []).length + 1;
+            const text = JSON.stringify({ items: Array.from({ length: n }, (_, i) => ({ n: i + 1, genres: ["Anadolu rock"], scores: { story: 8, pace: 5, acting: 9, visuals: 6, emotion: 8, sound: 7 } })) });
             return args.kind === "anthropic" ? { content: [{ type: "text", text }] } : { choices: [{ message: { content: text } }] };
           }
           if (cmd === "llm_post") {
@@ -124,9 +144,18 @@
             const lastUser = [...b.messages].reverse().find((m) => m.role === "user" || m.role === "tool");
             const toolDone = lastUser && (lastUser.role === "tool" || (Array.isArray(lastUser.content) && lastUser.content.some((c) => c.type === "tool_result")));
             const call = !toolDone && b.tools && /kind of blue/i.test(JSON.stringify(lastUser));
+            // "songs like this": the songs card (a new list or an existing one grown)
+            const likeSongs = !toolDone && b.tools && /make_music_playlist'i titles/.test(JSON.stringify(lastUser));
+            if (likeSongs && !anth) {
+              const ext = JSON.stringify(lastUser).match(/extend alanına “([^”]+)”/)?.[1];
+              return { choices: [{ message: { content: null, tool_calls: [{ id: "c2", type: "function", function: { name: "make_music_playlist", arguments: JSON.stringify({ query: "", name: "Benzerler", titles: ["Tamirci Çırağı — Cem Karaca", "Yalnızlar Rıhtımı — Erkin Koray", "Gönül — Fikret Kızılok", "İnce İnce Bir Kar Yağar — Selda Bağcan"], ...(ext ? { extend: ext } : {}) }) } }] } }] };
+            }
             if (anth) return { content: call ? [{ type: "tool_use", id: "t1", name: "play_music", input: { query: "Kind of Blue" } }] : [{ type: "text", text: "Claude says hi" + (toolDone ? " (tool done)" : "") }] };
-            return { choices: [{ message: call ? { content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "play_music", arguments: JSON.stringify({ query: "Kind of Blue" }) } }] } : { content: "OpenAI-style says hi" + (toolDone ? " (tool done)" : "") } }] };
+            return { choices: [{ message: call ? { content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "play_music", arguments: JSON.stringify({ query: "Kind of Blue" }) } }] } : { content: /film/i.test(JSON.stringify(lastUser)) ? "Bu akşam için iki öneri:\n\n- **Arrival (2016)**: dil ve zaman üzerine sakin bir bilimkurgu.\n- **Dune (2021)**: büyük ölçekli, görsel bir şölen.\n\n" + "Uzun bir paragraf. ".repeat(80) : "OpenAI-style says hi" + (toolDone ? " (tool done)" : "") } }] };
           }
+          if (cmd === "secrets_load") return Object.fromEntries(args.names.map((n) => [n, /tmdb/i.test(n) ? (location.search.includes("tmdb") ? "mock" : "") : "x"]).filter((x) => x[1]));
+          if (cmd === "secret_set") return null;
+          if (cmd === "yt_search") { const w = args.query.split(" ").slice(0, 2).join(" "); return [{ url: "https://youtu.be/" + encodeURIComponent(args.query).slice(0, 11), title: w, channel: args.query.split(" ").slice(2).join(" ") || "Kanal", thumb: "", duration: 240 }]; }
           if (cmd === "llm_models") return args.kind === "anthropic" ? ["claude-haiku-5-5", "claude-sonnet-5-5"] : ["gpt-4.1-mini", "gpt-4.1"];
           if (cmd === "system_check") return { mpv: true, vulkan: !location.search.includes("novulkan"), gpus: ["NVIDIA GeForce RTX 3060"], lossless: false, webview: "131.0.2903.112" };
           if (cmd === "music_scan" && SHOTS) {

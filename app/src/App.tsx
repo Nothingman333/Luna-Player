@@ -10,12 +10,16 @@ import { listen } from "@tauri-apps/api/event";
 import { copiesOf, customMeta, details, groupKey, IMG, seasonKey, isRemote, isUrl, torrentSrc, pinFile, relinkFile, isFinished, setFinished, nearEnd, Episode, Item, loadRecent, parseName, Recent, store, useLibrary } from "./library";
 import { SubtitleDialog } from "./Subtitles";
 import { Added, DownloadPanel, Downloads, DownloadsSection, downloadDir, RemoveMode, isOpenableLink, isTorrentSource, TorrentDialog, TorrentLoader, TorrentStat, useTorrents } from "./Torrent";
-import { Actions, Browse, CardMenu, Confirm, Details, Folders, Header, Home, I, Icon, MenuEntry, pct, pickFolder, Rematch, RenameFile, Settings, Target, View, MissingPanel, Mode, MenuHost, filmAsks } from "./Screens";
+import { Actions, Browse, CardMenu, Confirm, Details, Folders, Header, Home, I, Icon, MenuEntry, pct, pickFolder, Rematch, RenameFile, Settings, Target, View, MissingPanel, Mode, MenuHost, filmAsks, openMenu } from "./Screens";
 import SubTimeline from "./SubTimeline";
-import { askAssistant, ChatPanel, diaryGet, diarySet, migrateDiary, RecsPage } from "./Taste";
+import { fillTaste } from "./tasteFill";
+import { askAssistant, autoUpdateMyLetterboxd, ChatPanel, diaryGet, diarySet, migrateDiary, RecsPage, TitleDetail } from "./Taste";
+import type { DetailTarget } from "./Taste";
+import { isM3u, M3uDialog, readM3u } from "./M3u";
+import type { M3uList } from "./M3u";
 import { WebResults } from "./Web";
 import { DiscoverPage } from "./Discover";
-import { MusicDock, MusicLinkDialog, MusicPage, MusicView, isMusicPath, musicRetrying, openMusicFiles, playYouTubeLink, purgeMusicFromFilms, resumeSuspendedMusic, suspendMusic, useMusic } from "./Music";
+import { MusicDock, MusicLinkDialog, SongRatePop, MusicPage, MusicView, isMusicPath, markMusicPath, musicRetrying, openMusicFiles, playYouTubeLink, purgeMusicFromFilms, resumeSuspendedMusic, suspendMusic, useMusic } from "./Music";
 import { BookLinkDialog, BooksPage, BooksView, openBookFile } from "./Books";
 import { pushSubs, UpscalerSettings } from "./Upscaler";
 
@@ -197,6 +201,14 @@ export default function App() {
   const [partLink, setPartLink] = useState<Mode | null>(null);
   // a question from a menu or a button opens the assistant (the panel asks it)
   useEffect(() => { const f = () => setChat(true); window.addEventListener("luna-ask", f); return () => window.removeEventListener("luna-ask", f); }, []);
+  // the user's own Letterboxd reads itself again once a day (a little after start, and while Luna stays open)
+  useEffect(() => {
+    // and books and songs liked since get their topic scores (books/music only; films have Luna Analiz)
+    const run = () => { void autoUpdateMyLetterboxd(); void fillTaste("music").then(() => fillTaste("book")); };
+    const t = window.setTimeout(run, 45000);
+    const iv = window.setInterval(run, 3600 * 1000);
+    return () => { clearTimeout(t); clearInterval(iv); };
+  }, []);
   // a book or a film opened from anywhere (the assistant too): the collections page steps aside
   useEffect(() => { const f = () => { setMine(null); setMineOpen(null); }; window.addEventListener("luna-book-open", f); return () => window.removeEventListener("luna-book-open", f); }, []);
   // the mode's colours apply to everything, windows opened on top included
@@ -204,6 +216,8 @@ export default function App() {
   // music in mpv isn't a video: no player screen, subtitles, resume or per-video settings.
   // The queue is the reliable sign (mpv may report a resolved YouTube URL instead of the item's src).
   const isMusic = !!music.now || isMusicPath(s.path);
+  // whatever address mpv plays while the music queue is on is music (a podcast's CDN redirect included)
+  if (music.now && s.path) markMusicPath(s.path);
   tracksRef.current = s.tracks;
   pathRef.current = isMusic ? null : s.path;
   const playing = !!s.path && !isMusic;
@@ -406,6 +420,8 @@ export default function App() {
     if (changed) setRecent((r) => [...r]);
   }, [torrents]);
 
+  const [m3uList, setM3uList] = useState<M3uList | null>(null);
+  const channelName = useRef<string | null>(null);
   const load = useCallback((p: string, start = false, confirmed = false) => {
     // A YouTube link belongs to the music part: it plays there and never enters the film library.
     if (YT_LINK.test(p)) { playYouTubeLink(p).then((ok) => { if (!ok) flash(tt("Bu bağlantıda çalınacak bir şey yok"), "warn"); }); return; }
@@ -414,6 +430,12 @@ export default function App() {
     const src = store.get("tsrc:" + p);
     const stream = !!src && store.get("tdone:" + p) !== "1" && !p.startsWith("http");
     if (stream && !confirmed) { setAskStream({ path: p, src: src!, start }); return; }
+    // .m3u / .m3u8: a channel list opens to pick from; a single HLS stream plays below
+    if (isM3u(p) && !confirmed) {
+      readM3u(p).then((l) => { if (l === "stream") loadRef.current?.(p, start, true); else setM3uList(l); })
+        .catch(() => loadRef.current?.(p, start, true));
+      return;
+    }
     // a subtitle goes onto what is playing; anything else replaces the music
     if (SUB_EXT.includes(ext(p))) {
       mpv("sub-add", p, "select");
@@ -429,6 +451,9 @@ export default function App() {
     // a film has its picture and the usual quality (music may have left mpv set to sound only)
     setProp("vid", "auto");
     setProp("ytdl-format", "");
+    // a channel from an .m3u list shows its name, anything else its own title
+    setProp("force-media-title", channelName.current ?? "");
+    channelName.current = null;
     mpv("loadfile", p, "replace");
     setProp("pause", false);
     if (store.get("autoFull") !== "0") getCurrentWindow().setFullscreen(true);
@@ -444,8 +469,29 @@ export default function App() {
     setProp("slang", lang() === "tr" ? "tr,tur,en,eng" : "en,eng");
     // Music that once slipped into the film library (link opens) is taken out again.
     if (purgeMusicFromFilms()) { setRecent(loadRecent()); window.dispatchEvent(new Event("luna-library")); }
-    // This is a desktop app: no browser context menu, reload, find or zoom.
-    const noMenu = (e: MouseEvent) => e.preventDefault();
+    // This is a desktop app: no browser context menu, reload, find or zoom. Instead, Luna's own small
+    // menu where there is text to copy (an assistant answer…) or a text box (cut, copy, paste).
+    const noMenu = (e: MouseEvent) => {
+      if (e.defaultPrevented) return; // a card's own menu took it
+      e.preventDefault();
+      const field = (e.target as HTMLElement).closest?.("input:not([type=range]):not([type=checkbox]):not([type=radio]), textarea") as HTMLInputElement | HTMLTextAreaElement | null;
+      const entries: MenuEntry[] = [];
+      if (field && !field.readOnly && !field.disabled) {
+        const [a, b] = [field.selectionStart ?? 0, field.selectionEnd ?? 0];
+        const part = field.value.slice(a, b);
+        const back = () => { field.focus(); field.setSelectionRange(a, b); };
+        if (part) entries.push({ label: tt("Kes"), act: () => { back(); document.execCommand("cut"); } }, { label: tt("Kopyala"), act: () => { navigator.clipboard.writeText(part).catch(() => {}); } });
+        entries.push({ label: tt("Yapıştır"), act: () => { navigator.clipboard.readText().then((t) => { back(); document.execCommand("insertText", false, t); }).catch(() => {}); } });
+        if (field.value) entries.push({ label: tt("Tümünü seç"), act: () => { field.focus(); field.select(); } });
+      } else {
+        const sel = window.getSelection()?.toString() ?? "";
+        if (sel.trim()) entries.push(
+          { label: tt("Kopyala"), act: () => { navigator.clipboard.writeText(sel).catch(() => {}); } },
+          { label: tt("Asistana sor: “{0}”", sel.trim().length > 32 ? sel.trim().slice(0, 30) + "…" : sel.trim()), act: () => askAssistant(tt("Şunu açıklar mısın: “{0}”", sel.trim().slice(0, 2000))) },
+        );
+      }
+      if (entries.length) openMenu(e as unknown as React.MouseEvent, entries);
+    };
     const noBrowserKeys = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
       if (k === "f5" || k === "f3" || k === "f7" || k === "f12" ||
@@ -876,6 +922,7 @@ export default function App() {
   const openFile = async () => {
     const p = await open({ multiple: false, filters: [
       { name: "Video", extensions: VIDEO_EXT },
+      { name: tt("Yayın listesi (M3U)"), extensions: ["m3u", "m3u8"] },
       { name: tt("Altyazı"), extensions: SUB_EXT },
       { name: "Torrent", extensions: ["torrent"] },
     ] });
@@ -1074,6 +1121,13 @@ export default function App() {
     window.addEventListener("luna-go", go);
     return () => window.removeEventListener("luna-go", go);
   }, []);
+  // a title opened from anywhere (Luna Analiz's similar titles…): its details over the page
+  const [titleOpen, setTitleOpen] = useState<DetailTarget | null>(null);
+  useEffect(() => {
+    const open = (e: Event) => setTitleOpen((e as CustomEvent<DetailTarget>).detail);
+    window.addEventListener("luna-open-title", open);
+    return () => window.removeEventListener("luna-open-title", open);
+  }, []);
   const [query, setQuery] = useState("");
   const actions: Actions = {
     play: (p, start) => load(p, start),
@@ -1177,13 +1231,13 @@ export default function App() {
       {!playing && (mode !== "film" || !detailsItem) && (
         <div className="shell" onScroll={(e) => e.currentTarget.classList.toggle("scrolled", e.currentTarget.scrollTop > 8)}>
           <Header mode={mode} setMode={(m) => { setModeState(m); store.set("mode", m); setQuery(""); }}
-            tabs={mode === "music" ? [["home", tt("Ana sayfa")], ["discover", tt("Keşfet")], ["library", tt("Kütüphanem")], ["radio", tt("Radyo")], ["podcast", tt("Podcast")]]
-              : mode === "books" ? [["home", tt("Ana sayfa")], ["library", tt("Kitaplığım")], ["discover", tt("Keşfet")], ["audio", tt("Sesli kitaplar")]] : undefined}
+            tabs={mode === "music" ? [["home", tt("Ana sayfa")], ["discover", tt("Keşfet")], ["library", tt("Kütüphanem")], ["taste", tt("Zevk profilim")], ["radio", tt("Radyo")], ["podcast", tt("Podcast")]]
+              : mode === "books" ? [["home", tt("Ana sayfa")], ["discover", tt("Keşfet")], ["library", tt("Kitaplığım")], ["taste", tt("Zevk profilim")], ["audio", tt("Sesli kitaplar")]] : undefined}
             view={mode === "music" ? musicView : mode === "books" ? booksView : view}
             setView={(v) => { if (mode === "music") setMusicView(v); else if (mode === "books") setBooksView(v); else setView(v); if (v === "home") setQuery(""); }} query={query} setQuery={setQuery}
             scanning={mode === "film" && lib.scanning} onSettings={() => setSettings(true)}
             onOpen={mode === "music" ? openMusicFiles : mode === "books" ? openBookFile : openFile}
-            onTorrent={() => (mode === "film" ? setTorrentDlg(true) : setPartLink(mode))} downloading={torrents.filter((t) => !t.finished).length} onChat={() => setChat((v) => !v)} onMine={() => setMine("collections")} />
+            onTorrent={() => (mode === "film" ? setTorrentDlg(true) : setPartLink(mode))} downloading={torrents.filter((t) => !t.finished).length} onMine={() => setMine("collections")} />
           {mode === "music" ? (
             <div className="shell-body" key={"music:" + musicView}>
               <MusicPage view={musicView} setView={setMusicView} query={query} />
@@ -1238,6 +1292,15 @@ export default function App() {
         <Details key={detailsItem.key} it={detailsItem} recent={recent} a={actions} onBack={() => setDetailsKey(null)}
           onAddSub={addSubtitle} download={detailsDownload} onAsk={() => setChat(true)} missingPanel={detailsMissingPanel} />
       )}
+      {titleOpen && <TitleDetail key={titleOpen.title + (titleOpen.year ?? "")} t={titleOpen} items={lib.items} onClose={() => setTitleOpen(null)} onPlay={(p) => { setTitleOpen(null); load(p); }}
+        onTorrent={() => setTorrentDlg(true)} onAsk={(it) => { setChatTopic(it); setChat(true); }} onSource={playSource} onDownload={startDownload} />}
+      {m3uList && <M3uDialog list={m3uList} onClose={() => setM3uList(null)} onOpen={(src) => { setM3uList(null); load(src); }}
+        onPlay={(c) => { setM3uList(null); channelName.current = c.name; load(c.url, false, true); }} />}
+      {/* the assistant as a bubble at the bottom right: always at hand, out of the way while a film plays */}
+      <SongRatePop />
+      {!chat && !playing && <button className="ai-bubble" aria-label={tt("Luna Asistan")} title={tt("Luna Asistan · Alt+A")} onClick={() => setChat(true)}>
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-4-.9L3 20l1.1-4A8.4 8.4 0 1 1 21 11.5z" /><path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01" strokeWidth="2.6" /></svg>
+      </button>}
       {chat && <ChatPanel onRemove={assistantRemove} mode={mode} onMode={(m) => { setModeState(m); store.set("mode", m); setDetailsKey(null); }} key={"chat:" + (mode === "film" ? detailsItem?.key ?? chatTopic?.key ?? "general" : "general")} items={lib.items} recent={recent} viewing={mode === "film" ? detailsItem ?? chatTopic ?? undefined : undefined}
         watching={playing ? { title: displayTitle, item: current } : undefined} onClose={() => { setChat(false); setChatTopic(null); }}
         onPlay={(p) => { setDetailsKey(null); load(p); }} onOpenSource={(src) => { setDetailsKey(null); setChat(false); openTorrent(src); }} />}

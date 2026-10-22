@@ -11,6 +11,9 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { fmtTime, mpv, MpvState, setProp } from "./mpv";
 import { store } from "./library";
 import { I, Icon, MenuEntry, openMenu } from "./Screens";
+import { ReasonPicker, TastePanel } from "./TastePanel";
+import { TasteProfile } from "./TasteProfile";
+import { filmKey } from "./filmReviewModel";
 import { askAssistant, openAssistant } from "./Taste";
 import { collectEntry } from "./Mine";
 
@@ -130,6 +133,7 @@ const P = {
   paused: false, // mpv's pause, reported by the dock
   from: "", // the playlist the queue was started from ("" for anything else)
   loading: false, // a song was asked for and its sound hasn't started yet (found on the web first)
+  volume: 100, // mpv's volume, reported by the dock (the reader's music popup has its own slider)
 };
 const subs = new Set<() => void>();
 const changed = () => subs.forEach((f) => f());
@@ -176,6 +180,69 @@ export function toggleLike(q: QItem): boolean {
   const l = loadLikes();
   const on = l.some((x) => x.q.src === q.src);
   store.set("musicLikes", JSON.stringify(on ? l.filter((x) => x.q.src !== q.src) : [{ q: { ...q, start: undefined }, at: Date.now() }, ...l]));
+  if (!on) store.set("musicDislikes", JSON.stringify(loadDislikes().filter((x) => x.q.src !== q.src)));
+  changed();
+  return !on;
+}
+/** The user's points for songs (1-10, like films): asked right after a like or dislike. */
+export const songRatings = () => store.json<Record<string, number>>("musicRatings", {});
+export const songRating = (src?: string) => (src ? songRatings()[src] : undefined);
+export function setSongRating(q: QItem, n: number | null) {
+  const r = songRatings();
+  if (n == null) delete r[q.src]; else r[q.src] = n;
+  store.set("musicRatings", JSON.stringify(r));
+  // a low score on a liked song (or a high one on a disliked song) turns the vote round, as for films
+  if (n != null && n <= 4 && isLiked(q.src)) toggleDislike(q);
+  else if (n != null && n >= 7 && isDisliked(q.src)) toggleLike(q);
+  changed();
+}
+let rateAsk: { q: QItem; x: number; y: number } | null = null;
+const rateSubs = new Set<() => void>();
+/** Opens "out of 10?" beside the button that was pressed. */
+export function askSongRating(q: QItem, el: Element) {
+  const r = el.getBoundingClientRect();
+  rateAsk = { q, x: r.left + r.width / 2, y: r.bottom };
+  rateSubs.forEach((f) => f());
+}
+/** Mounted once (in the app): the small 1-10 picker. */
+export function SongRatePop() {
+  const [, bump] = useState(0);
+  useEffect(() => { const f = () => bump((n) => n + 1); rateSubs.add(f); return () => { rateSubs.delete(f); }; }, []);
+  const box = useRef<HTMLDivElement>(null);
+  const close = () => { rateAsk = null; bump((n) => n + 1); };
+  useEffect(() => {
+    if (!rateAsk) return;
+    const away = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) close(); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+    const t = setTimeout(() => document.addEventListener("mousedown", away), 0);
+    window.addEventListener("keydown", esc, true);
+    return () => { clearTimeout(t); document.removeEventListener("mousedown", away); window.removeEventListener("keydown", esc, true); };
+  });
+  if (!rateAsk) return null;
+  const { q, x, y } = rateAsk;
+  const cur = songRating(q.src);
+  const left = Math.max(12, Math.min(window.innerWidth - 332, x - 160));
+  const top = y + 150 > window.innerHeight ? y - 130 : y + 8;
+  return createPortal(
+    <div className="song-rate" ref={box} style={{ left, top }} role="dialog" aria-label={tt("10 üzerinden kaç?")}>
+      <b className="ellipsis">{q.title}</b>
+      <span className="muted small">{isDisliked(q.src) ? tt("Beğenmedin · 10 üzerinden kaç?") : tt("Beğendin · 10 üzerinden kaç?")}</span>
+      <div className="song-rate-n">{Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+        <button key={n} className={"seg sm" + (cur === n ? " on" : "")} onClick={() => { setSongRating(q, n); close(); }}>{n}</button>))}</div>
+      <div className="song-rate-b">{cur != null && <button className="chip" onClick={() => { setSongRating(q, null); close(); }}>{tt("Puanı kaldır")}</button>}
+        <button className="chip" onClick={close}>{tt("Şimdi değil")}</button></div>
+    </div>,
+    document.body,
+  );
+}
+/** Songs the user said they don't like: the assistant keeps away from them and their kind. */
+export const loadDislikes = () => store.json<Liked[]>("musicDislikes", []);
+export const isDisliked = (src?: string) => !!src && loadDislikes().some((x) => x.q.src === src);
+export function toggleDislike(q: QItem): boolean {
+  const l = loadDislikes();
+  const on = l.some((x) => x.q.src === q.src);
+  store.set("musicDislikes", JSON.stringify(on ? l.filter((x) => x.q.src !== q.src) : [{ q: { ...q, start: undefined }, at: Date.now() }, ...l].slice(0, 500)));
+  if (!on) store.set("musicLikes", JSON.stringify(loadLikes().filter((x) => x.q.src !== q.src)));
   changed();
   return !on;
 }
@@ -257,9 +324,17 @@ listen<any>("mpv", ({ payload }) => {
 });
 
 /** Every address music was loaded from (also the found YouTube ones): such a path in mpv is music. */
-const musicPaths = new Set<string>();
+const musicPaths = new Set<string>(store.json<string[]>("musicStreamPaths", []));
+/** The address mpv really plays can differ from the item's (a podcast episode redirects to a CDN): remembered as music too. */
+export function markMusicPath(p: string | null) {
+  if (!p || musicPaths.has(p)) return;
+  musicPaths.add(p);
+  if (/^https?:/i.test(p)) store.set("musicStreamPaths", JSON.stringify([p, ...store.json<string[]>("musicStreamPaths", []).filter((x) => x !== p)].slice(0, 300)));
+}
+/** An address that is plainly sound (podcast episodes, radio): never a film. */
+const audioLike = (p: string) => /^https?:\/\/[^?#]+\.(mp3|m4a|aac|ogg|oga|opus|wav|flac)([?#]|$)/i.test(p);
 /** Music, never a film: also in the moment between two songs (or while a film takes over) when the queue is empty. */
-export const isMusicPath = (p: string | null) => !!p && (musicPaths.has(p) || p.startsWith("ytdl://") || /^https?:\/\/[^/]*googlevideo\.com\//i.test(p));
+export const isMusicPath = (p: string | null) => !!p && (musicPaths.has(p) || p.startsWith("ytdl://") || /^https?:\/\/[^/]*googlevideo\.com\//i.test(p) || audioLike(p));
 
 function loadCurrent(preserveIntent = false) {
   const generation = ++loadGeneration;
@@ -483,6 +558,24 @@ function Cover({ src, name, size, radius = 12, icon }: { src?: string | null; na
   );
 }
 const NOTE = "M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z";
+const srcUrl = (src: string) => (/^https?:/.test(src) ? src : convertFileSrc(src));
+/** A list's picture when it has none of its own: four of its songs' covers, else one of them under
+ *  the list's name, else a colour made from the name (a plain grey square looked unfinished). */
+function PlaylistArt({ p, size, radius = 12 }: { p: MPlaylist; size: number | string; radius?: number }) {
+  if (p.cover) return <Cover src={p.cover} name={p.name} size={size} radius={radius} icon={NOTE} />;
+  const covers = [...new Set(p.items.map((i) => i.cover).filter((c): c is string => !!c))].slice(0, 4);
+  const h = hue(p.name);
+  const big = typeof size === "number" ? size >= 120 : true;
+  return (
+    <div className="pl-art" style={{ width: size, height: size, borderRadius: radius, ["--h" as string]: String(h) }}>
+      {covers.length >= 4 ? <div className="pl-art-grid">{covers.map((c) => <img key={c} src={srcUrl(c)} alt="" loading="lazy" />)}</div>
+        : covers.length ? <img className="pl-art-one" src={srcUrl(covers[0])} alt="" loading="lazy" />
+        : <div className="pl-art-fill" />}
+      {covers.length < 4 && big && <span className="pl-art-name">{p.name}</span>}
+      {!covers.length && !big && <Icon d={NOTE} size={16} />}
+    </div>
+  );
+}
 const RADIO_ICON = "M4 10h16v10H4zM8 10l9-6M8 15h.01M12 15h5";
 const SHUFFLE = "M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5";
 const REPEAT = "M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3";
@@ -491,7 +584,7 @@ const NEXT = "M5 5l10 7-10 7zM17 5h2v14h-2z";
 const LYRICS = "M4 6h16M4 12h10M4 18h7M18 14v6M15 17h6";
 
 // ---------- the music pages ----------
-export type MusicView = "home" | "discover" | "library" | "radio" | "podcast";
+export type MusicView = "home" | "discover" | "library" | "taste" | "radio" | "podcast";
 // ---------- playlists made in Luna (e.g. from a Spotify list), kept in order ----------
 export type MPlaylist = { id: string; name: string; from?: string; url?: string; cover?: string | null; at: number; items: QItem[] };
 const plSubs = new Set<() => void>();
@@ -505,7 +598,8 @@ export function purgeMusicFromFilms(): boolean {
   if (last?.src) music.add(last.src);
   // stream URLs mpv reported instead of the item's own address are music too
   const linkLike = /^https?:\/\/([^/]*\.)?(youtube\.com|youtu\.be|googlevideo\.com|spotify\.com)\//i;
-  const isMusicPath = (p: string) => p.startsWith("ytdl://") || music.has(p) || linkLike.test(p);
+  for (const r of store.json<{ q?: { src?: string } }[]>("podRecent", [])) if (r.q?.src) music.add(r.q.src);
+  const isMusicPath = (p: string) => p.startsWith("ytdl://") || music.has(p) || linkLike.test(p) || musicPaths.has(p) || audioLike(p);
   let changed = false;
   for (const k of ["files", "pinned"]) {
     const l = store.json<string[]>(k, []);
@@ -556,6 +650,10 @@ export function MusicPage({ view, setView: setPage, query }: { view: MusicView; 
       {view === "home" && <MusicHome lib={lib} onAlbum={setAlbum} onAddFolder={addFolder} goRadio={() => setPage("radio")}
         goShow={(sh) => { pendingShow = sh; setPage("podcast"); }} />}
       {view === "library" && <MusicLibrary lib={lib} query={query} onAlbum={setAlbum} onAddFolder={addFolder} />}
+      {view === "taste" && <>
+        <TasteProfile kind="music" page />
+        <section className="la mu-taste"><TastePanel kind="music" open={false} /></section>
+      </>}
       {view === "radio" && <RadioPage query={query} />}
       {view === "podcast" && <Podcasts query={query} />}
       {view === "discover" && <MusicDiscover query={query} />}
@@ -589,10 +687,17 @@ const albumMenu = (a: Album, onOpen?: () => void): MenuEntry[] => [
   { label: tt("Karışık çal"), act: () => playQueue(a.tracks.map(trackItem), 0, true) },
   ...(onOpen ? [{ label: tt("Şarkıları göster"), act: onOpen }] : []),
 ];
+/** "Find songs like this": the assistant lists them first; the user then grows a list with them or makes a new one. */
+export const likeThisSongs = (title: string, artist?: string, list?: string) =>
+  tt("“{0}”{1} şarkısına benzeyen 15 şarkı bul: aynı ruh hâli, tempo ve tarzda; aynı sanatçıdan en fazla 2 şarkı. Önce metin olarak listeleme: hemen make_music_playlist'i titles ile çağır (“Şarkı — Sanatçı”), adı “{0} gibi” olsun{2}. Kullanıcı açılan kartta şarkıları seçer, yeni liste mi yapılacağını yoksa var olan bir listesinin mi genişletileceğini kendisi seçer. Sonra kısaca neye göre seçtiğini söyle.", title, artist ? " (" + artist + ")" : "", list ? tt("; extend alanına “{0}” yaz (şu an bu listeden çalıyor; kullanıcı kartta değiştirebilir)", list) : "");
+/** The request for "a playlist of songs like this one": the assistant builds a real list (make_music_playlist). */
+export const likeThisList = (title: string, artist?: string) =>
+  tt("“{0}”{1} şarkısına benzeyen 15 şarkıdan bir çalma listesi yap: aynı ruh hâli, tempo ve tarzda; aynı sanatçıdan en fazla 2 şarkı, gerisi başka sanatçılardan. make_music_playlist ile listeyi gerçekten oluştur (titles alanına “Şarkı — Sanatçı” yaz), adı “{0} gibi” olsun.", title, artist ? ` (${artist})` : "");
 const songMenu = (t: Track, play: () => void): MenuEntry[] => [
   { label: ASK + tt("Bu şarkı hangi film ve dizilerde geçiyor?"), act: () => askAssistant(tt("“{0}” ({1}) şarkısı hangi film ve dizilerde geçiyor?", t.title, t.artist)) },
   { label: ASK + tt("Bu şarkının hikayesi"), act: () => askAssistant(tt("“{0}” ({1}) şarkısının hikayesi ve ilginç bilgiler", t.title, t.artist)) },
   { label: ASK + tt("Buna benzer şarkılar"), act: () => askAssistant(tt("“{0}” ({1}) şarkısına benzer şarkılar öner", t.title, t.artist)) },
+  { label: ASK + tt("Bunun gibi şarkılardan liste yap"), act: () => askAssistant(likeThisList(t.title, t.artist), tt("“{0}” gibi şarkılardan liste yap", t.title)) },
   "sep",
   { label: tt("Çal"), act: play },
 ];
@@ -630,7 +735,7 @@ function PlaylistCard({ p }: { p: MPlaylist }) {
   return (
     <button className="mu-album" onClick={() => openPlaylist?.(p.id)} title={p.name} onContextMenu={(e) => openMenu(e, plMenu(p))}>
       <div className="mu-album-art">
-        <Cover src={p.cover} name={p.name} size="100%" icon={NOTE} />
+        <PlaylistArt p={p} size="100%" />
         <span className="mu-album-play" role="button" aria-label={tt("Çal")} tabIndex={0}
           onClick={(e) => { e.stopPropagation(); playQueue(p.items, 0, false, p.id); }}
           onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); playQueue(p.items, 0, false, p.id); } }}><Icon d={I.play} fill size={18} /></span>
@@ -706,7 +811,7 @@ function PlaylistPage({ id, onClose }: { id: string; onClose: () => void }) {
           <button className="round" aria-label={tt("Geri")} onClick={onClose}><Icon d={I.left} /></button>
         </header>
         <section className="pl-head">
-          <Cover src={p.cover} name={p.name} size={224} icon={NOTE} />
+          <PlaylistArt p={p} size={224} radius={16} />
           <div className="pl-head-txt">
             <span className="eyebrow">{tt("LİSTE")}</span>
             <h1 title={tt("Adını değiştir")} onClick={rename}>{p.name}</h1>
@@ -728,7 +833,7 @@ function PlaylistPage({ id, onClose }: { id: string; onClose: () => void }) {
           <label className="pl-search"><Icon d={I.search} size={15} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tt("Listede ara")} /></label>
         </div>
         <div className="pl-table">
-          <div className="pl-row pl-th"><span>#</span><span>{tt("Başlık")}</span><span className="pl-alb">{tt("Albüm")}</span><span className="pl-dur"><Icon d="M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" size={15} /></span><span /></div>
+          <div className="pl-row pl-th"><span>#</span><span>{tt("Başlık")}</span><span className="pl-alb">{tt("Albüm")}</span><span /><span className="pl-dur"><Icon d="M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" size={15} /></span><span /></div>
           {shown.map(({ t, i }) => {
             const cur = m.now?.src === t.src;
             return (
@@ -748,6 +853,7 @@ function PlaylistPage({ id, onClose }: { id: string; onClose: () => void }) {
                   <span className="mu-song-t"><b className="ellipsis">{t.title}</b><span className="muted small ellipsis">{t.artist}</span></span>
                 </span>
                 <span className="pl-alb muted small ellipsis">{t.album ?? ""}</span>
+                <SongVote q={t} />
                 <span className="pl-dur muted small">{t.duration ? fmtTime(t.duration) : ""}</span>
                 <button className="pl-x" aria-label={tt("Listeden çıkar")} title={tt("Listeden çıkar")} onClick={() => save(p.items.filter((_, j) => j !== i))}><Icon d={I.x} size={14} /></button>
               </div>
@@ -838,9 +944,10 @@ function HomeLists() {
   const liked = loadLikes().length > 0;
   return (
     <>
+      {/* "Beğendiklerim" always heads the lists, even while it is empty */}
       {(lists.length > 0 || liked) && (
         <section className="row"><h2>{tt("Listelerin")}</h2>
-          <div className="mu-grid">{liked && <LikedCard onOpen={() => { store.set("musicLibTab", "liked"); goMusicPage?.("library"); }} />}{lists.slice(0, liked ? 11 : 12).map((p) => <PlaylistCard key={p.id} p={p} />)}</div>
+          <div className="mu-grid"><LikedCard onOpen={() => { store.set("musicLibTab", "liked"); goMusicPage?.("library"); }} />{lists.slice(0, 11).map((p) => <PlaylistCard key={p.id} p={p} />)}</div>
         </section>
       )}
       {most.length > 0 && (
@@ -874,7 +981,7 @@ function MusicHome({ lib, onAlbum, onAddFolder, goRadio, goShow }: { lib: Lib; o
   }, []);
   if (lib.tracks && !lib.tracks.length && !lib.folders.length) return (
     <>
-      <HomeLists />
+            <HomeLists />
       {pods}
       <NoMusic onAddFolder={onAddFolder} scanning={lib.scanning} />
       <RadioRow list={top} title={tt("Canlı radyo")} more={goRadio} />
@@ -882,7 +989,7 @@ function MusicHome({ lib, onAlbum, onAddFolder, goRadio, goShow }: { lib: Lib; o
   );
   return (
     <>
-      <section className="mu-top">
+            <section className="mu-top">
         <div className="mu-card mu-mix">
           <div>
             <div className="eyebrow">{tt("BUGÜN İÇİN")}</div>
@@ -1067,6 +1174,7 @@ function SongList({ tracks, showAlbum }: { tracks: Track[]; showAlbum?: boolean 
             <span className="mu-n">{on && m.loading ? <span className="mu-spin sm" aria-label={tt("Yükleniyor…")} /> : on ? <Icon d={NOTE} size={14} /> : showAlbum ? i + 1 : t.track ?? i + 1}</span>
             {showAlbum && <Cover src={t.cover} name={t.album} size={36} radius={6} />}
             <span className="mu-song-t"><b className="ellipsis">{t.title}</b><span className="muted small ellipsis">{showAlbum && t.album ? `${t.artist} · ${t.album}` : t.artist}</span></span>
+            <SongVote q={trackItem(t)} />
             <span className="muted small">{t.duration ? fmtTime(t.duration) : ""}</span>
           </button>
         );
@@ -1508,7 +1616,19 @@ function Podcasts({ query }: { query: string }) {
     else { setFound(null); topShows().then((l) => alive && setTop(l)).catch(() => alive && setErr(true)); }
     return () => { alive = false; };
   }, [deb]);
-  const openTop = async (t: Top) => { const s = await feedOf(t).catch(() => null); if (s) setShow(s); };
+  // a featured podcast's feed can take a while: say so instead of looking frozen
+  const [opening, setOpening] = useState<Top | null>(null);
+  const [openErr, setOpenErr] = useState("");
+  const openRef = useRef<Top | null>(null);
+  const openTop = async (t: Top) => {
+    openRef.current = t; setOpening(t); setOpenErr("");
+    const s = await feedOf(t).catch(() => null);
+    if (openRef.current !== t) return; // cancelled, or another one was clicked
+    openRef.current = null; setOpening(null);
+    if (s) setShow(s); else setOpenErr(tt("“{0}” açılamadı; podcastin beslemesine ulaşılamadı.", t.title));
+  };
+  const cancelOpen = () => { openRef.current = null; setOpening(null); };
+  if (opening && !show) return <div className="mu-pod-wait"><div className="mu-pod-spin" /><b>{tt("Podcast açılıyor…")}</b><span className="muted small">{opening.title}</span><span className="muted small">{tt("Bölümler podcastin kendi beslemesinden alınıyor")}</span><button className="chip sm" onClick={cancelOpen}>{tt("İptal")}</button></div>;
   if (show) return <ShowPage s={show} onBack={() => { setShow(null); setSubs(loadSubs()); }} />;
   return (
     <>
@@ -1523,6 +1643,7 @@ function Podcasts({ query }: { query: string }) {
       )}
       <section className="row">
         <h2>{deb ? tt("“{0}” için podcastler", deb) : tt("Öne çıkan podcastler")}</h2>
+        {openErr && <div className="muted">{openErr}</div>}
         {err && <div className="muted">{tt("Podcast listesi alınamadı; internet bağlantını kontrol et.")}</div>}
         <div className="mu-grid">
           {(deb ? found : top) == null && !err && Array.from({ length: 8 }, (_, i) => <div key={i} className="mu-album ghost-card"><div className="mu-album-art" /></div>)}
@@ -1602,7 +1723,29 @@ function LikeBtn({ q, big }: { q: QItem; big?: boolean }) {
   return (
     <button className={"mu-ib mu-like" + (on ? " on" : "") + (big ? " big" : "")} aria-pressed={on}
       aria-label={on ? tt("Beğendiklerimden çıkar") : tt("Beğendiklerime ekle")} title={on ? tt("Beğendiklerimden çıkar") : tt("Beğendiklerime ekle")}
-      onClick={(e) => { e.stopPropagation(); toggleLike(q); }}><Icon d={HEART} size={big ? 22 : 17} fill={on} /></button>
+      onClick={(e) => { e.stopPropagation(); if (toggleLike(q)) askSongRating(q, e.currentTarget); }}><Icon d={THUMB_UP} size={big ? 22 : 17} />{on && songRating(q.src) ? <span className="vote-n">{songRating(q.src)}</span> : null}</button>
+  );
+}
+
+const THUMB_UP = "M7 10v11H3V10zM7 10l4-8a3 3 0 0 1 3 3v4h6a2 2 0 0 1 2 2.3l-1.4 8A2 2 0 0 1 18.6 21H7";
+const THUMB_DOWN = "M10 15v4a3 3 0 0 0 3 3l4-9V2H5.7a2 2 0 0 0-2 1.7l-1.4 9a2 2 0 0 0 2 2.3zM17 2h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3";
+/** Like and dislike on a song row: shown on hover, or always once set. (Spans, as the row itself is often a button.) */
+export function SongVote({ q }: { q: QItem }) {
+  useMusic();
+  if (q.radio) return null;
+  const like = isLiked(q.src), dis = isDisliked(q.src);
+  const n = songRating(q.src);
+  const btn = (on: boolean, label: string, d: string, act: () => boolean, cls: string) => (
+    <span role="button" tabIndex={0} aria-pressed={on} aria-label={label} title={label} className={"mu-ib mu-vote-b " + cls + (on ? " on" : "")}
+      onClick={(e) => { e.stopPropagation(); if (act() && !q.podcast) askSongRating(q, e.currentTarget); }}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); if (act() && !q.podcast) askSongRating(q, e.currentTarget); } }}>
+      <Icon d={d} size={15} />{on && n ? <span className="vote-n">{n}</span> : null}</span>
+  );
+  return (
+    <span className={"mu-vote" + (like || dis ? " set" : "")}>
+      {btn(like, like ? tt("Beğendiklerimden çıkar") : tt("Beğendiklerime ekle"), THUMB_UP, () => toggleLike(q), "mu-like")}
+      {!q.podcast && btn(dis, dis ? tt("Beğenmediklerimden çıkar") : tt("Beğenmedim"), THUMB_DOWN, () => toggleDislike(q), "mu-dis")}
+    </span>
   );
 }
 
@@ -1620,6 +1763,7 @@ function QRows({ items, extra, when }: { items: QItem[]; extra?: (q: QItem) => M
             <span className="mu-n">{on && m.loading ? <span className="mu-spin sm" /> : on ? <Icon d={NOTE} size={14} /> : i + 1}</span>
             <Cover src={q.cover} name={q.album ?? q.title} size={36} radius={6} icon={q.podcast ? MIC : NOTE} />
             <span className="mu-song-t"><b className="ellipsis">{q.title}</b><span className="muted small ellipsis">{[q.artist, q.album && q.album !== q.artist ? q.album : ""].filter(Boolean).join(" · ")}</span></span>
+            <SongVote q={q} />
             <span className="muted small">{when ? when(i) : q.duration ? fmtTime(q.duration) : ""}</span>
           </button>
         );
@@ -1630,6 +1774,8 @@ function QRows({ items, extra, when }: { items: QItem[]; extra?: (q: QItem) => M
 
 /** "Beğendiklerim": every song and episode you liked, newest first. Like Spotify's Liked Songs it can't
  *  be deleted; a song leaves it when you un-like it. */
+/** One song for the music taste: its name and artist, whatever address it plays from. */
+export const songKey = (q: { title: string; artist?: string }) => filmKey({ title: q.title + " | " + (q.artist ?? "") });
 function LikedView() {
   useMusic();
   const all = loadLikes();
@@ -1651,6 +1797,7 @@ function LikedView() {
           </div>
         </div>
       </section>
+      {kind === "songs" && <section className="la mu-taste"><TastePanel kind="music" open={false} /></section>}
       <div className="seg-row mu-liked-tabs">
         <button className={"seg sm" + (kind === "songs" ? " on" : "")} onClick={() => setKind("songs")}>{tt("Şarkılar")} {songs.length || ""}</button>
         <button className={"seg sm" + (kind === "pods" ? " on" : "")} onClick={() => setKind("pods")}>{tt("Podcast bölümleri")} {pods.length || ""}</button>
@@ -1694,6 +1841,38 @@ function HistoryView() {
 type MiniTab = "lists" | "recent" | "pods";
 /** What's playing with its buttons, and your lists / recent songs / podcasts to start something
  *  without leaving the page. */
+/** The volume as a small drop-down: a button with the level, a slider under it. */
+function MiniVolume({ vol }: { vol: number }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const last = useRef(70);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
+    document.addEventListener("mousedown", away);
+    window.addEventListener("keydown", esc, true);
+    return () => { document.removeEventListener("mousedown", away); window.removeEventListener("keydown", esc, true); };
+  }, [open]);
+  const v = Math.round(Math.min(100, vol));
+  return (
+    <div className="mini-vol" ref={box}>
+      <button className={"mu-ib" + (open ? " on" : "")} aria-label={tt("Ses düzeyi")} title={tt("Ses düzeyi")} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <Icon d={I.vol} size={16} />{v === 0 && <span className="mu-mute" aria-hidden />}
+      </button>
+      {open && (
+        <div className="mini-vol-pop" role="dialog" aria-label={tt("Ses düzeyi")}>
+          <button className="mu-ib" aria-label={v > 0 ? tt("Sesi kapat") : tt("Sesi aç")} title={v > 0 ? tt("Sesi kapat") : tt("Sesi aç")}
+            onClick={() => { if (v > 0) { last.current = v; setProp("volume", 0); } else setProp("volume", last.current || 70); }}>
+            <Icon d={I.vol} size={15} />{v === 0 && <span className="mu-mute" aria-hidden />}
+          </button>
+          <input className="vol" type="range" min={0} max={100} value={v} aria-label={tt("Ses düzeyi")} onChange={(e) => setProp("volume", Number(e.target.value))} />
+          <span className="mini-vol-n">{v}</span>
+        </div>
+      )}
+    </div>
+  );
+}
 export function MiniMusic() {
   const m = useMusic();
   const c = m.now;
@@ -1713,6 +1892,7 @@ export function MiniMusic() {
           <button className="mu-ib mini-pp" aria-label={m.paused ? tt("Çal") : tt("Duraklat")} onClick={() => toggleMusicPause()}>
             <Icon d={m.paused ? I.play : I.pause} fill size={16} /></button>
           {!c.radio && <button className="mu-ib" aria-label={tt("Sonraki")} onClick={() => nextTrack()}><Icon d={NEXT} size={16} /></button>}
+          <MiniVolume vol={m.volume} />
         </div>
       ) : <div className="muted small mini-none">{tt("Şu an müzik çalmıyor. Aşağıdan bir şey seç:")}</div>}
       <div className="seg-row mini-tabs">
@@ -1723,7 +1903,7 @@ export function MiniMusic() {
       <div className="mini-list">
         {tab === "lists" && (lists.length ? lists.map((p) => (
           <button key={p.id} className={"mini-row" + (m.from === p.id ? " on" : "")} onClick={() => playQueue(p.items, 0, false, p.id)} {...hoverSong(p.items[0])}>
-            <Cover src={p.cover} name={p.name} size={36} radius={6} icon={NOTE} />
+            <PlaylistArt p={p} size={36} radius={6} />
             <span className="mini-t"><b className="ellipsis">{p.name}</b><span className="muted small">{tt("{0} şarkı", p.items.length)}</span></span>
           </button>
         )) : <div className="muted small">{tt("Henüz listen yok.")}</div>)}
@@ -1856,18 +2036,23 @@ export const isSpotifyList = (u: string) => /open\.spotify\.com\/(intl-[a-z-]+\/
 export function SpotifyMove({ url, onDone }: { url: string; onDone: (name: string, id: string) => void }) {
   const [list, setList] = useState<SpList | null | undefined>(undefined);
   const [err, setErr] = useState("");
+  const [cancelled, setCancelled] = useState(false);
   useEffect(() => {
     let alive = true;
     spotifyList(url).then((l) => { if (!alive) return; setList(l); if (!l) setErr(tt("Bu listenin şarkıları okunamadı (gizli bir liste olabilir)")); })
       .catch((e) => { if (alive) { setList(null); setErr(String(e)); } });
     return () => { alive = false; };
   }, [url]);
-  if (list === undefined) return <div className="muted small pulse">{tt("Listedeki şarkılar okunuyor…")}</div>;
+  if (cancelled) return <div className="muted small">{tt("Liste aktarımı iptal edildi.")}</div>;
+  if (list === undefined) return <div className="sp-wait"><span className="muted small pulse">{tt("Listedeki şarkılar okunuyor…")}</span><button className="chip sm" onClick={() => setCancelled(true)}>{tt("İptal")}</button></div>;
   if (!list) return <div className="plugin-msg small err">{err}</div>;
-  return <div className="sp-in-chat"><SpotifyImport list={list} onDone={(id) => onDone(list.name, id)} /></div>;
+  return <div className="sp-in-chat"><SpotifyImport list={list} onDone={(id) => onDone(list.name, id)} onCancel={() => setCancelled(true)} /></div>;
 }
 
-function SpotifyImport({ list, onDone }: { list: SpList; onDone: (id: string) => void }) {
+function SpotifyImport({ list, onDone, onCancel }: { list: SpList; onDone: (id: string) => void; onCancel: () => void }) {
+  // "Aramayı durdur": the songs not searched yet stay unmatched; the list can be made from what was found
+  const stopped = useRef(false);
+  const [halted, setHalted] = useState(false);
   const [rows, setRowsState] = useState<ShiftRow[]>(() => list.tracks.map((sp) => ({ sp, on: true })));
   const rowsRef = useRef(rows);
   const setRows = (f: (r: ShiftRow[]) => ShiftRow[]) => setRowsState((r) => (rowsRef.current = f(r)));
@@ -1876,7 +2061,7 @@ function SpotifyImport({ list, onDone }: { list: SpList; onDone: (id: string) =>
   useEffect(() => {
     let alive = true, next = 0, reading = !!list.more?.length;
     const worker = async () => {
-      while (alive) {
+      while (alive && !stopped.current) {
         if (next < rowsRef.current.length) {
           const i = next++;
           const sp = rowsRef.current[i].sp;
@@ -1891,7 +2076,7 @@ function SpotifyImport({ list, onDone }: { list: SpList; onDone: (id: string) =>
     const readMore = async () => {
       const ids = list.more ?? [];
       try {
-        for (let k = 0; alive && k < ids.length; k += 6) {
+        for (let k = 0; alive && !stopped.current && k < ids.length; k += 6) {
           // one song that can't be read is skipped, not the end of the move
           const got = await Promise.all(ids.slice(k, k + 6).map((id) => spotifyTrack(id).catch(() => null)));
           if (!alive) return;
@@ -1914,7 +2099,8 @@ function SpotifyImport({ list, onDone }: { list: SpList; onDone: (id: string) =>
     upd(i, { alts: hits });
   };
   const searched = rows.filter((r) => r.hit !== undefined).length;
-  const searching = moreLeft > 0 || searched < rows.length;
+  const searching = !halted && (moreLeft > 0 || searched < rows.length);
+  const halt = () => { stopped.current = true; setHalted(true); setMoreLeft(0); setRows((r) => r.map((x) => (x.hit === undefined ? { ...x, hit: null, on: false } : x))); };
   const found = rows.filter((r) => r.hit).length;
   const cut = list.total && list.total > rows.length && !moreLeft ? list.total : 0;
   const chosen = rows.filter((r) => r.on && r.hit);
@@ -1979,6 +2165,8 @@ function SpotifyImport({ list, onDone }: { list: SpList; onDone: (id: string) =>
       </div>
       <div className="muted small">{tt("Hiçbir şey indirilmez: liste YouTube linklerinden oluşur, şarkılar oradan çalınır (yt-dlp ile). Ne dinlediğin senin sorumluluğunda.")}</div>
       <div className="modal-actions">
+        <button className="chip" onClick={() => { stopped.current = true; onCancel(); }}>{tt("İptal")}</button>
+        {searching && <button className="chip" onClick={halt}>{tt("Aramayı durdur")}</button>}
         {!searching && missing.length > 0 && <button className="chip" onClick={goMissing}>{tt("Bulunamayan şarkıya git ({0})", missing.length)}</button>}
         <button className="primary" disabled={searching || !chosen.length} onClick={save}>
           {searching ? tt("Aranıyor…") : tt("Devam · {0} şarkıyla “{1}” listesini oluştur", chosen.length, list.name)}</button>
@@ -2052,9 +2240,9 @@ export function MusicLinkDialog({ onClose, initial }: { onClose: () => void; ini
           <input autoFocus value={v} onChange={(e) => setV(e.target.value)} placeholder={tt("https://… ya da şarkı adı")} />
           <button className="primary sm" disabled={!v.trim() || !!busy}>{tt("Aç")}</button>
         </form>
-        {busy && <div className="muted small pulse">{busy}</div>}
+        {busy && <div className="sp-wait"><span className="muted small pulse">{busy}</span><button className="chip sm" onClick={() => { run.current++; setBusy(""); }}>{tt("İptal")}</button></div>}
         {err && <div className="plugin-msg small err">{err}</div>}
-        {list && <SpotifyImport key={list.name + list.tracks.length} list={list} onDone={(id) => { onClose(); openPlaylist?.(id); }} />}
+        {list && <SpotifyImport key={list.name + list.tracks.length} list={list} onDone={(id) => { onClose(); openPlaylist?.(id); }} onCancel={() => setList(null)} />}
         {choices && (
           <>
             <div className="mu-ask">{tt("Bu mu? “{0}” için YouTube'da bulunanlar:", choices.q)}</div>
@@ -2114,6 +2302,7 @@ export function MusicDock({ mp }: { mp: MP }) {
   const c = m.now;
   // the end of a song: the next one (or the same, on repeat one)
   useEffect(() => { if (!P.loading && P.paused !== mp.paused) { P.paused = mp.paused; changed(); } }, [mp.paused, m.loading]);
+  useEffect(() => { if (P.volume !== mp.volume) { P.volume = mp.volume; changed(); } }, [mp.volume]);
   useEffect(() => { if (c && !c.radio) musicTime = mp.time; }, [Math.floor(mp.time)]);
   const endedFor = useRef<string | null>(null);
   // mpv may report a YouTube song by the media address yt-dlp resolved, not the page link
@@ -2143,6 +2332,13 @@ export function MusicDock({ mp }: { mp: MP }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [c?.src, mp.time, m.view]);
+  // the mouse back button (and Alt+←) closes the big player first
+  useEffect(() => {
+    if (!m.view) return;
+    const back = (e: Event) => { e.preventDefault(); setView(false); };
+    window.addEventListener("luna-back", back);
+    return () => window.removeEventListener("luna-back", back);
+  }, [m.view]);
   if (!c) return null;
   // radio: the station sends what's on air as the stream title
   const onAir = c.radio && mp.title && mp.title !== c.src && !/^https?:/.test(mp.title) ? mp.title : null;
@@ -2206,6 +2402,7 @@ function Seek({ mp, big }: { mp: MP; big?: boolean }) {
 function NowPlaying({ mp, onAir }: { mp: MP; onAir: string | null }) {
   const m = useMusic();
   const c = m.now!;
+  const lastVol = useRef(70);
   const [tab, setTab] = useState<"lyrics" | "queue">("lyrics");
   const [ly, setLy] = useState<{ synced: Line[]; plain: string } | null | undefined>(undefined);
   const [epAbout, setEpAbout] = useState<string | null | undefined>(undefined);
@@ -2244,6 +2441,7 @@ function NowPlaying({ mp, onAir }: { mp: MP; onAir: string | null }) {
             <button className={"seg sm" + (tab === "queue" ? " on" : "")} onClick={() => setTab("queue")}>{tt("Sıradakiler")}</button>
           </div>
         )}
+        {!c.radio && !c.podcast && !c.book && <button className="chip mu-np-like" title={tt("Asistan bu şarkıya benzeyen şarkıları bulur; istersen bir listeni onlarla genişletir ya da yeni liste yapar")} onClick={() => askAssistant(likeThisSongs(c.title, c.artist, loadMusicPlaylists().find((p) => p.id === m.from)?.name), tt("“{0}” gibi şarkılar bul", c.title))}>✦ {tt("Bunun gibi şarkılar bul")}</button>}
         <button className="round" aria-label={tt("Asistana sor")} title={tt("Asistana sor")} onClick={openAssistant}>
           <Icon d={I.chat} size={19} />
         </button>
@@ -2252,9 +2450,14 @@ function NowPlaying({ mp, onAir }: { mp: MP; onAir: string | null }) {
         <div className="mu-np-left">
           <Cover src={c.radio ? c.favicon : c.cover} name={c.album ?? c.title} size="min(400px, 38vh)" radius={20} icon={c.radio ? RADIO_ICON : NOTE} />
           <div className="mu-np-title">
-            {!c.radio && <LikeBtn q={c} big />}
+            {!c.radio && <span className="mu-np-votes"><LikeBtn q={c} big />
+              {!c.podcast && <button className={"mu-ib mu-dis big" + (isDisliked(c.src) ? " on" : "")} aria-pressed={isDisliked(c.src)}
+                aria-label={isDisliked(c.src) ? tt("Beğenmediklerimden çıkar") : tt("Beğenmedim")} title={isDisliked(c.src) ? tt("Beğenmediklerimden çıkar") : tt("Beğenmedim")}
+                onClick={(e) => { if (toggleDislike(c)) askSongRating(c, e.currentTarget); }}><Icon d={THUMB_DOWN} size={20} />{isDisliked(c.src) && songRating(c.src) ? <span className="vote-n">{songRating(c.src)}</span> : null}</button>}</span>}
             <h1>{onAir ?? c.title}</h1>
             <div className="muted">{c.radio ? c.title : [c.artist, c.album].filter(Boolean).join(" · ")}</div>
+            {/* a liked song: what made it — the music taste learns from this, apart from films and books */}
+            {!c.radio && !c.podcast && !c.book && (isLiked(c.src) || isDisliked(c.src)) && <ReasonPicker key={isLiked(c.src) ? "like" : "dislike"} kind="music" itemKey={songKey(c)} vote={isLiked(c.src) ? "like" : "dislike"} compact name={c.title + (c.artist ? " — " + c.artist : "")} />}
           </div>
         </div>
         <div className="mu-np-right" ref={box}>
@@ -2298,6 +2501,14 @@ function NowPlaying({ mp, onAir }: { mp: MP; onAir: string | null }) {
           {!c.radio && <button className="mu-ib" aria-label={tt("Önceki")} onClick={() => prevTrack(mp.time)}><Icon d={PREV} fill size={22} /></button>}
           <button className="mu-play big" aria-label={mp.paused ? tt("Oynat") : tt("Duraklat")} onClick={() => toggleMusicPause()}><Icon d={mp.paused ? I.play : I.pause} fill size={24} /></button>
           {!c.radio && <button className="mu-ib" aria-label={tt("Sonraki")} onClick={() => nextTrack()}><Icon d={NEXT} fill size={22} /></button>}
+          <div className="mu-np-vol">
+            <button className="mu-ib" aria-label={mp.volume > 0 ? tt("Sesi kapat") : tt("Sesi aç")} title={mp.volume > 0 ? tt("Sesi kapat") : tt("Sesi aç")}
+              onClick={() => { if (mp.volume > 0) { lastVol.current = mp.volume; setProp("volume", 0); } else setProp("volume", lastVol.current || 70); }}>
+              <Icon d={I.vol} size={18} />{mp.volume === 0 && <span className="mu-mute" aria-hidden />}
+            </button>
+            <input className="vol" type="range" min={0} max={100} value={Math.min(100, mp.volume)} aria-label={tt("Ses düzeyi")} onChange={(e) => setProp("volume", Number(e.target.value))} />
+            <span className="mu-np-volnum">{Math.round(Math.min(100, mp.volume))}</span>
+          </div>
         </div>
       </div>
     </div>,

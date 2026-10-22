@@ -7,6 +7,7 @@ import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { FilmDecisionPanel } from "./FilmDecision";
+import { Switch } from "./FilmReviewAi";
 import { askAssistant, TasteButtons, TrText, youtubeTrailer } from "./Taste";
 import { PluginSettings } from "./Web";
 import { AddonSettings } from "./Addons";
@@ -18,7 +19,7 @@ import { SubAppearance } from "./PlayerMenu";
 import { LibraryToolbar } from "./LibraryToolbar";
 import { libraryStats, selectLibrary, LibrarySort, LibraryFilter } from "./libraryTools";
 import { BackupSettings } from "./Backup";
-import { AI_PROVIDERS, AiProvider, aiModels, aiProvider } from "./ai";
+import { AI_PROVIDERS, AiProvider, AiProfile, aiModels, aiProfiles, saveAiProfiles, profileKeyName, PROFILE_SLOTS } from "./ai";
 import {
   besideCopies, Episode, FolderKind, fmtSize, IMG, Item, qualityBadges, Recent, renameVideo, SearchHit, searchTmdb, seasonEpisodes, sidecarSubs, store, flushSecrets,
   useMediaInfo, useThumb,
@@ -146,13 +147,13 @@ export function ModeSwitch({ mode, setMode }: { mode: Mode; setMode: (m: Mode) =
   );
 }
 
-export function Header({ mode, setMode, tabs: modeTabs, view, setView, query, setQuery, scanning, onOpen, onSettings, onTorrent, downloading, onChat, onMine }: {
+export function Header({ mode, setMode, tabs: modeTabs, view, setView, query, setQuery, scanning, onOpen, onSettings, onTorrent, downloading, onMine }: {
   mode: Mode; setMode: (m: Mode) => void; tabs?: [string, string][];
   view: string; setView: (v: any) => void; query: string; setQuery: (q: string) => void;
-  scanning: boolean; onOpen: () => void; onSettings: () => void; onTorrent: () => void; downloading: number; onChat: () => void; onMine: () => void;
+  scanning: boolean; onOpen: () => void; onSettings: () => void; onTorrent: () => void; downloading: number; onMine: () => void;
 }) {
   const film = mode === "film";
-  const tabs: [string, string][] = modeTabs ?? [["home", tt("Ana sayfa")], ["discover", tt("Keşfet")], ["movies", tt("Filmler")], ["shows", tt("Diziler")], ["folders", tt("Klasörler")], ["downloads", tt("İndirmeler")], ["recs", tt("Öneriler")]];
+  const tabs: [string, string][] = modeTabs ?? [["home", tt("Ana sayfa")], ["discover", tt("Keşfet")], ["movies", tt("Filmler")], ["shows", tt("Diziler")], ["recs", tt("Öneriler")], ["folders", tt("Klasörler")], ["downloads", tt("İndirmeler")]];
   // On a narrow window the tabs scroll sideways: the wheel scrolls them, the edges fade where more tabs wait,
   // and the open tab is brought into view
   const nav = useRef<HTMLElement>(null);
@@ -211,9 +212,6 @@ export function Header({ mode, setMode, tabs: modeTabs, view, setView, query, se
         <input value={query} placeholder={film ? tt("Ara") : mode === "music" ? tt("Müzikte ara") : tt("Kitaplarda ara")} aria-label={film ? tt("Kütüphanede ara") : mode === "music" ? tt("Müzikte ara") : tt("Kitaplarda ara")}
           onChange={(e) => { setQuery(e.target.value); if (e.target.value && view === "home") setView(film ? "movies" : "library"); }} />
       </label>
-      <button className="ghost sm hdr-btn" onClick={onChat} title={tt("Asistan (Alt+A)")} aria-label={tt("Asistan")}>
-        <Icon d={I.chat} size={18} /><span className="lbl">{tt("Asistan")}</span>
-      </button>
       <button className="ghost sm hdr-btn" onClick={onTorrent} title={tt("Bağlantı aç: magnet, torrent ya da video adresi (Ctrl+N)")} aria-label={tt("Bağlantı aç")}>
         <Icon d={film ? I.magnet : LINK} size={18} /><span className="lbl">{tt("Bağlantı")}</span>
       </button>
@@ -990,12 +988,17 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
   const [gemModel, setGemModel] = useState(store.get("geminiModel") ?? "gemini-3.1-flash-lite");
   const [models, setModels] = useState<[string, string][]>([]);
   // the assistant's service: Gemini, OpenAI, Claude or any OpenAI-compatible base URL
-  const [prov, setProv] = useState<AiProvider>(aiProvider);
+  const [prov, setProv] = useState<AiProvider>(() => (store.get("aiProvider") as AiProvider) || "gemini");
+  // API profiles: named service + key + model sets; the assistant can use one ("" = the settings below)
+  const [profs, setProfs] = useState<AiProfile[]>(aiProfiles);
+  const [profKeys, setProfKeys] = useState<Record<number, string>>(() => Object.fromEntries(Array.from({ length: PROFILE_SLOTS }, (_, i) => [i + 1, store.get(profileKeyName(i + 1)) ?? ""])));
+  const [actProf, setActProf] = useState(() => (aiProfiles().some((x) => String(x.slot) === store.get("aiProfile")) ? store.get("aiProfile")! : ""));
   // the AI that reads Letterboxd reviews ("Worth watching?"): "" = the assistant's
   const [rvProv, setRvProv] = useState<string>(store.get("reviewAiProvider") ?? "");
   const [rvModel, setRvModel] = useState(store.get("reviewAiModel") ?? "");
-  const [rvCount, setRvCount] = useState(() => { const n = Number(store.get("reviewAiCount")); return n >= 10 && n <= 100 ? n : 50; });
+  const [rvCount, setRvCount] = useState(() => { const n = Number(store.get("reviewAiCount")); return [10, 20, 30, 50, 75, 100].includes(n) ? n : n >= 10 && n <= 100 ? Math.round(n / 10) * 10 : 50; });
   const [rvNote, setRvNote] = useState(store.get("reviewAiNote") ?? "");
+  const [rvSpoil, setRvSpoil] = useState(store.get("reviewAiSpoilers") !== "0");
   const [aiKeys, setAiKeys] = useState<Record<string, string>>(() => Object.fromEntries(AI_PROVIDERS.filter((x) => x.id !== "gemini").map((x) => [x.keyName, store.get(x.keyName) ?? ""])));
   const [aiModelsBy, setAiModelsBy] = useState<Record<string, string>>(() => Object.fromEntries(AI_PROVIDERS.filter((x) => x.id !== "gemini").map((x) => [x.id, store.get("aiModel:" + x.id) ?? x.model])));
   const [base, setBase] = useState(store.get("aiBase") ?? "");
@@ -1059,9 +1062,14 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
     for (const [k, v] of Object.entries(aiKeys)) store.set(k, v.trim());
     for (const [id, m] of Object.entries(aiModelsBy)) store.set("aiModel:" + id, m.trim());
     store.set("aiBase", base.trim());
-    store.set("reviewAiProvider", rvProv);
+    const keep = profs.map((x) => ({ ...x, name: x.name.trim() || tt("Profil {0}", x.slot), model: x.model.trim(), base: x.base.trim() }));
+    saveAiProfiles(keep);
+    for (let i = 1; i <= PROFILE_SLOTS; i++) store.set(profileKeyName(i), keep.some((x) => x.slot === i) ? (profKeys[i] ?? "").trim() : "");
+    store.set("aiProfile", keep.some((x) => String(x.slot) === actProf) ? actProf : "");
+    store.set("reviewAiProvider", rvProv.startsWith("profile:") && !keep.some((x) => "profile:" + x.slot === rvProv) ? "" : rvProv);
     store.set("reviewAiModel", rvModel.trim());
     store.set("reviewAiCount", String(rvCount));
+    store.set("reviewAiSpoilers", rvSpoil ? "1" : "0");
     store.set("reviewAiNote", rvNote.trim().slice(0, 1000));
     store.set("geminiModel", gemModel.trim() || "gemini-flash-latest");
     await flushSecrets();
@@ -1172,7 +1180,37 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                   </div>
                   <div className="set-card">
                     <div className="field">
+                      <span>{tt("API profilleri")}</span>
+                      <div className="set-hint">{tt("Birden fazla anahtar ve model kaydet (ör. iş OpenAI'si, ev Gemini'si, yerel Ollama). Asistan ve yorum analizi ayrı ayrı bir profil kullanabilir.")}</div>
+                    </div>
+                    {profs.map((x) => {
+                      const sp = AI_PROVIDERS.find((a) => a.id === x.provider)!;
+                      const edit = (c: Partial<AiProfile>) => setProfs((l) => l.map((y) => (y.slot === x.slot ? { ...y, ...c } : y)));
+                      return (
+                        <div key={x.slot} className="set-prof">
+                          <div className="set-prof-top">
+                            <input className="set-prof-name" value={x.name} maxLength={60} onChange={(e) => edit({ name: e.target.value })} placeholder={tt("Profil {0}", x.slot)} aria-label={tt("Profil adı")} />
+                            <select value={x.provider} onChange={(e) => edit({ provider: e.target.value as AiProvider, model: "" })} aria-label={tt("Servis")}>
+                              {AI_PROVIDERS.map((a) => <option key={a.id} value={a.id}>{a.id === "custom" ? tt("Başka (base URL)") : a.name}</option>)}
+                            </select>
+                            <label className="look-check set-radio"><input type="radio" name="actProf" checked={actProf === String(x.slot)} onChange={() => setActProf(String(x.slot))} />{tt("Asistan kullansın")}</label>
+                            <button className="chip" onClick={() => { setProfs((l) => l.filter((y) => y.slot !== x.slot)); if (actProf === String(x.slot)) setActProf(""); if (rvProv === "profile:" + x.slot) setRvProv(""); }}>{tt("Sil")}</button>
+                          </div>
+                          {x.provider === "custom" && <label>{tt("Base URL")}<input value={x.base} onChange={(e) => edit({ base: e.target.value })} placeholder="https://openrouter.ai/api/v1  ·  http://localhost:11434/v1" spellCheck={false} /></label>}
+                          <KeyField label={tt("API anahtarı")} hint={x.provider === "custom" ? tt("Yerel sunucular için boş bırak") : sp.name} value={profKeys[x.slot] ?? ""} onChange={(v) => setProfKeys((m) => ({ ...m, [x.slot]: v }))} placeholder={x.provider === "openai" ? "sk-…" : x.provider === "claude" ? "sk-ant-…" : ""} url={sp.keyUrl} />
+                          <label>{tt("Model")}<input value={x.model} onChange={(e) => edit({ model: e.target.value })} placeholder={sp.model || tt("model adını yaz")} spellCheck={false} /></label>
+                        </div>
+                      );
+                    })}
+                    <div className="seg-row">
+                      {profs.length < PROFILE_SLOTS && <button className="chip" onClick={() => { const used = new Set(profs.map((x) => x.slot)); const slot = Array.from({ length: PROFILE_SLOTS }, (_, i) => i + 1).find((i) => !used.has(i))!; setProfs((l) => [...l, { slot, name: "", provider: "openai", model: "", base: "" }]); }}>+ {tt("Profil ekle")}</button>}
+                      {profs.length > 0 && <label className="look-check set-radio"><input type="radio" name="actProf" checked={actProf === ""} onChange={() => setActProf("")} />{tt("Asistan profil kullanmasın (aşağıdaki ayar)")}</label>}
+                    </div>
+                  </div>
+                  <div className="set-card">
+                    <div className="field">
                       <span>{tt("Asistanın yapay zekâsı")}</span>
+                      {actProf && <div className="set-hint">{tt("Şu an asistan \"{0}\" profilini kullanıyor; aşağıdaki ayar profil kapatılınca geçerli olur.", profs.find((x) => String(x.slot) === actProf)?.name || tt("Profil {0}", actProf))}</div>}
                       <div className="seg-row">
                         {AI_PROVIDERS.map((x) => <button key={x.id} className={"seg" + (prov === x.id ? " on" : "")} onClick={() => setProv(x.id)}>{x.id === "custom" ? tt("Başka (base URL)") : x.name}</button>)}
                       </div>
@@ -1223,20 +1261,26 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                   </div>
                   <div className="set-card">
                     <div className="field">
-                      <span>{tt("Yorum analizi (İzlemeye değer mi?)")}</span>
+                      <span>{tt("Luna Analiz")}</span>
                       <div className="seg-row">
                         <button className={"seg" + (rvProv === "" ? " on" : "")} onClick={() => { setRvProv(""); setRvModel(""); }}>{tt("Asistanla aynı")}</button>
                         {AI_PROVIDERS.map((x) => <button key={x.id} className={"seg" + (rvProv === x.id ? " on" : "")} onClick={() => { setRvProv(x.id); setRvModel(""); }}>{x.id === "custom" ? tt("Başka (base URL)") : x.name}</button>)}
+                        {profs.map((x) => <button key={"p" + x.slot} className={"seg" + (rvProv === "profile:" + x.slot ? " on" : "")} onClick={() => { setRvProv("profile:" + x.slot); setRvModel(""); }}>◆ {x.name.trim() || tt("Profil {0}", x.slot)}</button>)}
                       </div>
-                      <div className="set-hint">{tt("Film ayrıntılarındaki \"İzlemeye değer mi?\" kartı Letterboxd yorumlarını bu yapay zekâyla özetler. Anahtarlar yukarıdakiler; seçtiğin servisin anahtarı girilmiş olmalı.")}</div>
+                      <div className="set-hint">{tt("Film sayfalarındaki Luna Analiz, Letterboxd yorumlarını bu yapay zekâyla okur. Anahtarlar yukarıdakiler; seçtiğin servisin ya da profilin anahtarı girilmiş olmalı.")}</div>
                     </div>
-                    <label className="set-sub">{tt("Model")}
+                    {!rvProv.startsWith("profile:") && <label className="set-sub">{tt("Model")}
                       <input value={rvModel} onChange={(e) => setRvModel(e.target.value)} placeholder={rvProv === "" ? tt("Asistanın modeli") : rvProv === "gemini" ? gemModel || "gemini-3.1-flash-lite" : aiModelsBy[rvProv] || tt("model adını yaz")} spellCheck={false} />
-                    </label>
-                    <div className="set-hint">{tt("Boş bırakırsan o servis için yukarıda seçili model kullanılır.")}</div>
-                    <label className="set-sub">{tt("Çekilecek yorum sayısı: {0}", rvCount)}
-                      <input type="range" min={10} max={100} step={10} value={rvCount} onChange={(e) => setRvCount(Number(e.target.value))} />
-                    </label>
+                    </label>}
+                    <div className="set-hint">{rvProv.startsWith("profile:") ? tt("Profilin kendi anahtarı ve modeli kullanılır.") : tt("Boş bırakırsan o servis için yukarıda seçili model kullanılır.")}</div>
+                    <div className="field set-sub">
+                      <span>{tt("Okunacak yorum")}</span>
+                      <div className="seg-row">{[10, 20, 30, 50, 75, 100].map((n) => <button key={n} className={"seg" + (rvCount === n ? " on" : "")} onClick={() => setRvCount(n)}>{n}</button>)}</div>
+                    </div>
+                    <div className="set-row-switch">
+                      <div><b>{tt("Spoiler'lı yorumlar")}</b><span>{rvSpoil ? tt("Okunur; listede gizli durur") : tt("Hiç okunmaz, analize girmez")}</span></div>
+                      <Switch on={rvSpoil} label={tt("Spoiler'lı yorumlar")} onChange={setRvSpoil} />
+                    </div>
                     <label className="set-sub">{tt("Ek talimat (isteğe bağlı)")}
                       <textarea value={rvNote} maxLength={1000} rows={2} onChange={(e) => setRvNote(e.target.value)} placeholder={tt("Örn. Oyunculuğa ve senaryoya daha çok dikkat et, kısa yaz.")} />
                     </label>

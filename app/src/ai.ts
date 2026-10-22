@@ -10,25 +10,56 @@ export const AI_PROVIDERS: { id: AiProvider; name: string; keyName: string; mode
   { id: "claude", name: "Claude", keyName: "claudeKey", model: "claude-haiku-5-5", keyUrl: "https://console.anthropic.com/settings/keys" },
   { id: "custom", name: "Base URL", keyName: "customAiKey", model: "" },
 ];
-export const aiProvider = (): AiProvider => (store.get("aiProvider") as AiProvider) || "gemini";
+// ---------- API profiles ----------
+/** Named sets of service + key + model (+ base URL): "Work OpenAI", "Local Ollama"… The assistant
+ *  and the review AI can each use one. Keys sit in Windows' store under fixed slot names. */
+export type AiProfile = { slot: number; name: string; provider: AiProvider; model: string; base: string };
+export const PROFILE_SLOTS = 8;
+export const profileKeyName = (slot: number) => "aiProfileKey" + slot;
+export function aiProfiles(): AiProfile[] {
+  const raw = store.json<any[]>("aiProfiles", []);
+  return (Array.isArray(raw) ? raw : []).filter((x) => x && Number.isInteger(x.slot) && x.slot >= 1 && x.slot <= PROFILE_SLOTS && AI_PROVIDERS.some((p) => p.id === x.provider))
+    .map((x) => ({ slot: x.slot, name: String(x.name ?? "").trim().slice(0, 60) || "Profil " + x.slot, provider: x.provider as AiProvider, model: String(x.model ?? "").trim(), base: String(x.base ?? "").trim() }))
+    .filter((x, i, all) => all.findIndex((y) => y.slot === x.slot) === i);
+}
+export const saveAiProfiles = (l: AiProfile[]) => store.set("aiProfiles", JSON.stringify(l));
+export const aiProfile = (slot: unknown) => aiProfiles().find((x) => String(x.slot) === String(slot)) ?? null;
+const cleanBase = (b: string) => b.trim().replace(/\/+$/, "").replace(/\/chat\/completions$/, "");
+/** What actually answers: a service with its key, model and base URL. */
+export type AiUse = { provider: AiProvider; model: string; key: string; base: string; label: string };
+function useOf(pr: AiProfile): AiUse {
+  const key = store.get(profileKeyName(pr.slot)) ?? "";
+  const base = cleanBase(pr.base);
+  return { provider: pr.provider, model: pr.model || spec(pr.provider).model, key: pr.provider === "custom" ? (base ? key || "-" : "") : key, base, label: pr.name };
+}
+/** The assistant's profile, if one is chosen (Settings › Accounts). */
+const activeProfile = () => aiProfile(store.get("aiProfile"));
+
+export const aiProvider = (): AiProvider => activeProfile()?.provider ?? ((store.get("aiProvider") as AiProvider) || "gemini");
 const spec = (p = aiProvider()) => AI_PROVIDERS.find((x) => x.id === p) ?? AI_PROVIDERS[0];
-export const aiModel = (p = aiProvider()) => (p === "gemini" ? store.get("geminiModel") : store.get("aiModel:" + p)) || spec(p).model;
+export const aiModel = (p = aiProvider()) => {
+  const pr = activeProfile();
+  if (pr && pr.provider === p) return pr.model || spec(p).model;
+  return (p === "gemini" ? store.get("geminiModel") : store.get("aiModel:" + p)) || spec(p).model;
+};
 /** "https://openrouter.ai/api/v1", "http://localhost:11434/v1"… (OpenAI-compatible) */
-export const aiBase = () => (store.get("aiBase") ?? "").trim().replace(/\/+$/, "").replace(/\/chat\/completions$/, "");
+export const aiBase = () => { const pr = activeProfile(); return cleanBase(pr && pr.provider === "custom" ? pr.base : store.get("aiBase") ?? ""); };
 /** The assistant can answer: a key for the chosen service (a local server at a base URL may need none). */
 export function aiKey(p: AiProvider = aiProvider()): string {
+  const pr = activeProfile();
+  if (pr && pr.provider === p) return useOf(pr).key;
   const k = store.get(spec(p).keyName) ?? "";
   if (p === "custom") return aiBase() ? k || "-" : "";
   return k;
 }
 export const aiReady = () => !!aiKey();
-export const aiName = () => (aiProvider() === "custom" ? aiBase().replace(/^https?:\/\//, "").split("/")[0] || "Base URL" : spec().name);
+export const aiName = () => activeProfile()?.name ?? (aiProvider() === "custom" ? aiBase().replace(/^https?:\/\//, "").split("/")[0] || "Base URL" : spec().name);
 
 const URLS = {
   openai: "https://api.openai.com/v1",
   claude: "https://api.anthropic.com/v1",
 };
-const endpoint = (p: AiProvider) => (p === "claude" ? URLS.claude : p === "custom" ? aiBase() : URLS.openai);
+const endpoint = (p: AiProvider, base?: string) => (p === "claude" ? URLS.claude : p === "custom" ? base || aiBase() : URLS.openai);
 
 /** The models of a provider, for the settings list. */
 export async function aiModels(p: AiProvider, key: string, base?: string): Promise<string[]> {
@@ -164,39 +195,48 @@ function fromAnthropic(r: any) {
 
 /** One request to the chosen non-Gemini provider, in and out in Gemini's format. Google Search
  *  (a Gemini-only tool) is left out; the caller sees no groundingMetadata and treats it as unsourced. */
-export async function otherAi(body: any, use?: { provider: AiProvider; model: string }): Promise<{ r: any; id: string; noSearch: boolean }> {
+export async function otherAi(body: any, use?: Partial<AiUse> & { provider: AiProvider }): Promise<{ r: any; id: string; noSearch: boolean }> {
   const p = use?.provider ?? aiProvider();
   const model = use?.model || aiModel(p);
   if (!model) throw new Error(p === "custom" ? "Ayarlar › Hesaplar ve anahtarlar: model adını yaz" : "Model yok");
   const noSearch = (body.tools ?? []).some((t: any) => t.google_search || t.googleSearch);
-  const key = aiKey(p) === "-" ? "" : aiKey(p);
+  const k = use?.key ?? aiKey(p);
+  const key = k === "-" ? "" : k;
   if (p === "claude") {
     const r = await invoke<any>("llm_post", { kind: "anthropic", url: endpoint(p) + "/messages", key, body: toAnthropic(body, model) });
     return { r: fromAnthropic(r), id: model, noSearch };
   }
-  const r = await invoke<any>("llm_post", { kind: "openai", url: endpoint(p) + "/chat/completions", key, body: toOpenAi(body, model) });
+  const r = await invoke<any>("llm_post", { kind: "openai", url: endpoint(p, use?.base) + "/chat/completions", key, body: toOpenAi(body, model) });
   return { r: fromOpenAi(r), id: model, noSearch };
 }
 
 // ---------- The AI that reads film reviews ("Worth watching?") ----------
-/** Settings › Accounts: its own service and model ("" = the assistant's), how many Letterboxd
- *  reviews to read and an extra instruction. The keys are the ones entered for the assistant. */
-export type ReviewAi = { provider: AiProvider; model: string; count: number; note: string };
+/** Settings › Accounts: its own service or API profile ("" = the assistant's), model, how many
+ *  Letterboxd reviews to read and an extra instruction. */
+export type ReviewAi = { provider: AiProvider; model: string; count: number; note: string; spoilers: boolean; use: AiUse };
 export function reviewAi(): ReviewAi {
-  const p = (store.get("reviewAiProvider") as AiProvider) || aiProvider();
   const n = Number(store.get("reviewAiCount"));
-  return { provider: AI_PROVIDERS.some((x) => x.id === p) ? p : aiProvider(), model: (store.get("reviewAiModel") ?? "").trim() || aiModel(p), count: Number.isFinite(n) && n >= 10 && n <= 100 ? Math.round(n) : 50, note: (store.get("reviewAiNote") ?? "").slice(0, 1000) };
+  const count = Number.isFinite(n) && n >= 10 && n <= 100 ? Math.round(n) : 50;
+  const note = (store.get("reviewAiNote") ?? "").slice(0, 1000);
+  const spoilers = store.get("reviewAiSpoilers") !== "0";
+  const choice = store.get("reviewAiProvider") ?? "";
+  const pr = choice.startsWith("profile:") ? aiProfile(choice.slice(8)) : null;
+  if (pr) { const use = useOf(pr); return { provider: pr.provider, model: use.model, count, note, spoilers, use }; }
+  const p = AI_PROVIDERS.some((x) => x.id === choice) ? (choice as AiProvider) : aiProvider();
+  const model = (store.get("reviewAiModel") ?? "").trim() || aiModel(p);
+  const base = p === "custom" ? aiBase() : "";
+  const label = !choice && activeProfile() ? aiName() : p === "custom" ? base.replace(/^https?:\/\//, "").split("/")[0] || "Base URL" : spec(p).name;
+  return { provider: p, model, count, note, spoilers, use: { provider: p, model, key: aiKey(p), base, label } };
 }
-export const reviewAiName = (r = reviewAi()) => (r.provider === "custom" ? aiBase().replace(/^https?:\/\//, "").split("/")[0] || "Base URL" : spec(r.provider).name) + " · " + r.model;
+export const reviewAiName = (r = reviewAi()) => r.use.label + " · " + r.model;
 
 /** One JSON answer from the review AI: the request in Gemini's shape, sent to whichever service is chosen. */
-export async function reviewAiJson(system: string, user: string): Promise<any> {
-  const r = reviewAi();
-  if (!aiKey(r.provider)) throw new Error("nokey");
+export async function reviewAiJson(system: string, user: string, r = reviewAi()): Promise<any> {
+  if (!r.use.key) throw new Error("nokey");
   const body = { systemInstruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts: [{ text: user }] }], generationConfig: { responseMimeType: "application/json", temperature: 0.3 } };
   const res = r.provider === "gemini"
-    ? await invoke<any>("gemini", { key: aiKey("gemini"), model: r.model, body })
-    : (await otherAi(body, { provider: r.provider, model: r.model })).r;
+    ? await invoke<any>("gemini", { key: r.use.key, model: r.model, body })
+    : (await otherAi(body, r.use)).r;
   const text = (res?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? "").join("");
   const json = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
   return JSON.parse(json);

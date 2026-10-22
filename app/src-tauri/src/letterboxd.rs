@@ -215,13 +215,16 @@ pub async fn read(url: &str, max_pages: u32, with_lists: bool, progress: Progres
 
 // ---------- A film's reviews (for "Worth watching?") ----------
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct Review {
     pub author: String,
     /// 0.5 – 5 stars, if the reviewer rated it
     pub stars: Option<f32>,
     pub spoiler: bool,
     pub text: String,
+    /// Long reviews come cut short in the list ("…more"); their whole text is at this address.
+    #[serde(skip)]
+    pub full: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -249,6 +252,7 @@ fn parse_reviews(html: &str) -> Vec<Review> {
     let spoiler = Selector::parse(".js-spoiler-container").unwrap();
     let body = Selector::parse(".js-review-body").unwrap();
     let para = Selector::parse("p").unwrap();
+    let collapsed = Selector::parse(".collapsed-text").unwrap();
     let squash = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut out = vec![];
     for a in doc.select(&article) {
@@ -263,13 +267,24 @@ fn parse_reviews(html: &str) -> Vec<Review> {
             author: a.select(&name).next().map(|n| n.text().collect::<String>().trim().to_string()).unwrap_or_default(),
             stars: a.select(&rating).next().and_then(|r| r.value().attr("aria-label")).and_then(stars_of),
             spoiler: a.select(&spoiler).next().is_some(),
+            full: b.select(&collapsed).next().and(b.value().attr("data-full-text-url")).map(|u| u.to_string()),
             text,
         });
     }
     out
 }
 
-fn urlencoding(s: &str) -> String {
+/// The whole text of a long review (the "/s/full-text/viewing:…/" answer: its paragraphs).
+fn parse_full_text(html: &str) -> String {
+    let doc = Html::parse_fragment(html);
+    let para = Selector::parse("p").unwrap();
+    let squash = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let paras: Vec<String> = doc.select(&para).map(|p| squash(p.text().collect())).filter(|t| !t.is_empty()).collect();
+    let text = if paras.is_empty() { squash(doc.root_element().text().collect()) } else { paras.join("\n") };
+    text.chars().take(6000).collect()
+}
+
+pub(crate) fn urlencoding(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
@@ -316,7 +331,7 @@ async fn film_page(client: &reqwest::Client, tmdb: Option<u64>, tv: bool, title:
 /// One page as text. Letterboxd turns away reqwest's connection on its review pages (403) but not
 /// Windows' own curl.exe (System32, since Windows 10 1803), so that is tried first; the address is
 /// always a letterboxd.com one built here.
-async fn get_page(client: &reqwest::Client, url: &str) -> Result<String, String> {
+pub(crate) async fn get_page(client: &reqwest::Client, url: &str) -> Result<String, String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -352,7 +367,9 @@ async fn get_page(client: &reqwest::Client, url: &str) -> Result<String, String>
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36";
 
 /// Up to `count` reviews of a film, most popular first (Letterboxd's "Review Activity" order).
-pub async fn reviews(tmdb: Option<u64>, tv: bool, title: &str, year: Option<&str>, count: usize, progress: Progress<'_>) -> Result<Reviews, String> {
+/// `found` gets each page's new reviews as they arrive (the card shows them scrolling by).
+/// `spoilers: false` leaves out the reviews Letterboxd marks as containing spoilers.
+pub async fn reviews(tmdb: Option<u64>, tv: bool, title: &str, year: Option<&str>, count: usize, spoilers: bool, progress: Progress<'_>, found: &(dyn Fn(&[Review]) + Send + Sync)) -> Result<Reviews, String> {
     let client = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36")
         .default_headers({
@@ -369,21 +386,38 @@ pub async fn reviews(tmdb: Option<u64>, tv: bool, title: &str, year: Option<&str
     let url = film_page(&client, tmdb, tv, title, year).await?;
     let mut out: Vec<Review> = vec![];
     // 12 reviews a page; one page more in case some are empty or repeated
-    for page in 1..=(count / 12 + 2) {
+    for page in 1..=(count / 12 + if spoilers { 2 } else { 5 }) {
         let u = if page == 1 { format!("{url}/reviews/by/activity/") } else { format!("{url}/reviews/by/activity/page/{page}/") };
-        let found = match get_page(&client, &u).await {
+        let page_reviews = match get_page(&client, &u).await {
             Ok(html) => parse_reviews(&html),
             Err(e) if page == 1 => return Err(tr!("Yorumlar açılamadı ({})", "Couldn't open the reviews ({})", e)),
             Err(_) => break,
         };
-        if found.is_empty() {
+        if page_reviews.is_empty() {
             break;
         }
-        for r in found {
-            if out.len() < count && !out.iter().any(|x| x.text == r.text) {
+        let before = out.len();
+        for r in page_reviews {
+            if out.len() < count && (spoilers || !r.spoiler) && !out.iter().any(|x| x.text == r.text) {
                 out.push(r);
             }
         }
+        // the cut-short ones: read the rest
+        let long = out[before..].iter().filter(|r| r.full.is_some()).count();
+        if long > 0 {
+            progress(tr!("{} uzun yorumun devamı okunuyor", "Reading the rest of {} long reviews", long));
+        }
+        for r in out[before..].iter_mut() {
+            let Some(u) = r.full.take() else { continue };
+            if let Ok(html) = get_page(&client, &format!("https://letterboxd.com{u}")).await {
+                let whole = parse_full_text(&html);
+                if whole.chars().count() > r.text.chars().count() {
+                    r.text = whole;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        }
+        found(&out[before..]);
         progress(tr!("{} yorum alındı", "{} reviews read", out.len()));
         if out.len() >= count {
             break;
@@ -408,18 +442,29 @@ mod tests {
         assert_eq!((r[0].author.as_str(), r[0].stars, r[0].spoiler, r[0].text.as_str()), ("Ann", Some(4.5), false, "Great pacing.\nLoud score."));
         assert_eq!((r[1].stars, r[1].spoiler), (None, true));
         assert_eq!(super::stars_of("★★"), Some(2.0));
+        let cut = r#"<article class="production-viewing"><strong class="displayname">Di</strong><div class="js-review-body" data-full-text-url="/s/full-text/viewing:1/"><div class="collapsed-text"><p>Start of a long</p></div></div></article>"#;
+        let c = super::parse_reviews(cut);
+        assert_eq!(c[0].full.as_deref(), Some("/s/full-text/viewing:1/"));
+        assert!(r[0].full.is_none());
+        assert_eq!(super::parse_full_text("<p>One  two.</p>\n<p>Three.</p>"), "One two.\nThree.");
         assert_eq!(super::urlencoding("Dune 2021"), "Dune%202021");
     }
 
     #[tokio::test]
     #[ignore]
     async fn real_reviews() {
-        let r = super::reviews(Some(27205), false, "Inception", Some("2010"), 50, &|m| println!("… {m}")).await.unwrap();
+        let r = super::reviews(Some(27205), false, "Inception", Some("2010"), 10, true, &|m| println!("… {m}"), &|_| {}).await.unwrap();
         println!("{} → {} yorum; ilk: {:?}", r.url, r.reviews.len(), r.reviews.first().map(|x| (&x.author, x.stars, x.spoiler)));
-        assert!(r.reviews.len() >= 40);
-        let s = super::reviews(None, false, "Dune", Some("1984"), 12, &|_| {}).await.unwrap();
+        assert!(r.reviews.len() >= 8);
+        let s = super::reviews(None, false, "Dune", Some("1984"), 10, true, &|_| {}, &|_| {}).await.unwrap();
         println!("{} → {}", s.url, s.reviews.len());
         assert!(s.url.contains("dune"));
+        // long reviews arrive whole, not cut at ~470 characters
+        let b = super::reviews(None, false, "The Brutalist", Some("2024"), 10, false, &|_| {}, &|_| {}).await.unwrap();
+        let longest = b.reviews.iter().map(|r| r.text.chars().count()).max().unwrap_or(0);
+        println!("{} → en uzun {} harf", b.url, longest);
+        assert!(longest > 600);
+        assert!(b.reviews.iter().all(|r| !r.spoiler));
     }
 
     #[test]

@@ -8,7 +8,7 @@
  * Keep app/package.json, app/src-tauri/tauri.conf.json and app/src-tauri/Cargo.toml on the same number.
  * The Settings › General page shows VERSION_LABEL.
  */
-export const APP_VERSION = "1.4.8";
+export const APP_VERSION = "1.6.0";
 export const BUILD_AGENT = "CC";
 
 export const BUILD_AGENT_NAMES: Record<string, string> = {
@@ -20,5 +20,5 @@ export const BUILD_AGENT_NAMES: Record<string, string> = {
   G: "Gemini",
 };
 
-/** "1.4.8CC" — what the settings page and the about text show. */
+/** "1.6.0CC" — what the settings page and the about text show. */
 export const VERSION_LABEL = `${APP_VERSION}${BUILD_AGENT}`;
