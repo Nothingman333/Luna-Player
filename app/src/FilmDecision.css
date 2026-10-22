@@ -239,7 +239,9 @@
 .tp { --good: #6dbb8a; --bad: #e0706a; }
 .tp-head { display: flex; align-items: baseline; gap: 12px; width: 100%; background: none; border: 0; padding: 0; margin: 32px 0 14px; color: inherit; font: inherit; cursor: pointer; text-align: left; }
 .tp-head h2 { font-family: Sora, sans-serif; font-size: 18px; margin: 0; }
-.tp-chev { color: var(--muted); font-size: 12px; }
+.tp-chev { flex:none; width:30px; height:30px; border:1px solid var(--line); border-radius:50%; display:inline-flex; align-items:center; justify-content:center; align-self:center; color:var(--accent); background:rgba(var(--acc-rgb),.08); }
+.tp-head:focus-visible { outline:2px solid var(--accent); outline-offset:5px; border-radius:8px; }
+.rec-analysis-badge { position:absolute; left:6px; top:6px; padding:3px 7px; border-radius:6px; font-size:10px; font-weight:600; color:var(--text); background:var(--panel); border:1px solid var(--accent); }
 .tp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 16px; }
 .tp-stats > div { padding: 14px 16px; border-radius: 16px; background: rgba(255,255,255,.035); display: flex; flex-direction: column; gap: 2px; }
 .tp-stats b { font-family: Sora, sans-serif; font-size: 24px; font-variant-numeric: tabular-nums; }

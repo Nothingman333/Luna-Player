@@ -87,15 +87,17 @@ export function validateToolCall(call: RawCall, decls: ToolDecl[], allowed?: str
   const raw = call.args === undefined || call.args === null ? {} : call.args;
   if (typeof raw !== "object" || Array.isArray(raw)) return { ok: false, name, reason: "argümanlar bir nesne olmalı" };
   try { if (JSON.stringify(raw).length > MAX_ARGS_CHARS) return { ok: false, name, reason: "argümanlar çok büyük" }; } catch { return { ok: false, name, reason: "argümanlar okunamadı" }; }
-  const r = checkObject(decl.parameters ?? {}, raw as Record<string, any>, "");
+  const searchArgs=raw as Record<string,unknown>;
+  const normalized = ["search_film_library","inspect_media_library","search_music","search_books"].includes(name) && searchArgs.query === undefined ? {...searchArgs,query:searchArgs.q??searchArgs.search??searchArgs.title??""} : raw;
+  const r = checkObject(decl.parameters ?? {}, normalized as Record<string, any>, "");
   return r.ok ? { ok: true, name, args: r.value } : { ok: false, name, reason: r.reason };
 }
 
 const fold = (s: string) => s.trim().replace(/\s+/g, " ").toLocaleLowerCase("tr");
-function canon(v: any): any {
-  if (typeof v === "string") return fold(v);
-  if (Array.isArray(v)) return v.map(canon);
-  if (v && typeof v === "object") return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])]));
+function canon(v: any, field=""): any {
+  if (typeof v === "string") return /^(?:paths?|src|url|uri|id|key|text|note|new_name)$/i.test(field)?v:fold(v);
+  if (Array.isArray(v)) return v.map(value=>canon(value,field));
+  if (v && typeof v === "object") return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k],k)]));
   return v;
 }
 /** Same tool + same (case/space-insensitive) arguments = the same action. */
@@ -120,6 +122,7 @@ export function planToolCalls(calls: RawCall[], decls: ToolDecl[], opts: { allow
 export function classifyToolResult(text: string): "ok" | "noop" | "partial" | "failed" {
   const t = String(text ?? "").trim();
   if (!t) return "ok";
+  if(/^[\[{]/.test(t)){try{const result=JSON.parse(t);return result&&typeof result==="object"&&result.error?"failed":"ok";}catch{}}
   if (/^(EKLENMEDİ|BELİRSİZ|HATA|GEÇERSİZ|Başlık yok|Liste adı yok|Not boş|Kişi adı yok|Bilinmeyen işlem|Bu işlem burada yapılamıyor|Oynatıcı hazır değil|Silinemedi|Adı değiştirilemedi|Bağlantı okunamadı|Letterboxd okunamadı|Kütüphanede YOK|Bu adda birden çok|Birden çok dosya|Bu not bulunamadı|Silinecek bir şey bulunamadı)/i.test(t)) return "failed";
   if (/^(Zaten |Already )/i.test(t)) return "noop";
   if (/\d+\s*\/\s*\d+\s.*(silindi|eklendi|çıkarıldı)[^.]*;.*(silinemedi|eklenemedi|başarısız)/i.test(t)) return "partial";

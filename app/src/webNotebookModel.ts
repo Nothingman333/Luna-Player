@@ -22,9 +22,10 @@ export function restoreQueuedPage(rows:WebReading[],entry:WebReading,index:numbe
 export function noteBaseUnchanged(rows:PageNote[],url:string,base:string):boolean{return (rows.find(n=>n.url===url)?.text||"")===base;}
 export function webNotebookMarkdown(reading:WebReading[],notes:PageNote[],tr:boolean):string{
  const clean=(s:string)=>s.replace(/[\r\n]+/g," ").replace(/([\[\]\\])/g,"\\$1");
+ const link=(url:string)=>url.replace(/</g,"%3C").replace(/>/g,"%3E").replace(/[\r\n]/g,"");
  const noteMap=new Map(notes.map(n=>[n.url,n]));
- const rows=reading.map(r=>`## [${clean(r.title)}](<${r.url}>)\n\n${r.done?(tr?"Okundu":"Read"):(tr?"Sırada":"Queued")} · ${Math.round(r.progress*100)}%\n\n${noteMap.get(r.url)?.text||""}`);
+ const rows=reading.map(r=>`## [${clean(r.title)}](<${link(r.url)}>)\n\n${r.done?(tr?"Okundu":"Read"):(tr?"Sırada":"Queued")} · ${Math.round(r.progress*100)}%\n\n${noteMap.get(r.url)?.text||""}`);
  const included=new Set(reading.map(r=>r.url));
- for(const n of notes)if(!included.has(n.url))rows.push(`## <${n.url}>\n\n${n.text}`);
+ for(const n of notes)if(!included.has(n.url))rows.push(`## <${link(n.url)}>\n\n${n.text}`);
  return `# Luna Web ${tr?"defterim":"notebook"}\n\n`+rows.join("\n\n---\n\n");
 }

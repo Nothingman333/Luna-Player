@@ -166,11 +166,11 @@ export function TasteProfile({ onOpen, kind = "film", page, sync }: { onOpen?: O
   const avoided = ASPECTS.filter((a) => profile.avoid.includes(a) || learned?.penalty[a]);
 
   return <section className="row tp">
-    <button className="tp-head" aria-expanded={open || page} onClick={page ? undefined : toggle}>
+    <button className="tp-head" title={page?undefined:open?tt("Daralt"):tt("Genişlet")} aria-expanded={open || !!page} onClick={page ? undefined : toggle}>
       <h2>{tt("Zevk profilin")}</h2>
       <span className="muted small">{music ? tt("Müzik için · {0} beğeni ve beğenmeme · {1} dinleme", diary.length, extra?.heard ?? 0)
         : tt("{0} için · {1} kayıt · {2} Luna Analiz · {3} yorum okundu", kind === "book" ? tt("Kitaplar") : tt("Filmler"), diary.length, all.length, reviewsRead)}</span>
-      <span className="grow" />{!page && <span className="tp-chev">{open ? "▴" : "▾"}</span>}
+      <span className="grow" />{!page && <span className="tp-chev" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{transform:open?"rotate(180deg)":undefined}}><path d="m6 9 6 6 6-6"/></svg></span>}
     </button>
     {measuring > 0 && <div className="tp-measure small" role="status"><span className="la-pulse" />{tt("Ölçülüyor… {0} yeni eser zevk haritana ekleniyor", measuring)}</div>}
     {sync && <div className="tp-sync small muted">

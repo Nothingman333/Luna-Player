@@ -1,0 +1,27 @@
+// Production models with synthetic records. No real user storage, application window or API.
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),ts=require('typescript');
+process.env.TZ='Europe/Istanbul';const source=process.env.LUNA_MODEL_SOURCE||path.join(__dirname,'../src'),data=new Map(),cache=new Map();global.window={addEventListener(){}};global.localStorage={get length(){return data.size;},key:i=>[...data.keys()][i]??null,getItem:k=>data.get(k)??null};
+const store={json:(k,f)=>{try{return JSON.parse(data.get(k)||'null')??f;}catch{return f;}}};
+function load(n){if(cache.has(n))return cache.get(n);const file=path.join(source,n+'.ts'),mod={exports:{}};const js=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;new Function('module','exports','require',js)(mod,mod.exports,s=>s==='./library'?{store}:load(s.replace('./','')));cache.set(n,mod.exports);return mod.exports;}
+const S=load('browserSuggest'),B=load('browserStartModel'),N=load('webNotebookModel'),R=load('readingExperienceModel'),L=load('bookLibraryModel'),F=load('filmCatalogModel'),D=load('debugModel'),H=load('assistantHistory');const tests=[],test=(id,title,fn)=>tests.push({id,title,fn});const v={url:'https://example.com/a',title:'Page',at:100000,visits:4};
+test(1,'Out-of-Date-range visit timestamps are discarded',()=>assert.equal(S.cleanRecent([{...v,at:1e20}]).length,0));
+test(2,'Duplicate history recovery retains the greatest known visit count',()=>assert.equal(S.cleanRecent([{...v,at:200000,visits:1},{...v,visits:9}])[0].visits,9));
+test(3,'Clock rollback is not treated as a rapid reload',()=>assert.equal(S.recordVisit([v],v,90000)[0].visits,5));
+test(4,'Relative time safely handles invalid dates',()=>assert.doesNotThrow(()=>S.relativeTime(NaN,Date.now(),true)));
+test(5,'Older visit date uses the local calendar rather than UTC',()=>{const at=new Date(2026,0,1,0,30).getTime();assert.equal(S.relativeTime(at,at+8*86400000,false),'2026-01-01');});
+test(6,'Empty address suggestions normalize and deduplicate stored visits',()=>assert.equal(S.suggestAddresses('',{tabs:[],bookmarks:[],recent:[v,v,{...v,url:'javascript:alert(1)'}],resolve:()=>null}).length,1));
+test(7,'Future history days are not labeled Today',()=>assert.notEqual(B.historyGroups([{...v,at:new Date(2026,1,4).getTime()}],new Date(2026,1,1).getTime(),false)[0].label,'Today'));
+test(8,'History grouping excludes non-renderable timestamps',()=>assert.equal(B.historyGroups([{...v,at:1e20}],Date.now(),false).length,0));
+test(9,'Top sites cannot expose embedded URL credentials',()=>assert.equal(B.topSites([{...v,url:'https://user:secret@example.com/a'}],Date.now()).length,0));
+test(10,'Notebook Markdown cannot be escaped through URL angle brackets',()=>assert(!N.webNotebookMarkdown([{...v,progress:0,done:false,url:'https://example.com/a>injected'}],[],false).includes('a>injected')));
+test(11,'CR-only quotation lines remain blockquoted',()=>assert(R.quoteMarkdown([{key:'a',b:{title:'A',author:'B',path:'a'},h:{text:'One\rTwo',at:1}}],{}).includes('One\n> Two')));
+test(12,'Duplicate recent book paths keep the first newest rank',()=>{const books=[{path:'a',title:'A',author:''},{path:'b',title:'B',author:''}],env={inLibrary:new Set(['a','b']),later:[],shelves:{},progress:()=>0,finished:()=>false,vote:()=>undefined};assert.equal(L.visibleBooks(books,{shelf:'all',topic:'',query:'',sort:'recent',recent:['a','b','a'],env})[0].path,'a');});
+test(13,'Nonfinite runtimes never render Infinity',()=>assert.equal(F.formatRuntime(Infinity,'h','m'),''));
+test(14,'No remaining playback time is not presented as one minute',()=>assert.equal(F.formatRemaining(0,'h','m'),''));
+test(15,'TMDB links require positive integral safe IDs',()=>{const m=F.safeMeta({id:-2,cast:[{name:'A',id:1.5}]},'movie');assert.equal(m.id,0);assert.equal(m.cast[0].id,undefined);});
+test(16,'Debug Error category includes failed browser/AI/player calls',()=>assert.equal(D.filterDebug([{id:1,at:1,category:'ai',level:'error',name:'Failed',detail:{}}],'error','').length,1));
+test(17,'Recovered chats cannot keep invalid date values',()=>assert.equal(H.salvageConversations([{id:'a',title:'A',ctx:'General',ctxKind:'general',at:1e20,msgs:[{role:'user',text:'A'}]}],m=>m).convs[0].at,0));
+test(18,'Overflowed chat history is reported as damaged and dropped',()=>{const result=H.salvageConversations(Array.from({length:61},(_,i)=>({id:String(i),title:'A',ctx:'A',ctxKind:'general',at:1,msgs:[{role:'user',text:'A'}]})),m=>m);assert(result.damaged);assert.equal(result.dropped,1);});
+test(19,'Truncation notice cannot exceed the model text budget',()=>{const result=H.budgetContents([{role:'user',parts:[{text:'A'.repeat(30)}]},{role:'model',parts:[{text:'B'.repeat(30)}]},{role:'user',parts:[{text:'C'.repeat(15)}]}],{maxChars:50,maxMessage:40});assert(result.contents.flatMap(c=>c.parts).reduce((n,p)=>n+(p.text||'').length,0)<=50);});
+test(20,'Reading sessions reject dates outside the calendar range',()=>assert.equal(R.mergeReadingSession([],{b:{path:'a'},at:1e20,mins:1,from:0,to:.2}).length,0));
+const results=tests.map(t=>{try{t.fn();return{id:t.id,title:t.title,status:'pass'};}catch(e){return{id:t.id,title:t.title,status:'fail',error:String(e)};}});const result={passed:results.filter(r=>r.status==='pass').length,total:results.length,results};console.log(JSON.stringify(result,null,2));if(result.passed!==result.total)process.exitCode=1;

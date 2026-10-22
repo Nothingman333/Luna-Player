@@ -1,3 +1,4 @@
+import {logDebug} from "./debugTelemetry";
 import { Component } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import { tt } from "./i18n";
@@ -19,6 +20,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
     return { error: error instanceof Error ? error : new Error(String(error)), note: "" };
   }
   componentDidCatch(error: Error, info: ErrorInfo) {
+    logDebug("error","React render failure",{error,stack:info.componentStack},"error");
     console.error("Luna: a screen failed to render", error, info.componentStack);
   }
   copy = async () => {

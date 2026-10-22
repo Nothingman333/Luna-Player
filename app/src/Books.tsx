@@ -28,6 +28,7 @@ import { TasteProfile } from "./TasteProfile";
 import { aspectsOf, profileKeyOf } from "./reviewTaste";
 import type { Aspect } from "./filmReviewModel";
 import "./FilmDecision.css";
+import { RsvpReader } from "./Rsvp";
 import { attachTts, loadVoices, voiceChoices, setRate, setSleep, setVoice, setTtsVolume, setTtsMuted, Sleep, takeHeard, TTS_CSS, ttsNoted, ttsPause, ttsSkip, ttsStart, ttsStop, ttsToggle, useTts, Voice } from "./ReadAloud";
 import { addSource, SourceHelp, fetchFeed, gutenbergBooks, gutenbergPopular, gutenbergSearch, kindOf, loadSources, OEntry, OFeed, saveSources, searchUrl, Source } from "./Opds";
 import literata400 from "@fontsource/literata/files/literata-latin-400-normal.woff2?url";
@@ -35,6 +36,11 @@ import literata400x from "@fontsource/literata/files/literata-latin-ext-400-norm
 import literata400i from "@fontsource/literata/files/literata-latin-400-italic.woff2?url";
 import literata600 from "@fontsource/literata/files/literata-latin-600-normal.woff2?url";
 import literata600x from "@fontsource/literata/files/literata-latin-ext-600-normal.woff2?url";
+import atkinson400 from "@fontsource/atkinson-hyperlegible-next/files/atkinson-hyperlegible-next-latin-400-normal.woff2?url";
+import atkinson400i from "@fontsource/atkinson-hyperlegible-next/files/atkinson-hyperlegible-next-latin-400-italic.woff2?url";
+import dyslexic400 from "@fontsource/opendyslexic/files/opendyslexic-latin-400-normal.woff2?url";
+import dyslexic700 from "@fontsource/opendyslexic/files/opendyslexic-latin-700-normal.woff2?url";
+import lexend400 from "@fontsource/lexend/files/lexend-latin-400-normal.woff2?url";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 // ---------- library ----------
@@ -123,6 +129,12 @@ function useBookLibrary() {
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState(false);
   const [tick, setTick] = useState(0);
+  // the folder watcher found new or removed books
+  useEffect(() => {
+    const f = (e: Event) => { if (((e as CustomEvent).detail?.kinds ?? ["book"]).includes("book")) setTick((n) => n + 1); };
+    window.addEventListener("luna-rescan", f);
+    return () => window.removeEventListener("luna-rescan", f);
+  }, []);
   const sig = folders.join("|");
   useEffect(() => {
     // (a scan cancelled by an early return never reaches its own finally: "scanning" is switched off here too)
@@ -1083,7 +1095,11 @@ const isFinishedBook = (b: { path: string; title: string; author: string }) => (
 // ---------- the reader ----------
 type Theme = "day" | "quiet" | "sepia" | "dusk" | "night" | "forest";
 type Spacing = "tight" | "normal" | "loose";
-type ReaderSet = { theme: Theme; size: number; font: "serif" | "sans"; spread: boolean; spacing: Spacing; bold: boolean; scroll: boolean;
+const READER_FONT: Record<ReaderSet["font"], string> = {
+  serif: "Literata, Georgia, serif", sans: "'IBM Plex Sans', system-ui, sans-serif",
+  atkinson: "'Atkinson Hyperlegible Next', system-ui, sans-serif", lexend: "Lexend, system-ui, sans-serif", dyslexic: "OpenDyslexic, system-ui, sans-serif",
+};
+type ReaderSet = { theme: Theme; size: number; font: "serif" | "sans" | "atkinson" | "dyslexic" | "lexend"; spread: boolean; spacing: Spacing; bold: boolean; scroll: boolean;
   /** 0–0.7: the page darkened (Windows' own brightness isn't touched) */
   dim: number;
   /** 0–1: a warm tint for the evening (less blue light) */
@@ -1155,6 +1171,7 @@ function Reader({ b, onClose }: { b: Book; onClose: () => void }) {
     setPanelNow(v);
   };
   const [side, setSide] = useState<Side>("toc");
+  const [rsvp, setRsvp] = useState(false);
   const [here, setHere] = useState<Here>({ pct: getPos(b.path)?.pct ?? 0, label: "" });
   // this sitting goes into the reading history when the book is closed
   const hereRef = useRef(here);
@@ -1188,7 +1205,7 @@ function Reader({ b, onClose }: { b: Book; onClose: () => void }) {
   const closeAll = () => { setPanel(""); setSel(null); };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if(document.querySelector(".extra-modal"))return;
+      if(document.querySelector(".extra-modal, .lx-rsvp"))return;
       // Keys from inside the EPUB frame are passed on to the window, so the target isn't always an element.
       const el = e.target instanceof Element ? (e.target as HTMLElement) : null;
       // A focused button keeps Space for its own activation, but arrow/page keys should still
@@ -1248,6 +1265,10 @@ function Reader({ b, onClose }: { b: Book; onClose: () => void }) {
         {b.kind === "epub" && <button className={"rb" + (tts.active ? " on" : "")} aria-label={tt("Sesli oku")} title={tt("Sesli oku (Ctrl+Shift+U)")}
           onClick={() => { closeAll(); if (tts.active) ttsStop(); else ttsStart(); }}>
           <Icon d="M4 9v6h4l5 4V5L8 9H4zM16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" size={16} /></button>}
+        {b.kind === "epub" && <button className={"rb" + (rsvp ? " on" : "")} aria-label={tt("Hızlı okuma")} title={tt("Hızlı okuma: kelime kelime, sabit hızda")}
+          onClick={() => { closeAll(); if (tts.active) ttsStop(); setRsvp(true); }}>
+          <Icon d="M13 3L4 14h7l-1 7 9-11h-7z" size={16} /></button>}
+        {rsvp && <RsvpReader onClose={() => setRsvp(false)} />}
         {b.kind === "epub" && <button className="rb" aria-label={tt("Kitapta ara")} title={tt("Kitapta ara")} onClick={() => openSide("find")}>
           <Icon d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-3.5-3.5" size={16} /></button>}
         <button className="rb" aria-label={tt("Bu sayfaya not ekle")} title={tt("Bu sayfaya not ekle")} onClick={() => { closeAll(); setNoteFor({ text: "" }); }}>
@@ -1361,6 +1382,9 @@ function Reader({ b, onClose }: { b: Book; onClose: () => void }) {
                 <div className="seg-row">
                   <button className={"seg sm" + (set.font === "serif" ? " on" : "")} style={{ fontFamily: "Literata, serif" }} onClick={() => setSet({ font: "serif" })}>Literata</button>
                   <button className={"seg sm" + (set.font === "sans" ? " on" : "")} onClick={() => setSet({ font: "sans" })}>Sans</button>
+                  <button className={"seg sm" + (set.font === "atkinson" ? " on" : "")} style={{ fontFamily: "'Atkinson Hyperlegible Next', sans-serif" }} title={tt("Harfleri birbirinden kolay ayırt edilen, okunaklı yazı tipi")} onClick={() => setSet({ font: "atkinson" })}>Atkinson</button>
+                  <button className={"seg sm" + (set.font === "lexend" ? " on" : "")} style={{ fontFamily: "Lexend, sans-serif" }} title={tt("Okuma akıcılığı için tasarlanmış yazı tipi")} onClick={() => setSet({ font: "lexend" })}>Lexend</button>
+                  <button className={"seg sm" + (set.font === "dyslexic" ? " on" : "")} style={{ fontFamily: "OpenDyslexic, sans-serif" }} title={tt("Disleksi için tasarlanmış yazı tipi")} onClick={() => setSet({ font: "dyslexic" })}>OpenDyslexic</button>
                 </div></div>
               <div className="bk-opt"><span>{tt("Satır aralığı")}</span>
                 <div className="seg-row">
@@ -1524,9 +1548,12 @@ type ViewProps = {
 };
 
 // EPUB: epub.js lays the book out in pages inside a sandboxed frame (no scripts from the book)
-const FONT_CSS = [
-  [literata400, 400, "normal"], [literata400x, 400, "normal"], [literata400i, 400, "italic"], [literata600, 600, "normal"], [literata600x, 600, "normal"],
-].map(([u, w, s]) => `@font-face{font-family:"Literata";src:url("${new URL(u as string, location.href).href}") format("woff2");font-weight:${w};font-style:${s};font-display:swap}`).join("");
+const FONT_CSS = ([
+  [literata400, "Literata", 400, "normal"], [literata400x, "Literata", 400, "normal"], [literata400i, "Literata", 400, "italic"], [literata600, "Literata", 600, "normal"], [literata600x, "Literata", 600, "normal"],
+  [atkinson400, "Atkinson Hyperlegible Next", 400, "normal"], [atkinson400i, "Atkinson Hyperlegible Next", 400, "italic"],
+  [dyslexic400, "OpenDyslexic", 400, "normal"], [dyslexic700, "OpenDyslexic", 700, "normal"],
+  [lexend400, "Lexend", 400, "normal"],
+] as [string, string, number, string][]).map(([u, f, w, st]) => `@font-face{font-family:"${f}";src:url("${new URL(u, location.href).href}") format("woff2");font-weight:${w};font-style:${st};font-display:swap}`).join("");
 
 function EpubView({ b, set, nav, onState, onToc, onErr, hl, onSelect, onTap, onMove }: ViewProps & {
   onToc: (t: Toc[]) => void; hl: Hl[]; onSelect: (s: Sel) => void; onTap: () => void; onMove: () => void;
@@ -1699,7 +1726,7 @@ function EpubView({ b, set, nav, onState, onToc, onErr, hl, onSelect, onTap, onM
 function applyTheme(rendition: any, set: ReaderSet) {
   const t = THEMES[set.theme];
   rendition.themes.default({
-    body: { background: `${t.bg} !important`, color: `${t.fg} !important`, "font-family": set.font === "serif" ? "Literata, Georgia, serif !important" : "'IBM Plex Sans', system-ui, sans-serif !important",
+    body: { background: `${t.bg} !important`, color: `${t.fg} !important`, "font-family": READER_FONT[set.font] + " !important",
       "line-height": `${LINE[set.spacing]} !important`, "font-weight": set.bold ? "600 !important" : "inherit" },
     "p, li, blockquote": { "font-family": "inherit !important", "line-height": "inherit !important" },
     a: { color: `${t.fg} !important` },

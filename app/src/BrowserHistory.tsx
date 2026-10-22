@@ -1,53 +1,38 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
-import { lang } from "./i18n";
-import { BrowserIcon as WebIcon } from "./BrowserIcons";
-import { ExtraModal } from "./Extras";
-import { historyGroups, hostKey, siteHue } from "./browserStartModel";
-import type { RecentVisit } from "./browserSuggest";
-
-const label = (tr: string, en: string) => (lang() === "tr" ? tr : en);
-
-/**
- * Luna Web's history (Ctrl+H): every remembered visit grouped by day, with a search that ignores accents and case.
- * A row opens the page; the × forgets it. Everything is local (localStorage "lunaWebRecent").
- */
-export function BrowserHistory({ rows, remember, onOpen, onForget, onClear, close }: {
-  rows: RecentVisit[]; remember: boolean; onOpen: (url: string) => void; onForget: (url: string) => void; onClear: () => void; close: () => void;
-}) {
-  const [query, setQuery] = useState(""), [confirm, setConfirm] = useState(false), search = useRef<HTMLInputElement>(null);
-  // A removed row or the confirm buttons take the keyboard with them: it goes back to the search box (so Esc still closes).
-  const refocus = () => requestAnimationFrame(() => search.current?.focus());
-  // Until that happens the keyboard is on <body> (the clicked button is gone): Esc must still close the panel.
-  useEffect(() => {
-    const onBody = (e: KeyboardEvent) => { const a = document.activeElement; if (e.key === "Escape" && (!a || a === document.body)) { e.preventDefault(); close(); } };
-    document.addEventListener("keydown", onBody); return () => document.removeEventListener("keydown", onBody);
-  }, [close]);
-  const tr = lang() === "tr", now = Date.now();
-  const groups = useMemo(() => historyGroups(rows, now, tr, query), [rows, query, tr]);
-  const shown = groups.reduce((n, g) => n + g.rows.length, 0);
-  const time = (at: number) => new Date(at).toLocaleTimeString(tr ? "tr-TR" : "en-GB", { hour: "2-digit", minute: "2-digit" });
-  return <ExtraModal title={label("Geçmiş", "History")} close={close}><div className="luna-extra browser-history">
-    <div className="browser-history-bar">
-      <label className="browser-history-search"><WebIcon name="search" size={15}/><input ref={search} value={query} onChange={e => setQuery(e.target.value)} aria-label={label("Geçmişte ara", "Search history")} placeholder={label("Başlık ya da adres ara…", "Search titles or addresses…")} spellCheck={false}/></label>
-      <span className="browser-history-count" aria-live="polite">{query.trim() ? label(`${shown} sonuç`, `${shown} found`) : label(`${rows.length} sayfa`, `${rows.length} pages`)}</span>
-      {confirm
-        ? <span className="browser-history-confirm"><button className="danger" onClick={() => { onClear(); setConfirm(false); refocus(); }}>{label("Evet, hepsini sil", "Yes, delete all")}</button><button onClick={() => { setConfirm(false); refocus(); }}>{label("Vazgeç", "Cancel")}</button></span>
-        : <button className="browser-history-clear" disabled={!rows.length} onClick={() => setConfirm(true)}><WebIcon name="trash" size={14}/>{label("Geçmişi temizle", "Clear history")}</button>}
-    </div>
-    {!remember && <p className="browser-history-note">{label("Son ziyaretleri hatırlama kapalı; yeni sayfalar buraya eklenmiyor (Araçlar menüsünden açabilirsin).", "Remembering recent visits is off, so new pages are not added (turn it on in the Tools menu).")}</p>}
-    <div className="browser-history-list">
-      {groups.map(g => <section key={g.key} aria-label={g.label}><h4>{g.label}<small>{g.rows.length}</small></h4>
-        {g.rows.map(r => { const host = hostKey(r.url); return <div className="browser-history-row" key={r.url}>
-          <span className="bh-time">{time(r.at)}</span>
-          <button className="bh-open" onClick={() => onOpen(r.url)} title={r.url}>
-            <span className="bh-letter" style={{ "--site-hue": siteHue(host) } as CSSProperties}>{(r.title || host).charAt(0).toLocaleUpperCase()}</span>
-            <span className="bh-text"><b>{r.title}</b><small>{host}{r.visits > 1 ? " · " + label(`${r.visits} ziyaret`, `${r.visits} visits`) : ""}</small></span>
-          </button>
-          <button className="bh-forget" aria-label={label(r.title + " geçmişten kaldır", "Remove " + r.title + " from history")} onClick={() => { onForget(r.url); refocus(); }}><WebIcon name="close" size={13}/></button>
-        </div>; })}
-      </section>)}
-      {!shown && <p className="browser-history-empty"><WebIcon name="clock" size={26}/><span>{query.trim() ? label("Bu aramayla eşleşen sayfa yok.", "No page matches this search.") : label("Henüz geçmiş yok. Ziyaret ettiğin sayfalar burada gün gün listelenir.", "No history yet. Pages you visit are listed here, day by day.")}</span></p>}
-    </div>
-  </div></ExtraModal>;
+import "./BrowserPlus.css";
+import {useEffect,useMemo,useRef,useState} from "react";
+import type {CSSProperties} from "react";
+import {lang} from "./i18n";
+import {BrowserIcon as WebIcon} from "./BrowserIcons";
+import {ExtraModal,exportExtra} from "./Extras";
+import {copyAssistantText} from "./AssistantTools";
+import {historyGroups,hostKey,siteHue} from "./browserStartModel";
+import {cleanRecent,relativeTime} from "./browserSuggest";
+import type {RecentVisit} from "./browserSuggest";
+const label=(tr:string,en:string)=>lang()==="tr"?tr:en;
+export function BrowserHistory({rows,remember,onOpen,onForget,onClear,close,onKeepChange,onOpenNew,onClearSince}:{rows:RecentVisit[];remember:boolean;onOpen:(url:string)=>void;onForget:(url:string)=>void;onClear:()=>void;close:()=>void;onKeepChange?:(value:boolean)=>void;onOpenNew?:(url:string)=>void;onClearSince?:(since:number)=>void}){
+ const[query,setQuery]=useState(""),[site,setSite]=useState(""),[period,setPeriod]=useState("all"),[order,setOrder]=useState("new"),[limit,setLimit]=useState(50),[confirm,setConfirm]=useState<"all"|"site"|null>(null),[status,setStatus]=useState(""),[busy,setBusy]=useState(false),[now,setNow]=useState(Date.now);
+ const search=useRef<HTMLInputElement>(null),alive=useRef(true),lock=useRef(false);
+ useEffect(()=>{alive.current=true;const timer=setInterval(()=>setNow(Date.now()),60000);return()=>{alive.current=false;clearInterval(timer);};},[]);
+ useEffect(()=>{setLimit(50);setConfirm(null);},[query,site,period,order]);
+ const refocus = () => requestAnimationFrame(() => search.current?.focus());
+ useEffect(()=>{const onBody=(e:KeyboardEvent)=>{if(e.key==="Escape"&&document.activeElement===document.body){e.preventDefault();close();}};document.addEventListener("keydown", onBody);return()=>document.removeEventListener("keydown", onBody);},[close]);
+ const clean=useMemo(()=>cleanRecent(rows,1000,{includeSearch:true,preserveFragments:true}),[rows]),sites=useMemo(()=>[...new Set(clean.map(r=>hostKey(r.url)))].sort(),[clean]),tr=lang()==="tr";
+ const filtered=useMemo(()=>{const midnight=new Date(now);midnight.setHours(0,0,0,0);const since=period==="today"?midnight.getTime():period==="all"?0:now-Number(period)*86400000;return clean.filter(r=>(!site||hostKey(r.url)===site)&&r.at>=since);},[clean,site,period,now]);
+ const matching=useMemo(()=>historyGroups(filtered,now,tr,query).flatMap(g=>g.rows),[filtered,now,tr,query]);
+ const sorted=[...matching].sort((a,b)=>order==="old"?a.at-b.at:order==="frequent"?b.visits-a.visits||b.at-a.at:b.at-a.at),visible=sorted.slice(0,limit);
+ let groups=order==="frequent"?[{key:"frequent",label:label("Sık ziyaret edilenler","Most visited"),rows:visible}]:historyGroups(visible,now,tr);
+ if(order==="old")groups=groups.reverse().map(g=>({...g,rows:[...g.rows].reverse()}));
+ const run=async(fn:()=>Promise<void>)=>{if(lock.current)return;lock.current=true;setBusy(true);setStatus("");try{await fn();}catch(e){if(alive.current)setStatus(String(e));}finally{lock.current=false;if(alive.current)setBusy(false);}};
+ const copy=async(text:string)=>{await copyAssistantText(text);if(alive.current)setStatus(label("Kopyalandı.","Copied."));};
+ const time=(at:number)=>new Date(at).toLocaleTimeString(tr?"tr-TR":"en-GB",{hour:"2-digit",minute:"2-digit"});
+ return <ExtraModal title={label("Geçmiş","History")} close={close}><div className="luna-extra browser-history">
+  <p className="browser-history-note">{label("Geçmiş bu bilgisayarda tutulur; yapay zekâ isteğine eklenmez.","History stays on this computer; it is not added to AI requests.")}</p>{onKeepChange&&<label className="web-switch"><input type="checkbox" checked={remember} onChange={e=>onKeepChange(e.target.checked)}/><span/>{label("Geçmişi kaydet","Keep history")}</label>}<div className="browser-history-bar"><label className="browser-history-search"><WebIcon name="search" size={15}/><input autoFocus ref={search} value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.key==="Escape"&&query){e.preventDefault();e.stopPropagation();setQuery("");}}} aria-label={label("Geçmişte ara","Search history")} placeholder={label("Başlık ya da adres ara…","Search titles or addresses…")} spellCheck={false}/></label><button className="chip" disabled={!query} aria-label={label("Aramayı temizle","Clear search")} onClick={()=>{setQuery("");refocus();}}>×</button><span className="browser-history-count" aria-live="polite">{matching.length}/{clean.length} {label("sayfa","pages")}</span></div>
+  <div className="quality-filter-row"><select aria-label={label("Geçmiş dönemi","History period")} value={period} onChange={e=>setPeriod(e.target.value)}>{[["all",label("Bütün zamanlar","All time")],["today",label("Bugün","Today")],["7",label("Son 7 gün","Last 7 days")],["30",label("Son 30 gün","Last 30 days")]].map(([v,t])=><option key={v} value={v}>{t}</option>)}</select><select aria-label={label("Geçmiş sitesi","History site")} value={site} onChange={e=>setSite(e.target.value)}><option value="">{label("Bütün siteler","All sites")}</option>{sites.map(s=><option key={s}>{s}</option>)}</select><select aria-label={label("Geçmiş sıralaması","History order")} value={order} onChange={e=>setOrder(e.target.value)}><option value="new">{label("En yeni","Newest first")}</option><option value="old">{label("En eski","Oldest first")}</option><option value="frequent">{label("En çok ziyaret","Most visited")}</option></select></div>
+  <div className="quality-filter-row">{onClearSince&&<><button className="chip" disabled={!clean.length||busy} onClick={()=>onClearSince(Date.now()-3600000)}>{label("Son 1 saati sil","Remove last hour")}</button><button className="chip" disabled={!clean.length||busy} onClick={()=>{const d=new Date();d.setHours(0,0,0,0);onClearSince(d.getTime());}}>{label("Bugünü sil","Remove today")}</button></>}<button className="chip" disabled={busy||!matching.length} onClick={()=>void run(()=>copy(sorted.map(r=>r.url).join("\n")))}>{label("Sonuç adreslerini kopyala","Copy result addresses")}</button><button className="chip" disabled={busy||!matching.length} onClick={()=>void run(async()=>{if(await exportExtra("Luna-gecmis.json",JSON.stringify({version:1,exportedAt:new Date().toISOString(),visits:sorted},null,2))&&alive.current)setStatus(label("Dışa aktarıldı.","Exported."));})}>{label("Sonuçları dışa aktar","Export results")}</button><button className="chip" disabled={!site||busy} onClick={()=>setConfirm("site")}>{label("Bu siteyi geçmişten unut","Forget this site")}</button><button className="browser-history-clear" disabled={!clean.length||busy} onClick={()=>setConfirm("all")}><WebIcon name="trash" size={14}/>{label("Geçmişi temizle","Clear history")}</button></div>
+  {confirm&&<div className="browser-history-confirm"><span>{confirm==="all"?label("Bütün geçmiş silinsin mi?","Delete all history?"):label(`${site} ziyaretlerinin tamamı silinsin mi?`,`Delete every visit to ${site}?`)}</span><button className="danger" onClick={()=>{if(confirm==="all")onClear();else for(const r of clean)if(hostKey(r.url)===site)onForget(r.url);setConfirm(null);refocus();}}>{label("Evet, sil","Yes, delete")}</button><button onClick={()=>{setConfirm(null);refocus();}}>{label("Vazgeç","Cancel")}</button></div>}
+  {!remember&&<p className="browser-history-note">{label("Geçmişi hatırlama kapalı. Araçlar menüsünden açabilirsin.","History is paused. You can enable it from Tools.")}</p>}
+  {status&&<p role="status" className="extra-status">{status}</p>}
+  <div className="browser-history-list">{groups.map(g=><section key={g.key} aria-label={g.label}><h4>{g.label}<small>{g.rows.length}</small></h4>{g.rows.map(r=>{const host=hostKey(r.url);return <div className="browser-history-row" key={r.url}><span className="bh-time" title={relativeTime(r.at,now,tr)+" · "+new Date(r.at).toLocaleString()}>{time(r.at)}</span><button className="bh-open" onClick={e=>(e.ctrlKey||e.metaKey)&&onOpenNew?onOpenNew(r.url):onOpen(r.url)} onAuxClick={e=>{if(e.button===1&&onOpenNew){e.preventDefault();onOpenNew(r.url);}}} title={r.url}><span className="bh-letter" style={{"--site-hue":siteHue(host)}as CSSProperties}>{(r.title||host).charAt(0).toLocaleUpperCase()}</span><span className="bh-text"><b>{r.title}</b><small>{host}{r.visits>1?` · ${r.visits} ${label("ziyaret","visits")}`:""}</small></span></button><button className="bh-forget" disabled={busy} aria-label={label(r.title+" adresini kopyala","Copy address of "+r.title)} onClick={()=>void run(()=>copy(r.url))}>⧉</button><button className="bh-forget" aria-label={label(r.title+" geçmişten kaldır","Remove "+r.title+" from history")} onClick={()=>{onForget(r.url);refocus();}}><WebIcon name="close" size={13}/></button></div>;})}</section>)}{!matching.length&&<p className="browser-history-empty"><WebIcon name="clock" size={26}/><span>{clean.length?label("Bu filtrelerle eşleşen sayfa yok.","No pages match these filters."):label("Henüz geçmiş yok.","No history yet.")}</span></p>}</div>
+  {matching.length>limit&&<button className="chip" onClick={()=>setLimit(n=>n+50)}>{label("50 sayfa daha göster","Show 50 more pages")} · {limit}/{matching.length}</button>}
+ </div></ExtraModal>;
 }

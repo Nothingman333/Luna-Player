@@ -6,7 +6,7 @@ export function safeAiError(error: unknown, secrets: string[] = []): string {
     .replace(/\bBearer\s+[^\s"'<>]+/gi, "Bearer [hidden]")
     .replace(/\bsk-[a-zA-Z0-9_-]{12,}/g, "[hidden]")
     .replace(/\bAIza[0-9A-Za-z_-]{20,}/g, "[hidden]")
-    .replace(/\b(x-api-key|api-key|authorization)(["']?\s*[:=]\s*["']?)[^\s"',}]+/gi, "$1$2[hidden]")
+    .replace(/\b(x-api-key|api[_-]key|authorization)(["']?\s*[:=]\s*["']?)[^\s"',}]+/gi, "$1$2[hidden]")
     .replace(/([?&](?:key|api_key|token|access_token)=)[^&\s]+/gi, "$1[hidden]")
     .slice(0, 1200);
 }
@@ -44,7 +44,7 @@ export function shouldTryAiModel(error: unknown): boolean { return aiErrorPlan(e
 type ExplainOptions = { tr: boolean; label?: string; model?: string; secrets?: string[] };
 /** A short message that says what to do. Provider detail follows in brackets, with keys masked. */
 export function explainAiError(error: unknown, o: ExplainOptions): string {
-  if ((error as any)?.friendly) return String((error as any).message);
+  if ((error as any)?.friendly) return safeAiError((error as any).message,o.secrets);
   const kind = classifyAiError(error), tr = o.tr;
   const who = o.label || (tr ? "Sağlayıcı" : "The provider");
   const m = o.model ? ` (${o.model})` : "";
@@ -95,6 +95,11 @@ export function cleanChatMessage<T extends { role: string; text: string }>(m: T)
   if ("song" in o && !(isObj(o.song) && isText(o.song.query) && Array.isArray(o.song.hits))) delete o.song;
   if ("book" in o && !(isObj(o.book) && isText(o.book.query) && Array.isArray(o.book.hits))) delete o.book;
   if ("page" in o && !(isObj(o.page) && isText(o.page.url) && isText(o.page.title) && Number.isFinite(o.page.at))) delete o.page;
+  if(isObj(o.film)){
+   o.film={...o.film,overview:isText(o.film.overview)?o.film.overview:"",genres:Array.isArray(o.film.genres)?o.film.genres.filter(isText):[]};
+   for(const key of ["director","original","tagline","year","altYear","poster","backdrop"])if(o.film[key]!==undefined&&o.film[key]!==null&&!isText(o.film[key]))delete o.film[key];
+  }
+  for(const card of ["song","book"])if(isObj(o[card])){o[card]={...o[card],hits:o[card].hits.filter((hit:any)=>isObj(hit)&&isText(hit.title)&&isText(hit.url)&&(card!=="book"||isText(hit.author)&&isText(hit.id)))};}
   return o as T;
 }
 export function cleanChatMessages<T extends { role: string; text: string }>(raw: unknown): T[] {

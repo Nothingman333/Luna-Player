@@ -1,3 +1,4 @@
+import {logDebug} from "./debugTelemetry";
 import {MusicPlaylistTools,PlaylistUtilities,SaveQueuePlaylist} from "./MusicPlaylistTools";
 import {validPlaylist,playlistCollection,uniquePlaylistName,reorderPlaylist,audioResume,storedAudioPosition} from "./musicWorkspaceModel";
 import {extraText,ExtraModal} from "./Extras";
@@ -15,6 +16,8 @@ import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { open } from "@tauri-apps/plugin-dialog";
 import { fmtTime, mpv, MpvState, setProp } from "./mpv";
+import { BarMarks, MusicSoundButton } from "./PlaybackExtras";
+import { PodcastExtras } from "./PodcastExtras";
 import { store } from "./library";
 import { I, Icon, MenuEntry, openMenu } from "./Screens";
 import { ReasonPicker, TastePanel } from "./TastePanel";
@@ -46,6 +49,12 @@ function useMusicLibrary() {
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState(false);
   const [tick, setTick] = useState(0);
+  // the folder watcher found new or removed music files
+  useEffect(() => {
+    const f = (e: Event) => { if (((e as CustomEvent).detail?.kinds ?? ["music"]).includes("music")) { libCache = null; setTick((n) => n + 1); } };
+    window.addEventListener("luna-rescan", f);
+    return () => window.removeEventListener("luna-rescan", f);
+  }, []);
   const sig = folders.join("|");
   useEffect(()=>{const update=()=>{libCache=null;setFoldersState(loadMusicFolders());setTick(n=>n+1);};window.addEventListener("luna-library",update);return()=>window.removeEventListener("luna-library",update);},[]);
   useEffect(() => {
@@ -150,7 +159,8 @@ const P = {
   volume: 100, // mpv's volume, reported by the dock (the reader's music popup has its own slider)
 };
 const subs = new Set<() => void>();
-const changed = () => subs.forEach((f) => f());
+let debugQueueSignature="";
+const changed = () => {const signature=JSON.stringify([P.queue.length,P.index,P.paused,P.repeat,P.shuffle]);if(signature!==debugQueueSignature){debugQueueSignature=signature;logDebug("player","Music queue",{count:P.queue.length,index:P.index,paused:P.paused,repeat:P.repeat,shuffle:P.shuffle});}subs.forEach((f) => f());};
 let loadGeneration = 0;
 let wantsPlayback = true;
 export const beginMusicSelection=()=>++loadGeneration;
@@ -2444,7 +2454,7 @@ function Seek({ mp, big }: { mp: MP; big?: boolean }) {
       <span>{fmtTime(mp.time)}</span>
       <div className="mu-bar" role="slider" tabIndex={0} aria-label={tt("Çalma konumu")} aria-valuemin={0} aria-valuemax={Math.max(0, Math.round(mp.duration))}
         aria-valuenow={Math.max(0, Math.round(mp.time))} aria-valuetext={`${fmtTime(mp.time)} / ${fmtTime(mp.duration)}`}
-        onPointerDown={go} onPointerMove={go} onKeyDown={key}><div style={{ width: f * 100 + "%" }} /></div>
+        onPointerDown={go} onPointerMove={go} onKeyDown={key}><BarMarks duration={mp.duration} /><div style={{ width: f * 100 + "%" }} /></div>
       <span>{fmtTime(mp.duration)}</span>
     </div>
   );
@@ -2495,6 +2505,7 @@ function NowPlaying({ mp, onAir }: { mp: MP; onAir: string | null }) {
         )}
         {!c.radio && !c.podcast && !c.book && <button className="chip mu-np-like" title={tt("Asistan bu şarkıya benzeyen şarkıları bulur; istersen bir listeni onlarla genişletir ya da yeni liste yapar")} onClick={() => askAssistant(likeThisSongs(c.title, c.artist, loadMusicPlaylists().find((p) => p.id === m.from)?.name), tt("“{0}” gibi şarkılar bul", c.title))}>✦ {tt("Bunun gibi şarkılar bul")}</button>}
         {(c.podcast||c.book)&&<button className="chip" onClick={()=>{store.set((c.podcast?"podPos:":"audioPos:")+c.src,"0");loadCurrent();}} title={extraText("Bu bölümdeki dinleme konumunu sıfırla","Reset listening position for this chapter")}>{extraText("Bölümü baştan dinle","Restart this chapter")}</button>}
+        {!c.radio && <MusicSoundButton />}
         <button className="round" aria-label={tt("Asistana sor")} title={tt("Asistana sor")} onClick={openAssistant}>
           <Icon d={I.chat} size={19} />
         </button>
@@ -2522,6 +2533,7 @@ function NowPlaying({ mp, onAir }: { mp: MP; onAir: string | null }) {
                 <h3>{c.title}</h3>
                 {epAbout === undefined ? <div className="muted pulse">{tt("Bölüm bilgisi getiriliyor…")}</div>
                   : epAbout ? <p>{epAbout}</p> : <div className="muted">{tt("Bu bölüm için açıklama yok.")}</div>}
+                <PodcastExtras feed={c.podcast} src={c.src} time={mp.time} />
               </div>
             )
             : tab === "queue" ? (

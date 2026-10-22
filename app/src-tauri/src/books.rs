@@ -302,6 +302,21 @@ fn natural(a: &str, b: &str) -> std::cmp::Ordering {
     key(a).cmp(&key(b))
 }
 
+/// The ComicInfo.xml inside a comic archive (the de-facto standard of comic taggers), read at most 256 KB.
+fn comic_info_of(p: &Path) -> Option<crate::shell_core::ComicInfo> {
+    let mut z = zip::ZipArchive::new(std::fs::File::open(p).ok()?).ok()?;
+    let name = z.file_names().find(|n| n.eq_ignore_ascii_case("ComicInfo.xml"))?.to_string();
+    let f = z.by_name(&name).ok()?;
+    if f.size() > 256 * 1024 {
+        return None;
+    }
+    let mut raw = Vec::new();
+    f.take(256 * 1024 + 1).read_to_end(&mut raw).ok()?;
+    let text = String::from_utf8_lossy(raw.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&raw)).into_owned();
+    let ci = crate::shell_core::comic_info(&text);
+    (ci.series.is_some() || ci.title.is_some()).then_some(ci)
+}
+
 pub fn cbz_page(p: &Path, name: &str) -> Result<Vec<u8>, String> {
     let mut z = zip::ZipArchive::new(std::fs::File::open(p).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     zip_bytes(&mut z, name).ok_or_else(|| tr!("Sayfa okunamadı", "Couldn't read the page"))
@@ -317,7 +332,16 @@ fn read(p: &Path, size: u64, mtime: u64, covers: &Path) -> Book {
     };
     let meta = match kind.as_str() {
         "epub" => epub_meta(p),
-        "cbz" => cbz_pages(p).ok().and_then(|n| n.first().cloned()).and_then(|first| cbz_page(p, &first).ok()).map(|c| Meta { isbn: None, title: None, author: None, lang: None, cover: Some(c) }),
+        "cbz" => {
+            let info = comic_info_of(p);
+            let cover = cbz_pages(p).ok().and_then(|n| n.first().cloned()).and_then(|first| cbz_page(p, &first).ok());
+            let title = info.as_ref().and_then(crate::shell_core::comic_title);
+            if cover.is_none() && title.is_none() {
+                None
+            } else {
+                Some(Meta { isbn: None, title, author: info.as_ref().and_then(|i| i.writer.clone()), lang: info.and_then(|i| i.lang), cover })
+            }
+        }
         _ => None,
     };
     let cover = meta.as_ref().and_then(|m| m.cover.as_ref()).and_then(|bytes| {
@@ -331,7 +355,7 @@ fn read(p: &Path, size: u64, mtime: u64, covers: &Path) -> Book {
         title: meta.as_ref().and_then(|m| m.title.clone()).unwrap_or(ft),
         author: meta.as_ref().and_then(|m| m.author.clone()).unwrap_or(fa),
         isbn: meta.as_ref().and_then(|m| m.isbn.clone()),
-        metadata_version: 1,
+        metadata_version: if kind == "cbz" { 2 } else { 1 },
         lang: meta.and_then(|m| m.lang),
         kind,
         cover,
@@ -362,7 +386,7 @@ pub fn scan(folders: &[String], index_file: &Path, covers: &Path) -> Vec<Book> {
             let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
             let mtime = meta.and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
             match old.get(&*p.to_string_lossy()) {
-                Some(b) if b.metadata_version == 1 && b.size == size && b.mtime == mtime && b.cover.as_ref().is_none_or(|c| Path::new(c).exists()) => b.clone(),
+                Some(b) if b.metadata_version == if b.kind == "cbz" { 2 } else { 1 } && b.size == size && b.mtime == mtime && b.cover.as_ref().is_none_or(|c| Path::new(c).exists()) => b.clone(),
                 _ => read(p, size, mtime, covers),
             }
         })

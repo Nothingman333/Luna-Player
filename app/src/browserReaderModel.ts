@@ -16,12 +16,12 @@ export function readerBlocks(text: string, title = ""): ReaderBlock[] {
     const heading = /^(#{1,6})\s+(.+)$/.exec(line);
     if (heading) { blocks.push({ kind: "heading", level: heading[1].length, text: heading[2] }); continue; }
     if (/^- \S/.test(line)) { blocks.push({ kind: "item", text: line.slice(2) }); continue; }
-    if (line.includes(" | ")) { const cells = line.split(" | ").map(c => c.trim()).filter(Boolean); if (cells.length > 1) { blocks.push({ kind: "row", cells: cells.slice(0, 12) }); continue; } }
+    if (line.includes(" | ")) { const cells = line.split(" | ").map(c => c.trim()); if (cells.length > 1) { blocks.push({ kind: "row", cells: cells.slice(0, 12) }); continue; } }
     blocks.push({ kind: "para", text: line });
   }
   // A first heading that only restates the page title adds nothing under the reader's own title.
   const same = (a: string) => a.replace(/\s+/g, " ").trim().toLocaleLowerCase();
-  if (title && blocks[0]?.kind === "heading" && (same(title).startsWith(same(blocks[0].text)) || same(blocks[0].text) === same(title))) blocks.shift();
+  if (title && blocks[0]?.kind === "heading" && same(blocks[0].text) === same(title)) blocks.shift();
   return blocks;
 }
 

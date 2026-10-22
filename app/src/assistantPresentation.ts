@@ -38,7 +38,7 @@ export function safeHttpUrl(raw:unknown):string|null{
  try{const u=new URL(raw.trim());if(!["http:","https:"].includes(u.protocol)||u.username||u.password||!u.hostname)return null;return u.href;}catch{return null;}
 }
 export const hostOf=(url:string)=>{try{return new URL(url).hostname.replace(/^www\./,"");}catch{return "";}};
-const urlId=(href:string)=>{try{const u=new URL(href);return (u.origin+u.pathname.replace(/\/+$/,"")+u.search).toLowerCase();}catch{return href;}};
+const urlId=(href:string)=>{try{const u=new URL(href);return u.origin+u.pathname.replace(/\/+$/,"")+u.search;}catch{return href;}};
 /** Two addresses are the same page when only a fragment or a trailing slash differs. */
 export const sameUrl=(a:string,b:string)=>urlId(a)===urlId(b);
 /** Sources shown under an answer: valid addresses only, one per page, a short single-line title. */
@@ -70,3 +70,8 @@ export type NoteTone="ok"|"warn"|"cancel"|"info";
 export function noteSegments(note:string):{text:string;tone:NoteTone}[]{
  return String(note??"").split("\n").map(s=>s.trim()).filter(Boolean).map(text=>({text,tone:(text.startsWith("✓")?"ok":text.startsWith("⚠")?"warn":text.startsWith("✕")||text.startsWith("⏹")?"cancel":"info") as NoteTone}));
 }
+
+/** Plain text export preserves the conversation without Markdown role formatting. */
+export function conversationText(messages:AssistantMessage[],title:string){return title.replace(/[\r\n]+/g," ").trim()+"\n\n"+messages.map(m=>(m.role==="user"?"You":"Luna")+":\n"+m.text+"\n"+sourceLines(m).join("\n")).join("\n\n");}
+/** Only complete fenced code blocks; text outside the blocks is never executed. */
+export function assistantCode(text:string){return [...text.matchAll(/```[^\r\n]*\r?\n([\s\S]*?)\r?\n```/g)].map(m=>m[1]).join("\n\n");}

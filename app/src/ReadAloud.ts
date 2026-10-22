@@ -134,7 +134,7 @@ export function loadVoices(): Promise<Voice[]> {
   const c = raw && typeof raw.at === "number" && Array.isArray(raw.l) ? { at: raw.at, l: raw.l.filter(usableVoice) } : null;
   if (c && Date.now() - c.at < 7 * 864e5 && c.l.length) return Promise.resolve(c.l);
   return (voiceList ??= invoke<Voice[]>("tts_voices")
-    .then((list) => { const l = Array.isArray(list) ? list.filter(usableVoice) : []; store.set("ttsVoices2", JSON.stringify({ at: Date.now(), l })); store.remove("ttsVoices"); return l; })
+    .then((list) => { const l = Array.isArray(list) ? list.filter(usableVoice) : []; if(l.length){store.set("ttsVoices2", JSON.stringify({ at: Date.now(), l }));store.remove("ttsVoices");}else voiceList=null;return l; })
     .catch(() => { voiceList = null; return c?.l ?? []; }));
 }
 /** How good a voice is for reading a book, best first (from Microsoft's own kinds and the voice's generation):
@@ -215,6 +215,9 @@ const E = {
   waitingChapter: false,
   sleepT: undefined as ReturnType<typeof setTimeout> | undefined,
 };
+
+/** The open book's text source (the reader's host), for other ways of reading it such as RSVP; null when no book is open. */
+export const ttsHost = (): TtsHost | null => E.host;
 
 /** The reader opened (or closed: null) a book. */
 export function attachTts(host: TtsHost | null, book?: { path: string; title: string; lang?: string }) {

@@ -8,19 +8,25 @@ import type { SearchEngine } from "./browserSearchModel";
  * Luna Web's own history: pages that finished loading, kept only on this computer (localStorage
  * "lunaWebHistory"), paused with one switch. Pure helpers; Browser.tsx reads and writes the rows.
  */
-export type WebVisit = { url: string; title: string; at: number; first: number; count: number };
+export type WebVisit = { url: string; title: string; at: number; first: number; count: number; lastAdded?:boolean };
 export const HISTORY_KEY = "lunaWebHistory", HISTORY_PAUSED_KEY = "lunaWebHistoryPaused", SESSION_KEY = "lunaWebLastSession", HIDDEN_SITES_KEY = "lunaWebHiddenSites";
 export const HISTORY_LIMIT = 1000;
 
 const plainUrl = (url: string) => { try { return browserAddress(url) === url; } catch { return false; } };
 export const validVisit = (x: any): x is WebVisit => !!x && typeof x.url === "string" && x.url.length <= 2048 && plainUrl(x.url)
-  && typeof x.title === "string" && x.title.length <= 300 && Number.isFinite(x.at) && Number.isFinite(x.first) && x.first <= x.at
+  && typeof x.title === "string" && x.title.length <= 300 && Number.isFinite(x.at) && Number.isFinite(new Date(x.at).getTime()) && Number.isFinite(x.first) && x.first <= x.at
   && Number.isInteger(x.count) && x.count >= 1;
 
 /** Damaged rows are dropped one by one, never the whole history. */
 export function readVisits(raw: string | null): WebVisit[] {
   if (!raw) return [];
-  try { const rows: unknown = JSON.parse(raw); return Array.isArray(rows) ? rows.filter(validVisit).slice(0, HISTORY_LIMIT) : []; } catch { return []; }
+  try {
+    const rows:unknown=JSON.parse(raw);if(!Array.isArray(rows))return [];
+    const merged=new Map<string,WebVisit>();
+    for(const row of rows.filter(validVisit).sort((a,b)=>b.at-a.at)){const old=merged.get(row.url);if(old)old.count=Math.max(old.count,row.count);else merged.set(row.url,{...row});}
+    return [...merged.values()].slice(0,HISTORY_LIMIT);
+  }catch{return [];}
+
 }
 
 const cleanTitle = (title: string, url: string) => title.replace(/\s+/g, " ").trim().slice(0, 300) || hostLabel(url);
@@ -31,8 +37,8 @@ export function recordVisit(rows: WebVisit[], url: string, title: string, at: nu
   if (!plainUrl(url) || url.length > 2048) return rows;
   const old = rows.find(v => v.url === url);
   // A reload or a redirect landing seconds later is the same visit, not a new one.
-  const repeat = old && at - old.at < 30_000;
-  const visit: WebVisit = { url, title: cleanTitle(title || old?.title || "", url), at, first: old?.first ?? at, count: (old?.count ?? 0) + (repeat ? 0 : 1) || 1 };
+  const repeat = old && at>=old.at && at - old.at < 30_000;
+  const visit: WebVisit = { url, title: cleanTitle(title || old?.title || "", url), at, first: Math.min(old?.first??at,at), lastAdded:!repeat, count: (old?.count ?? 0) + (repeat ? 0 : 1) || 1 };
   return [visit, ...rows.filter(v => v.url !== url)].slice(0, limit);
 }
 
@@ -46,7 +52,7 @@ export function retitleVisit(rows: WebVisit[], url: string, title: string): WebV
 /** A failed load (error page) right after it was recorded is taken back out. */
 export function forgetFailedVisit(rows: WebVisit[], url: string, now: number): WebVisit[] {
   const v = rows.find(r => r.url === url);
-  if (!v || now - v.at > 60_000) return rows;
+  if (!v || v.lastAdded===false || now - v.at > 60_000) return rows;
   return v.count <= 1 ? rows.filter(r => r.url !== url) : rows.map(r => r.url === url ? { ...r, count: r.count - 1 } : r);
 }
 
@@ -149,13 +155,13 @@ export function webSuggestions(input: string, sources: { tabs: { id: number; tit
     if (searches.size >= 2) break;
   }
   const search: Suggestion = { kind: "search", query: text, title: tr ? `${engine.name} ile ara: ${text}` : `Search ${engine.name} for ${text}` };
-  return [...pages, search, ...[...searches].map(s => ({ kind: "search" as const, query: s, title: s }))].slice(0, limit + 1);
+  return [...pages, search, ...[...searches].map(s => ({ kind: "search" as const, query: s, title: s }))].slice(0, limit);
 }
 
 /** The open tabs as they were, to offer "continue where you left off" next time. */
-export const sessionTabs = (tabs: { title: string; url: string }[]) => cleanWebTabs(tabs, 8);
+export const sessionTabs = (tabs: { title: string; url: string }[]) => (Array.isArray(tabs)?tabs:[]).flatMap(tab=>cleanWebTabs([tab],1)).slice(0,8);
 export function readSession(raw: string | null): SavedWebTab[] {
-  try { const data = JSON.parse(raw || "null"); return cleanWebTabs(Array.isArray(data) ? data : data?.tabs, 8); } catch { return []; }
+  try { const data = JSON.parse(raw || "null"); return sessionTabs(Array.isArray(data) ? data : data?.tabs); } catch { return []; }
 }
 
 /** A stable hue per host for the letter avatars (no network needed). */

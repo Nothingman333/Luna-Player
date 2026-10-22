@@ -58,7 +58,9 @@ export type CatalogResult = { groups: CatalogGroup[]; list: Item[]; titles: numb
 const filesOf = (item: Item) => (Array.isArray(item.files) ? item.files : []);
 
 function groupState(members: Item[], idx: Map<string, Progress>, finished: (p: string) => boolean): WatchState {
-  const states = members.flatMap((m) => filesOf(m).map((f) => fileState(idx.get(f.path)?.rec, finished(f.path))));
+  const episodeStates=new Map<string,number>();
+  for(const m of members)for(const f of filesOf(m)){const key=m.parsed.kind==="tv"&&f.episode!=null?`${f.season??0}:${f.episode}`:f.path;episodeStates.set(key,Math.max(episodeStates.get(key)??0,fileState(idx.get(f.path)?.rec,finished(f.path))));}
+  const states=[...episodeStates.values()];
   if (!states.length) return "unwatched";
   const tv = members[0].parsed.kind === "tv";
   if (tv ? states.every((n) => n === 2) : states.some((n) => n === 2)) return "watched";
@@ -67,18 +69,19 @@ function groupState(members: Item[], idx: Map<string, Progress>, finished: (p: s
 
 function resumeOf(members: Item[], idx: Map<string, Progress>, finished: (p: string) => boolean): ResumeInfo | null {
   const tv = members[0].parsed.kind === "tv";
-  let best: { path: string; itemKey: string; rank: number; rec: Recent; season?: number; episode?: number } | null = null;
+  const candidates: { path: string; itemKey: string; rank: number; rec: Recent; season?: number; episode?: number }[]=[];
   const episodes = new Map<string, boolean>(); // episode key -> finished (any copy)
   for (const m of members) for (const f of filesOf(m)) {
     const p = idx.get(f.path), fin = fileState(p?.rec, finished(f.path)) === 2;
     if (tv) { const k = f.episode != null ? `${f.season ?? 0}:${f.episode}` : "f:" + f.path; episodes.set(k, (episodes.get(k) ?? false) || fin); }
-    if (p && !fin && fileState(p.rec, false) === 1 && (!best || p.rank < best.rank)) best = { path: f.path, itemKey: m.key, rank: p.rank, rec: p.rec, season: f.season, episode: f.episode };
+    if (p && !fin && fileState(p.rec, false) === 1) candidates.push({ path: f.path, itemKey: m.key, rank: p.rank, rec: p.rec, season: f.season, episode: f.episode });
   }
+  const best=candidates.filter(c=>!tv||c.episode==null||!episodes.get(`${c.season??0}:${c.episode}`)).sort((a,b)=>a.rank-b.rank)[0];
   const watched = tv ? [...episodes.values()].filter(Boolean).length : 0, total = tv ? episodes.size : 0;
   if (!best && !(tv && watched > 0)) return null;
   if (!best) return { path: null, itemKey: members[0].key, fraction: 0, remaining: 0, watched, total };
   const fr = fraction(best.rec);
-  return { path: best.path, itemKey: best.itemKey, fraction: fr, remaining: Math.max(0, best.rec.duration - best.rec.time), episode: tv ? { season: best.season, episode: best.episode } : undefined, watched, total };
+  return { path: best.path, itemKey: best.itemKey, fraction: fr, remaining: Number.isFinite(best.rec.duration)?Math.max(0, best.rec.duration - best.rec.time):0, episode: tv ? { season: best.season, episode: best.episode } : undefined, watched, total };
 }
 
 /** Distinct episodes of a series: copies of one episode are one, a file without an episode number counts by itself. */
@@ -195,24 +198,26 @@ export function safeMeta(meta: Meta | null | undefined, fallbackKind: "movie" | 
   const rating = Number(m.rating);
   const cast = Array.isArray(m.cast) ? m.cast.filter((c): c is Record<string, unknown> => !!c && typeof c === "object" && !!text((c as Record<string, unknown>).name)) : [];
   return {
-    id: Number.isFinite(Number(m.id)) ? Number(m.id) : 0,
+    id: Number.isSafeInteger(Number(m.id)) && Number(m.id)>0 ? Number(m.id) : 0,
     kind: m.kind === "tv" || m.kind === "movie" ? m.kind : fallbackKind,
     title: text(m.title), year: text(m.year), overview: text(m.overview), poster: path(m.poster), backdrop: path(m.backdrop),
     rating: Number.isFinite(rating) && rating > 0 && rating <= 10 ? rating : 0,
     genres: Array.isArray(m.genres) ? m.genres.filter((g): g is string => typeof g === "string" && !!g.trim()) : [],
     runtime: (() => { const n = Number(m.runtime); return Number.isFinite(n) && n >= 1 && n <= 1440 ? Math.round(n) : 0; })(),
     seasons: (() => { const n = Number(m.seasons); return Number.isInteger(n) && n > 0 && n < 1000 ? n : 0; })(),
-    cast: cast.map((c) => ({ id: Number.isFinite(Number(c.id)) && Number(c.id) > 0 ? Number(c.id) : undefined, name: text(c.name), character: text(c.character), profile: path(c.profile) })),
+    cast: cast.map((c) => ({ id: Number.isSafeInteger(Number(c.id)) && Number(c.id) > 0 ? Number(c.id) : undefined, name: text(c.name), character: text(c.character), profile: path(c.profile) })),
   };
 }
 /** "1 h 33 min" / "45 min": no "0 h" and no fractions. */
 export function formatRuntime(minutes: number, hour: string, min: string): string {
+  if(!Number.isFinite(minutes))return "";
   const n = Math.round(minutes);
   if (!(n > 0)) return "";
   return n < 60 ? `${n} ${min}` : n % 60 ? `${Math.floor(n / 60)} ${hour} ${n % 60} ${min}` : `${n / 60} ${hour}`;
 }
 /** Time left on a half-watched file: "38 min", "1 h 12 min". */
 export function formatRemaining(seconds: number, hour: string, min: string): string {
+  if(!Number.isFinite(seconds)||seconds<=0)return "";
   const m = Math.max(1, Math.ceil(seconds / 60));
   return formatRuntime(m, hour, min);
 }

@@ -70,6 +70,8 @@ function useOf(pr: AiProfile): AiUse {
   const base = cleanBase(pr.base);
   return { provider: pr.provider, model: pr.model || spec(pr.provider).model, key: pr.provider === "custom" ? (base ? key || "-" : "") : key, base, label: pr.name };
 }
+/** A saved profile as the service, model, key and base URL a request uses. */
+export const useOfProfile = (pr: AiProfile): AiUse => useOf(pr);
 /** The assistant's profile, if one is chosen (Settings › Accounts). */
 const activeProfile = () => aiProfile(store.get("aiProfile"));
 
@@ -269,4 +271,18 @@ export async function reviewAiJson(system: string, user: string, r = reviewAi())
   const text = (res?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? "").join("");
   const json = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
   return JSON.parse(json);
+}
+
+/** One JSON answer from the assistant's own service (Settings › Accounts), e.g. for the subtitle
+ *  studio's translations and word explanations. The request is in Gemini's shape. */
+export async function assistantJson(system: string, user: string, use: AiUse = captureAiUse(), temperature = 0.2): Promise<any> {
+  if (!use.key) throw new Error("nokey");
+  const body = { systemInstruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts: [{ text: user }] }], generationConfig: { responseMimeType: "application/json", temperature } };
+  const res = use.provider === "gemini"
+    ? await invoke<any>("gemini", { key: use.key, model: use.model, body })
+    : (await otherAi(body, use)).r;
+  const text = (res?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? "").join("");
+  const start = text.indexOf("{"), end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("The AI answer had no JSON");
+  return JSON.parse(text.slice(start, end + 1));
 }

@@ -44,6 +44,14 @@ recommend, or connect their Letterboxd, and see everything in one place.
 link or a `.torrent` file, and Luna plays it. Torrents start playing while they download. Press **Ctrl+N** or just
 paste a link into the window.
 
+**Subtitles that make themselves.** No subtitle found? Luna can write one from the audio on your own computer (Whisper, nothing leaves it), translate any subtitle with your own AI, line a subtitle up with the sound (and see the speech against the lines before you apply it), clean it up with every change listed, and show a second language underneath. A transcript panel (**R**) lists every line, with the second language under it: search, click to jump, click a word to see what it means or save it for Anki, export it all as text or Markdown. **I** skips the intro, recap or credits when the video's chapters or your marks say where they are.
+
+**Luna and Windows.** Close to the tray and keep the music going, media keys everywhere, notifications, a folder watcher that keeps the library fresh, a library-health check for copies and missing files, a scene grid and a clip maker for films, headphone correction (AutoEq), and where-to-watch and an episode calendar from TMDB. All of it is off until you switch it on.
+
+**Luna Özet and quote cards.** A story of your year in films, music and books with a card to keep, a "what should I watch tonight?" picker on the home page that fits your time and mood, and quote cards that set a subtitle line over the frame where it is said.
+
+**Find a scene by what was said.** Type a line you remember and Luna shows the films and moments where it is said, from the subtitle files beside your films.
+
 **Sharper picture with AI upscaling.** If you have [Lossless Scaling](https://store.steampowered.com/app/993090/Lossless_Scaling/)
 (a paid app on Steam), Luna switches it on for you while a video plays: sharper lower-resolution videos and smoother
 motion, with subtitles kept crisp on top. Press **Q** in the player or use the **UP** menu.
@@ -95,7 +103,7 @@ songs and books on that topic into one page. One history keeps what you watched,
 ## And more
 
 - **Updates by itself:** Luna finds new versions and installs them (signed, so only real Luna updates go in).
-- **A backup in one file:** your library, likes, history and settings, to keep or move to another computer.
+- **A backup in one file:** your library, likes, history and settings, to keep or move to another computer, or made automatically into a folder you choose (daily or weekly).
 - A first-run tour, and a check that tells you if anything is missing, with download links
 - Hide posters of films with disturbing content (optional)
 - English and Turkish (change it in Settings)

@@ -68,7 +68,7 @@ export function permissionNotice(kind: string, tr: boolean): string {
 
 /** The message for a finished navigation of the page in use. A stopped load is not an error. */
 export function navFailure(done: NavDone, tr: boolean, stopped: boolean): string | null {
-  if (done.ok || stopped) return null;
+  if (stopped || done.ok && done.http < 400) return null;
   const code = done.http > 0 ? ` (HTTP ${done.http})` : "";
   return tr
     ? `Sayfa yüklenemedi${code}. Adresi kontrol edip yeniden dene.`

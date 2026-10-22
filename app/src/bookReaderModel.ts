@@ -19,8 +19,9 @@ export async function displayFirstWorking(display: (target?: string) => Promise<
  *  page positions of the whole book are known (they are generated in the background and are not there
  *  when the book is closed again quickly). undefined: nothing to estimate from. */
 export function spineProgress(index: unknown, count: unknown, page?: number, pages?: number, atEnd?: boolean): number | undefined {
-  if (atEnd) return 1;
-  if (typeof index !== "number" || typeof count !== "number" || !Number.isFinite(index) || !Number.isFinite(count) || !(count > 0) || index < 0) return undefined;
+
+  if (typeof index !== "number" || typeof count !== "number" || !Number.isFinite(index) || !Number.isFinite(count) || !Number.isInteger(index) || !Number.isInteger(count) || !(count > 0) || index < 0 || index >= count) return undefined;
+  if(atEnd)return 1;
   const within = pages && pages > 0 && page && page > 0 ? Math.min(1, (page - 1) / pages) : 0;
   return Math.max(0, Math.min(1, (index + within) / count));
 }

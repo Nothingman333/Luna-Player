@@ -1,9 +1,10 @@
+import {BrowserHistory} from "./BrowserHistory";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
-import { ExtraModal, exportExtra } from "./Extras";
+import { ExtraModal } from "./Extras";
 import { lang } from "./i18n";
 import { BrowserIcon as WebIcon } from "./BrowserIcons";
-import { groupVisitsByDay, hostLabel, searchVisits, siteHue } from "./browserHistoryModel";
+import { hostLabel, siteHue } from "./browserHistoryModel";
 import { BANGS } from "./browserSearchModel";
 import type { Suggestion, WebVisit } from "./browserHistoryModel";
 import { readerBlocks, readerPlainText, readingStats, READER_KEY, readReaderPrefs } from "./browserReaderModel";
@@ -25,44 +26,14 @@ export function SiteAvatar({ url, size = 34, icon = true }: { url: string; size?
   </span>;
 }
 
-const timeOf = (t: number) => new Date(t).toLocaleTimeString(isTr() ? "tr-TR" : "en-GB", { hour: "2-digit", minute: "2-digit" });
+
 
 /** Ctrl+H: the local history, grouped by day, searchable, with per-row and time-range removal. */
 export function HistoryPanel({ rows, paused, setPaused, open, remove, clearSince, close }: {
   rows: WebVisit[]; paused: boolean; setPaused: (paused: boolean) => void; open: (url: string, newTab: boolean) => void;
   remove: (url: string) => void; clearSince: (since: number) => void; close: () => void;
 }) {
-  const [query, setQuery] = useState(""), [limit, setLimit] = useState(120), [status, setStatus] = useState("");
-  const found = useMemo(() => searchVisits(rows, query), [rows, query]);
-  const groups = useMemo(() => groupVisitsByDay(found.slice(0, limit), Date.now(), isTr()), [found, limit]);
-  const dayStart = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
-  return <ExtraModal title={label("Geçmiş", "History")} close={close}><div className="luna-extra web-history">
-    <div className="web-history-head">
-      <div><small>LUNA WEB</small><h3>{label("Gezdiğin sayfalar", "Where you have been")} <span>{rows.length}</span></h3></div>
-      <label className="web-switch"><input type="checkbox" checked={!paused} onChange={e => setPaused(!e.target.checked)}/><span/>{label("Geçmişi kaydet", "Keep history")}</label>
-    </div>
-    <p className="web-history-note">{label("Geçmiş yalnız bu bilgisayarda, Luna'nın içinde tutulur; hiçbir yapay zekâ isteğine eklenmez.", "History stays on this computer, inside Luna; it is never added to an AI request.")}</p>
-    <div className="web-history-search"><WebIcon name="search" size={15}/><input autoFocus aria-label={label("Geçmişte ara", "Search history")} placeholder={label("Başlık veya adres ara…", "Search titles or addresses…")} value={query} onChange={e => { setQuery(e.target.value); setLimit(120); }}/></div>
-    <div className="extra-row web-history-actions">
-      <button className="chip" disabled={!rows.length} onClick={() => { clearSince(Date.now() - 3_600_000); setStatus(label("Son bir saat silindi.", "The last hour was removed.")); }}>{label("Son 1 saati sil", "Remove last hour")}</button>
-      <button className="chip" disabled={!rows.length} onClick={() => { clearSince(dayStart()); setStatus(label("Bugünün geçmişi silindi.", "Today's history was removed.")); }}>{label("Bugünü sil", "Remove today")}</button>
-      <button className="chip" disabled={!rows.length} onClick={() => { if (confirm(label("Bütün Luna Web geçmişi silinsin mi?", "Remove all Luna Web history?"))) { clearSince(0); setStatus(label("Geçmiş temizlendi.", "History cleared.")); } }}>{label("Tümünü sil", "Remove all")}</button>
-      <button className="chip" disabled={!rows.length} onClick={() => void exportExtra("Luna-web-gecmisi.json", JSON.stringify({ version: 1, history: rows }, null, 2)).then(ok => ok && setStatus(label("Geçmiş dışa aktarıldı.", "History exported.")))}>{label("Dışa aktar", "Export")}</button>
-    </div>
-    {status && <div className="extra-status" role="status">{status}</div>}
-    <div className="web-history-list">
-      {groups.map(g => <section key={g.key}><h4>{g.label}</h4>{g.rows.map(v => <div className="web-history-row" key={v.url}>
-        <time>{timeOf(v.at)}</time>
-        <button className="web-history-open" title={v.url + "\n" + label("Orta tık veya Ctrl+tık: yeni sekme", "Middle-click or Ctrl+click: new tab")} onClick={e => open(v.url, e.ctrlKey || e.metaKey)} onAuxClick={e => { if (e.button === 1) { e.preventDefault(); open(v.url, true); } }}>
-          <SiteAvatar url={v.url} size={26}/><span><b>{v.title}</b><small>{hostLabel(v.url)}{v.count > 1 ? " · " + label(`${v.count} kez`, `${v.count} visits`) : ""}</small></span>
-        </button>
-        <button className="web-history-remove" aria-label={label(v.title + " kaydını sil", "Remove " + v.title)} title={label("Geçmişten sil", "Remove from history")} onClick={() => remove(v.url)}><WebIcon name="close" size={13}/></button>
-      </div>)}</section>)}
-      {!rows.length && <div className="web-empty"><WebIcon name="globe" size={30}/><p>{paused ? label("Geçmiş kaydı kapalı. Açınca ziyaret ettiğin sayfalar burada görünür.", "History is paused. Turn it on to see the pages you visit here.") : label("Henüz geçmiş yok. Açtığın sayfalar burada birikir.", "No history yet. The pages you open will gather here.")}</p></div>}
-      {rows.length > 0 && !found.length && <p className="web-history-note">{label("Eşleşen kayıt yok.", "No matching entries.")}</p>}
-      {found.length > limit && <button className="chip web-history-more" onClick={() => setLimit(n => n + 200)}>{label(`Daha fazla göster (${found.length - limit})`, `Show more (${found.length - limit})`)}</button>}
-    </div>
-  </div></ExtraModal>;
+  return <BrowserHistory rows={rows.map(r=>({url:r.url,title:r.title,at:r.at,visits:r.count}))} remember={!paused} onKeepChange={value=>setPaused(!value)} onOpen={url=>open(url,false)} onOpenNew={url=>open(url,true)} onForget={remove} onClear={()=>clearSince(0)} onClearSince={clearSince} close={close}/>;
 }
 
 const KEYS: { group: [string, string]; rows: [string, string, string][] }[] = [

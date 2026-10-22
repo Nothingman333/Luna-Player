@@ -1,9 +1,10 @@
+import {paletteExtras} from "./paletteExtras";
+import {DebugHost} from "./DebugPanel";
 import { LibraryScanNotice } from "./EverydayTools";
 import { ttsActive, ttsStop } from "./ReadAloud";
 import { BulkRelink, MediaNotebook } from "./Extras";
 import { readActiveBrowserPage, translateActiveBrowser } from "./browserTranslation";
 import { Browser } from "./Browser";
-import { CommandPalette } from "./CommandPalette";
 import type { PaletteCommand } from "./CommandPalette";
 import { episodeNeighbor, leftBehind, recordableProgress } from "./playbackModel";
 import type { Progress } from "./playbackModel";
@@ -11,18 +12,27 @@ import type { ActiveWebTab } from "./Browser";
 import type { BrowserPage } from "./browserModel";
 import { createPortal } from "react-dom";
 import { defaultSubLangs, tt, pctText, lang } from "./i18n";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
-import { applySubOpts, fmtTime, isImageSub, isPgs, loadSubOpts, mpv, setProp, useMpv } from "./mpv";
+import { PlaybackRuntime } from "./PlaybackRuntime";
+import { BarMarks, EQ_ICON, SoundPanel, soundIsOn, SvgIcon, useExtras } from "./PlaybackExtras";
+import { CommandPalette } from "./CommandPalette";
+import { applySubOpts, fmtTime, isImageSub, isPgs, loadSubOpts, mainSubTrack, mpv, setProp, useMpv } from "./mpv";
 import { listen } from "@tauri-apps/api/event";
 import { copiesOf, customMeta, details, groupKey, IMG, seasonKey, isRemote, isUrl, torrentSrc, pinFile, relinkFile, isFinished, setFinished, nearEnd, Episode, Item, loadRecent, parseName, Recent, store, useLibrary } from "./library";
 import { SubtitleDialog } from "./Subtitles";
 import { Added, DownloadPanel, Downloads, DownloadsSection, downloadDir, RemoveMode, isOpenableLink, isTorrentSource, TorrentDialog, TorrentLoader, TorrentStat, useTorrents } from "./Torrent";
 import { Actions, Browse, CardMenu, Confirm, Details, Folders, Header, Home, I, Icon, MenuEntry, pct, pickFolder, Rematch, RenameFile, Settings, Target, View, MissingPanel, Mode, MenuHost, filmAsks, openMenu } from "./Screens";
 import SubTimeline from "./SubTimeline";
+import { SkipButton, skipLabel, StudioTab, SubtitleStudio, TranscriptPanel, WhisperPill } from "./SubtitleStudio";
+import { loadShaders, setSceneSource, subtitleText, SyncResult } from "./studioBridge";
+import { Cue, parseSubtitle } from "./subtitleModel";
+import { activeSegment, chapterSegments, Marks, markSegments, mergeSegments, segmentKey, Segment } from "./segmentModel";
+import { autoSkip } from "./StudioExtras";
+import { runAutoBackup } from "./Backup";
 import { fillTaste } from "./tasteFill";
 import { askAssistant, autoUpdateMyLetterboxd, ChatPanel, diaryGet, diarySet, migrateDiary, RecsPage, TitleDetail } from "./Taste";
 import type { DetailTarget } from "./Taste";
@@ -46,6 +56,19 @@ import { startUpdateChecks, UpdateBanner } from "./Update";
 import { collectEntry, endFilmSitting, MinePage, MineTab, noteFilm } from "./Mine";
 import "./App.css";
 import "./Refinements.css";
+import "./LunaPlus.css";
+import { ShellRuntime } from "./ShellRuntime";
+import { LibraryHealth } from "./LibraryHealth";
+import { CalendarModal } from "./CalendarView";
+import { ClipMaker } from "./ClipMaker";
+import { SceneGrid } from "./SceneGrid";
+import type { PanelName } from "./paletteExtras";
+import { LunaRecap } from "./LunaRecap";
+import { LineSearch } from "./LineSearch";
+import { aniskipOn, loadAniSkip } from "./aniskip";
+import { preferOwn } from "./aniskipModel";
+import { QuoteCard, QuoteSource } from "./QuoteCard";
+import "./LunaCreative.css";
 
 // (the same list the library scan accepts)
 const VIDEO_EXT = ["mkv", "mp4", "avi", "mov", "wmv", "webm", "m4v", "ts", "m2ts", "flv", "mpg", "mpeg"];
@@ -81,6 +104,7 @@ export default function App() {
   const [settings, setSettings] = useState(false);
   // Command palette (Ctrl+K): every part, page and film of the library from one box. Luna Web has its own.
   const [palette, setPalette] = useState(false);
+  useEffect(()=>{const show=()=>setPalette(true);window.addEventListener("luna-palette",show);return()=>window.removeEventListener("luna-palette",show);},[]);
   const [mine, setMine] = useState<MineTab | null>(null);
   const [mineOpen, setMineOpen] = useState<string | null>(null);
   const [tour, setTour] = useState(() => !tourSeen());
@@ -89,6 +113,18 @@ export default function App() {
   const [setup, setSetup] = useState(() => !setupSeen());
   const [detailsKey, setDetailsKey] = useState<string | null>(null);
   const [cues, setCues] = useState<[number, number][]>([]);
+  // subtitle studio: lines with their text (transcript panel, assistant's scene), studio window, skip marks
+  const [subCues, setSubCues] = useState<Cue[]>([]);
+  // the second subtitle's lines, shown under each line in the transcript
+  const [secCues, setSecCues] = useState<Cue[]>([]);
+  const [subRev, setSubRev] = useState(0);
+  const [studio, setStudio] = useState<{ tab: StudioTab; path: string } | null>(null);
+  const [transcript, setTranscript] = useState(false);
+  const [panel, setPanel] = useState<PanelName | null>(null);
+  const [quote, setQuote] = useState<QuoteSource | null>(null);
+  const [marksRev, setMarksRev] = useState(0);
+  const heard = useRef<{ time: number; text: string }[]>([]);
+  const skipped = useRef(new Set<string>());
   const tracksRef = useRef<any[]>([]);
   const pathRef = useRef<string | null>(null);
   const fromStart = useRef(false);
@@ -100,6 +136,8 @@ export default function App() {
 
   const [subDlg, setSubDlg] = useState<string | null>(null);
   const [showVset, setShowVset] = useState(false);
+  const [showSound, setShowSound] = useState(false);
+  useExtras();
   // Keyboard lock: keys do nothing while watching (no accidental skips); the mouse keeps working.
   const [kbLock, setKbLock] = useState(false);
   // 3-2-1 then play (pressing again cancels).
@@ -182,6 +220,12 @@ export default function App() {
       if (!p) return;
       const d = store.get("delay:" + p);
       setProp("sub-delay", d ? Number(d) : 0);
+      // frame-rate correction found by the studio's audio sync (1 = none)
+      const sp = Number(store.get("subspeed:" + p) ?? 1);
+      setProp("sub-speed", Number.isFinite(sp) && sp > 0.5 && sp < 2 ? sp : 1);
+      setProp("secondary-sid", "no");
+      heard.current = [];
+      skipped.current.clear();
       const pos = loadRecent().find((r) => r.path === p);
       if(noteJump.current?.path===p){void mpv("seek",noteJump.current.time,"absolute").catch(e=>flash(String(e),"warn"));noteJump.current=null;}
       else if (!fromStart.current && pos && pos.time > 10 && pos.time < pos.duration - 30)
@@ -205,6 +249,9 @@ export default function App() {
         } else if (typeof pref?.sid === "number") setProp("sid", pref.sid);
         // Look online only when nothing was chosen for this video before.
         if (!pref?.sid && !ext) setTimeout(() => autoSubtitles(p), 100);
+        // the second subtitle chosen for this video (e.g. a translation from the studio)
+        const sec = store.get("secSub:" + p);
+        if (sec) selectSecondary(p, sec, true);
         // From now on changes are the user's: save once right away (e.g. an auto-found subtitle).
         // (only if this file is still the one playing: a stale timer of file A must not end B's restore phase,
         // or B's saved dub/subtitle would be overwritten by mpv's defaults)
@@ -273,14 +320,14 @@ export default function App() {
     if (!p || restoring.current || isMusic) return;
     const audio = s.tracks.find((t) => t.type === "audio" && t.selected);
     const subs = s.tracks.filter((t) => t.type === "sub");
-    const sub = subs.find((t) => t.selected);
+    const sub = mainSubTrack(s.tracks, s.secondarySid);
     const pref: TrackPref = { ...store.json<TrackPref>("trk:" + p, {}) };
     if (audio) pref.aid = audio.id;
     if (sub?.external && sub["external-filename"]) { pref.sidExt = sub["external-filename"]; delete pref.sid; }
     else if (sub) { pref.sid = sub.id; delete pref.sidExt; store.remove("extSub:" + p); }
     else if (subs.length) { pref.sid = "no"; delete pref.sidExt; store.remove("extSub:" + p); } // turned off on purpose
     store.set("trk:" + p, JSON.stringify(pref));
-  }, [s.path, trackTick, JSON.stringify(s.tracks.map((t) => [t.id, t.type, t.selected]))]);
+  }, [s.path, trackTick, s.secondarySid, JSON.stringify(s.tracks.map((t) => [t.id, t.type, t.selected]))]);
   useEffect(() => {
     if (s.path && !restoring.current) store.set("adelay:" + s.path, String(s.audioDelay ?? 0));
   }, [s.audioDelay]);
@@ -619,15 +666,33 @@ export default function App() {
 
   const subFile = s.sub?.["external-filename"];
   useEffect(() => {
-    if (!subFile) { setCues([]); return; }
+    if (!subFile) { setCues([]); setSubCues([]); return; }
     // the lines of a subtitle that was switched away from meanwhile don't land on the new one;
     // in time order (an .ass file may list its lines in any order)
     let alive = true;
     invoke<[number, number][]>("subtitle_cues", { file: subFile })
       .then((c) => { if (alive) setCues([...c].sort((a, b) => a[0] - b[0])); })
       .catch(() => { if (alive) setCues([]); });
+    // with their text: the transcript panel and the assistant's "scene so far"
+    subtitleText(subFile).then((t) => { if (alive) setSubCues(parseSubtitle(t)); }).catch(() => { if (alive) setSubCues([]); });
     return () => { alive = false; };
-  }, [subFile]);
+  }, [subFile, subRev]);
+  const secFile = typeof s.secondarySid === "number" ? s.tracks.find((t) => t.type === "sub" && t.id === s.secondarySid)?.["external-filename"] : undefined;
+  useEffect(() => {
+    if (!secFile || !transcript) { setSecCues([]); return; }
+    let alive = true;
+    subtitleText(secFile).then((t) => { if (alive) setSecCues(parseSubtitle(t)); }).catch(() => { if (alive) setSecCues([]); });
+    return () => { alive = false; };
+  }, [secFile, transcript]);
+  // Embedded subtitles have no file to read: the lines seen while watching are kept instead.
+  useEffect(() => {
+    const t = (s.subText ?? "").trim();
+    if (!t || !playing) return;
+    const last = heard.current[heard.current.length - 1];
+    if (last?.text === t) return;
+    heard.current.push({ time: s.time, text: t.slice(0, 400) });
+    if (heard.current.length > 400) heard.current.splice(0, heard.current.length - 400);
+  }, [s.subText]);
 
   // Prefer the TMDB name ("Dizi — S01B03") over the raw file name.
   const current = s.path ? lib.itemFor(s.path) : undefined;
@@ -664,6 +729,100 @@ export default function App() {
     const id = setTimeout(() => setNextUp((n) => n && { ...n, count: n.count - 1 }), 1000);
     return () => clearTimeout(id);
   }, [nextUp]);
+
+  // ---------- skippable parts (chapter names, the series' marked intro) ----------
+  const markKey = current && current.parsed.kind === "tv" ? "skipMarks:" + current.key : null;
+  const marks = useMemo(() => (markKey ? store.json<Marks | null>(markKey, null) : null), [markKey, marksRev]);
+  // anime: opening and ending times from the community (AniSkip), only for what the file's own chapters and marks don't tell
+  const [aniSegs, setAniSegs] = useState<Segment[]>([]);
+  useEffect(() => {
+    setAniSegs([]);
+    if (!playing || !s.path || !aniskipOn() || !(s.duration > 300)) return;
+    const it = lib.itemFor(s.path);
+    const file = it?.files.find((f) => f.path === s.path);
+    if (!it || it.parsed.kind !== "tv" || !file?.episode || !(it.meta?.genres ?? []).some((g) => /^(animasyon|animation)$/i.test(g))) return;
+    let alive = true;
+    void loadAniSkip(s.path, { title: it.parsed.title, season: file.season, episode: file.episode, duration: s.duration }).then((r) => { if (alive) setAniSegs(r); });
+    return () => { alive = false; };
+  }, [s.path, playing, Math.round(s.duration)]);
+  const segments = useMemo(() => {
+    const own = [...chapterSegments(s.chapters, s.duration), ...markSegments(marks, s.duration)];
+    return mergeSegments(chapterSegments(s.chapters, s.duration), markSegments(marks, s.duration), preferOwn(own, aniSegs));
+  }, [s.chapters, s.duration, marks, aniSegs]);
+  const seg = playing ? activeSegment(segments, s.time) : null;
+  const skipNow = () => {
+    if (!seg) return;
+    skipped.current.add(segmentKey(seg));
+    mpv("seek", seg.end, "absolute");
+  };
+  useEffect(() => {
+    if (!seg || skipped.current.has(segmentKey(seg)) || !autoSkip()[seg.kind]) return;
+    skipped.current.add(segmentKey(seg));
+    mpv("seek", seg.end, "absolute");
+    showOsd(skipLabel(seg.kind) + " ✓", 1600);
+  }, [seg ? segmentKey(seg) : ""]);
+  const markIntro = (part: "introStart" | "introEnd" | null) => {
+    if (!markKey) return;
+    if (!part) { store.remove(markKey); setMarksRev((n) => n + 1); showOsd(tt("İntro işareti silindi")); return; }
+    const m = { ...(marks ?? {}), [part]: Math.round(s.time * 10) / 10 };
+    store.set(markKey, JSON.stringify(m));
+    setMarksRev((n) => n + 1);
+    showOsd(part === "introStart" ? tt("İntro başlangıcı: {0}", fmtTime(s.time)) : tt("İntro bitişi: {0}", fmtTime(s.time)), 2000);
+  };
+
+  // ---------- subtitle studio ----------
+  const sceneRef = useRef({ playing: false, title: "", time: 0, cues: [] as Cue[] });
+  sceneRef.current = { playing, title: displayTitle, time: s.time, cues: subCues };
+  useEffect(() => {
+    setSceneSource(() => (sceneRef.current.playing ? { ...sceneRef.current, heard: heard.current } : null));
+    return () => setSceneSource(null);
+  }, []);
+  /** Shows `file` as the second subtitle of the video at `path` (and remembers it for that video). */
+  const selectSecondary = (path: string, file: string, quiet = false) => {
+    store.set("secSub:" + path, file);
+    if (pathRef.current !== path) return;
+    const pick = (tries: number) => {
+      if (pathRef.current !== path) return;
+      const t = tracksRef.current.find((x) => x.type === "sub" && x["external-filename"] === file);
+      if (t) { setProp("secondary-sid", t.id); return; }
+      if (tries === 0) mpv("sub-add", file, "auto");
+      if (tries < 8) setTimeout(() => pick(tries + 1), 300);
+    };
+    pick(0);
+    if (!quiet) flash(tt("İkinci altyazı gösteriliyor"), "ok");
+  };
+  // "Preview in the video": the found delay/speed applied without saving; null puts back the old ones
+  const syncBefore = useRef<{ path: string; delay: number; speed: number } | null>(null);
+  const previewSync = (r: SyncResult | null) => {
+    if (r && s.path) {
+      if (!syncBefore.current) syncBefore.current = { path: s.path, delay: s.subDelay, speed: s.subSpeed ?? 1 };
+      setProp("sub-speed", r.ratio);
+      setProp("sub-delay", r.offset);
+    } else if (syncBefore.current) {
+      const b = syncBefore.current;
+      syncBefore.current = null;
+      if (pathRef.current === b.path) { setProp("sub-speed", b.speed); setProp("sub-delay", b.delay); }
+    }
+  };
+  const applySync = (r: SyncResult) => {
+    syncBefore.current = null;
+    if (!s.path) return;
+    setProp("sub-speed", r.ratio);
+    setProp("sub-delay", r.offset);
+    if (r.ratio !== 1) store.set("subspeed:" + s.path, String(r.ratio)); else store.remove("subspeed:" + s.path);
+    store.set("delay:" + s.path, String(r.offset));
+    flash(tt("Altyazı sesle eşleştirildi: {0} sn", (r.offset >= 0 ? "+" : "") + r.offset.toFixed(2)), "ok");
+  };
+  const attachRef = useRef<(path: string, file: string, label: string) => void>(() => {});
+  useEffect(() => {
+    void loadShaders();
+    const t = setTimeout(() => { void runAutoBackup().catch(() => {}); }, 45000);
+    // a Luna left open for days still backs up on schedule
+    const every = setInterval(() => { void runAutoBackup().catch(() => {}); }, 3600000);
+    const done = (e: Event) => { const d = (e as CustomEvent<{ path: string; file: string; label: string }>).detail; if (d?.path && d.file) attachRef.current(d.path, d.file, d.label); };
+    window.addEventListener("luna-studio-done", done);
+    return () => { clearTimeout(t); clearInterval(every); window.removeEventListener("luna-studio-done", done); };
+  }, []);
 
   useEffect(() => {
     const t = isMusic && music.now ? [music.now.title, music.now.artist].filter(Boolean).join(" — ") : playing ? displayTitle : "";
@@ -870,6 +1029,12 @@ export default function App() {
     const from = prev && h?.kind === "seek" ? h.to : s.time;
     return { kind: "seek", secs: total, to: Math.max(0, Math.min(s.duration || 0, from + secs)), n: ++hudN.current };
   });
+  // Ctrl+K rows and buttons open the library health, calendar, clip maker and scene grid
+  useEffect(() => {
+    const f = (e: Event) => setPanel((e as CustomEvent<PanelName>).detail ?? null);
+    window.addEventListener("luna-open", f);
+    return () => window.removeEventListener("luna-open", f);
+  }, []);
   const showOsd = (text: string, ms = 1200) => {
     setOsd(text);
     clearTimeout(osdTimer.current);
@@ -924,8 +1089,8 @@ export default function App() {
       else if (k === "f" || k === "f11") toggleFull();
       else if (k === "escape") {
         // an open panel or menu closes first; only then Esc leaves the film (back to the library)
-        if (showTracks || showUp || showVset || showSync || menu || subDlg) {
-          setShowTracks(false); setShowUp(false); setShowVset(false); setShowSync(false); setMenu(null); setSubDlg(null);
+        if (showTracks || showUp || showVset || showSound || showSync || menu || subDlg || transcript) {
+          setShowTracks(false); setShowUp(false); setShowVset(false); setShowSound(false); setShowSync(false); setMenu(null); setSubDlg(null); setTranscript(false);
         } else close();
       }
       else if (k === "m") { mpv("cycle", "mute"); showOsd(s.mute ? tt("Ses açık") : tt("Sessiz")); }
@@ -936,6 +1101,8 @@ export default function App() {
       else if (k === "e") mpv("frame-step");
       else if (k === "v") { mpv("cycle", "sid", alt ? "down" : "up"); showOsd(tt("Altyazı değişti")); }
       else if (k === "b") { mpv("cycle", "aid"); showOsd(tt("Ses parçası değişti")); }
+      else if (k === "g" && ctrl) { e.preventDefault(); setPanel("scenes"); }
+      else if (k === "x" && !ctrl && !alt && !shift) { void setProp("pause", true); setPanel("clip"); }
       else if (k === "g") { nudge(-0.05); showOsd(tt("Altyazı gecikmesi ") + sec(delayRef.current)); }
       else if (k === "h" && !ctrl) { nudge(0.05); showOsd(tt("Altyazı gecikmesi ") + sec(delayRef.current)); }
       else if (k === "j") { mpv("add", "audio-delay", -0.05); showOsd(tt("Ses gecikmesi ") + sec((s.audioDelay ?? 0) - 0.05)); }
@@ -954,6 +1121,8 @@ export default function App() {
       else if (k === "q" && !ctrl && !alt) toggleUpscalerQ();
       // ---- Luna extras ----
       else if (k === "u" && s.path) setSubDlg(s.path);
+      else if (k === "r" && !ctrl && !alt) setTranscript((v) => !v);
+      else if (k === "i" && !ctrl && !alt && seg) skipNow();
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key !== " " || !hold.current) return;
@@ -1117,6 +1286,7 @@ export default function App() {
     setFinished([path], watched);
   };
   const addSubtitle = (path: string) => setSubDlg(path);
+  attachRef.current = (path: string, file: string, label: string) => attachSubtitle(path, file, label);
   const attachSubtitle = (path: string, file: string, label: string) => {
     setSubDlg(null);
     store.set("extSub:" + path, file);
@@ -1284,6 +1454,7 @@ export default function App() {
       const name = it.meta?.title || it.parsed.title, year = it.meta?.year || (it.parsed.year ? String(it.parsed.year) : "");
       rows.push({ id: "item-" + it.key, group: films, title: name, detail: [year, (it.meta?.kind ?? it.parsed.kind) === "tv" ? tt("Dizi") : tt("Film"), ...(it.meta?.genres ?? []).slice(0, 2)].filter(Boolean).join(" · "), icon: "film", keywords: it.parsed.title + " " + (it.meta?.genres ?? []).join(" "), run: () => { part("film"); setDetailsKey(it.key); } });
     }
+    rows.push(...paletteExtras().map(row=>({id:row.id,group:row.group,title:row.label,hint:row.hint,keywords:row.keywords,run:row.run})));
     return rows;
   }
 
@@ -1319,8 +1490,8 @@ export default function App() {
       )}
       {countdown != null && countdown > 0 && playing && <div className="countdown" key={countdown}>{countdown}</div>}
 
-      {!playing && (mode !== "film" || !detailsItem) && (
-        <div className="shell" onScroll={(e) => e.currentTarget.classList.toggle("scrolled", e.currentTarget.scrollTop > 8)}>
+      {(!playing || (mode === "film" && view === "recs")) && (mode !== "film" || !detailsItem) && (
+        <div className="shell" style={playing ? {visibility:"hidden",pointerEvents:"none"} : undefined} inert={playing || undefined} onScroll={(e) => e.currentTarget.classList.toggle("scrolled", e.currentTarget.scrollTop > 8)}>
           <Header browserOpen={browserOpen} onBrowser={() => { setBrowserMounted(true); setBrowserOpen(o => !o); setBrowserPage(undefined); }} mode={mode} setMode={(m) => { setBrowserOpen(false); setBrowserPage(undefined); setModeState(m); store.set("mode", m); setQuery(""); }}
             tabs={mode === "music" ? [["home", tt("Ana sayfa")], ["discover", tt("Keşfet")], ["library", tt("Kütüphanem")], ["taste", tt("Zevk profilim")], ["radio", tt("Radyo")], ["podcast", tt("Podcast")]]
               : mode === "books" ? [["home", tt("Ana sayfa")], ["discover", tt("Keşfet")], ["library", tt("Kitaplığım")], ["taste", tt("Zevk profilim")], ["audio", tt("Sesli kitaplar")]] : undefined}
@@ -1354,7 +1525,7 @@ export default function App() {
                   onDownload={startDownload} />
               </div>
             )}
-            {view === "recs" && <RecsPage items={lib.items} onPlay={(p) => load(p)} onTorrent={() => setTorrentDlg(true)} onAsk={(it) => { setChatTopic(it); setChat(true); }}
+            {view === "recs" && <RecsPage active={!playing} items={lib.items} onPlay={(p) => load(p)} onTorrent={() => setTorrentDlg(true)} onAsk={(it) => { setChatTopic(it); setChat(true); }}
               onSource={playSource} onDownload={startDownload} />}
             {view === "discover" && <DiscoverPage items={lib.items} recent={recent} onPlay={(p) => load(p)} onTorrent={() => setTorrentDlg(true)}
               onAsk={(it) => { setChatTopic(it); setChat(true); }} onSource={playSource} onDownload={startDownload} onSettings={() => setSettings(true)} />}
@@ -1364,6 +1535,21 @@ export default function App() {
         </div>
       )}
       {browserMounted && <Browser items={lib.items} onLibraryOpen={key=>{setBrowserOpen(false);setBrowserPage(undefined);setModeState("film");store.set("mode","film");setQuery("");setDetailsKey(key);}} onAssistant={() => setChat(true)} onPlay={url => load(url)} active={browserOpen && !playing} onClose={() => { setBrowserOpen(false); setBrowserPage(undefined); }} onInvalidate={invalidateBrowserPage} onActiveTab={setBrowserTab} onPage={page => { setBrowserPage(page); setChat(true); }} />}
+      <ShellRuntime s={sRaw} film={playing} />
+      {panel === "health" && <LibraryHealth items={lib.items} onClose={() => setPanel(null)} />}
+      {panel === "recap" && <LunaRecap items={lib.items} onClose={() => setPanel(null)} />}
+      {panel === "lines" && <LineSearch items={lib.items} onClose={() => setPanel(null)} />}
+      {panel === "quote" && <QuoteFromPlayer playing={playing && !!s.path} cues={subCues} time={s.time} onPick={(c) => { if (s.path) setQuote({ path: s.path, title: lib.itemFor(s.path)?.meta?.title ?? s.title, year: lib.itemFor(s.path)?.meta?.year, start: c.start, text: c.text }); }} onDone={() => setPanel(null)} flash={flash} />}
+      {quote && <QuoteCard src={quote} onClose={() => setQuote(null)} />}
+      {panel === "calendar" && <CalendarModal items={lib.items} onOpen={(key) => { setModeState("film"); store.set("mode", "film"); setQuery(""); setDetailsKey(key); }} onClose={() => setPanel(null)} />}
+      {panel === "clip" && (playing && s.path
+        ? <ClipMaker path={s.path} title={lib.itemFor(s.path)?.meta?.title ?? s.title} time={s.time} duration={s.duration} subFile={subFile} onClose={() => setPanel(null)} />
+        : <PanelNeedsFilm onDone={() => setPanel(null)} flash={flash} />)}
+      {panel === "scenes" && (playing && s.path && s.duration > 0
+        ? <SceneGrid path={s.path} duration={s.duration} time={s.time} cues={subCues} onSeek={(t) => void mpv("seek", t, "absolute")} onClose={() => setPanel(null)} />
+        : <PanelNeedsFilm onDone={() => setPanel(null)} flash={flash} />)}
+      <PlaybackRuntime s={sRaw} film={playing} item={playing && sRaw.path ? lib.itemFor(sRaw.path) ?? null : null} />
+
       {/* over the collections page the real music bar comes along, on top of it (volume, seek, shuffle…) */}
       {!playing && music.now && (mine ? createPortal(<div className="mu-dock-over"><MusicDock mp={sRaw} /></div>, document.body) : <MusicDock mp={sRaw} />)}
       <MenuHost />
@@ -1440,6 +1626,7 @@ export default function App() {
         <>
           <div className="top">
             <button className="nf" aria-label={tt("Geri")} onClick={close}><Icon d={I.arrowLeft} size={36} /></button>
+            <WhisperPill onOpen={() => { if (s.path) setStudio({ tab: "create", path: s.path }); }} />
             <span className="grow" />
             <button className={"nf lockbtn" + (kbLock ? " on" : "")} aria-pressed={kbLock}
               aria-label={kbLock ? tt("Klavye kilidini aç") : tt("Klavyeyi kilitle")}
@@ -1449,6 +1636,12 @@ export default function App() {
             </button>
           </div>
 
+          {transcript && s.path && (
+            <TranscriptPanel onQuote={(c) => { if (s.path) { void setProp("pause", true); setQuote({ path: s.path, title: lib.itemFor(s.path)?.meta?.title ?? s.title, year: lib.itemFor(s.path)?.meta?.year, start: c.start, text: c.text }); } }} cues={subCues} second={secCues} time={s.time} file={subFile} path={s.path} title={displayTitle}
+              onSeek={(t) => mpv("seek", t, "absolute")} onClose={() => setTranscript(false)}
+              onEdited={() => { mpv("sub-reload"); setSubRev((n) => n + 1); }} />
+          )}
+          {seg && !nextUp && !autoSkip()[seg.kind] && <SkipButton seg={seg} time={s.time} onSkip={skipNow} />}
           <div className="bottom">
             {upOn && <div className="up-hint"><span className="up-ico">{tt("UP")}</span>  {tt("Upscaler açık · kapatmak için")} <kbd>Q</kbd>  {tt("tuşuna bas")}</div>}
             <div className="seek">
@@ -1464,6 +1657,7 @@ export default function App() {
                 {haves.map(([a, b], i) => (
                   <div key={i} className="have" style={{ left: a * 100 + "%", width: (b - a) * 100 + "%" }} />
                 ))}
+                <BarMarks duration={s.duration} ab />
                 <div className="fill" style={{ width: (s.duration ? (s.time / s.duration) * 100 : 0) + "%" }} />
               </div>
               <span className="t right">{fmtTime(s.duration - s.time)}</span>
@@ -1524,7 +1718,9 @@ export default function App() {
                   {showTracks && (
                     <TracksPanel s={s} onClose={() => setShowTracks(false)}
                       onSearch={() => { setShowTracks(false); setSubDlg(s.path); }}
-                      onSync={() => { setShowTracks(false); setShowSync(true); }} />
+                      onSync={() => { setShowTracks(false); setShowSync(true); }}
+                      onStudio={() => { setShowTracks(false); if (s.path) setStudio({ tab: "create", path: s.path }); }}
+                      onTranscript={() => { setShowTracks(false); setTranscript(true); }} />
                   )}
                 </div>
                 <div className="tracks-anchor vset-anchor">
@@ -1532,7 +1728,14 @@ export default function App() {
                     onClick={() => { setShowTracks(false); setShowUp(false); setShowVset((v) => !v); }}>
                     <Icon d={I.gear} size={34} />
                   </button>
-                  {showVset && s.path && <VideoPanel path={s.path} onClose={() => setShowVset(false)} />}
+                  {showVset && s.path && <VideoPanel path={s.path} onClose={() => setShowVset(false)} onScenes={() => setPanel("scenes")} onClip={() => { void setProp("pause", true); setPanel("clip"); }} />}
+                </div>
+                <div className="tracks-anchor">
+                  <button className={"nf" + (showSound || soundIsOn("film") ? " on" : "")} aria-label={tt("Ses ayarları")} aria-expanded={showSound}
+                    title={tt("Ses ayarları: ekolayzer, ses dengeleme, gece modu, A-B döngüsü")} onClick={() => { setShowTracks(false); setShowUp(false); setShowVset(false); setShowSound((v) => !v); }}>
+                    <SvgIcon d={EQ_ICON} size={34} />
+                  </button>
+                  {showSound && <SoundPanel time={s.time} onClose={() => setShowSound(false)} />}
                 </div>
                 <button className={"nf" + (showSync ? " on" : "")} aria-label={tt("Altyazı zaman çizelgesi")}
                   title={tt("Altyazı zaman çizelgesi · senkron (S)")} onClick={() => { setShowTracks(false); setShowSync((v) => !v); }}>
@@ -1547,6 +1750,7 @@ export default function App() {
                 embedded={!!s.sub && !s.sub.external}
                 onReset={() => setProp("sub-delay", 0)}
                 onOther={() => setSubDlg(s.path)}
+                onAuto={() => { setShowSync(false); if (s.path) setStudio({ tab: "sync", path: s.path }); }}
                 onClose={() => setShowSync(false)} />
             )}
           </div>
@@ -1603,8 +1807,26 @@ export default function App() {
       )}
       {subDlg && (
         <SubtitleDialog path={subDlg} onClose={() => setSubDlg(null)}
-          onAttach={(file, label) => attachSubtitle(subDlg, file, label)} />
+          onAttach={(file, label) => attachSubtitle(subDlg, file, label)}
+          onWhisper={() => { const p = subDlg; setSubDlg(null); setStudio({ tab: "create", path: p }); }} />
       )}
+      {studio && (() => {
+        const sp = studio.path, here = sp === s.path;
+        const item = lib.itemFor(sp);
+        const name = (f: string) => f.split(/[\\/]/).pop() ?? f;
+        const others = item && item.parsed.kind === "tv" ? item.files.filter((f) => f.path !== sp && store.get("hasSub:" + f.path) !== "1") : [];
+        return (
+          <SubtitleStudio tab={studio.tab} path={sp} duration={here ? s.duration : 0}
+            title={here ? displayTitle : item?.meta?.title ?? item?.parsed.title ?? name(sp)} meta={item?.meta}
+            subFile={here ? subFile : undefined} embedded={here && !!s.sub && !s.sub.external}
+            queue={others.map((f) => ({ path: f.path, title: (f.season != null ? `S${f.season}:${lang() === "tr" ? "B" : "E"}${f.episode} · ` : "") + name(f.path) }))}
+            onAttach={(file, label, secondary) => { if (secondary) { selectSecondary(sp, file); } else attachSubtitle(sp, file, label); }}
+            onApplySync={(r) => { applySync(r); setStudio(null); }}
+            onPreviewSync={here ? previewSync : undefined}
+            onReloaded={() => { if (here) { mpv("sub-reload"); setSubRev((n) => n + 1); } }}
+            onClose={() => setStudio(null)} />
+        );
+      })()}
       {nextUp && (
         <div className="next-up">
           <div className="muted small">{tt("Sonraki bölüm")}</div>
@@ -1622,6 +1844,13 @@ export default function App() {
           ...(nextFile ? [{ label: tt("Sonraki bölüm"), act: () => load(nextFile.path) }] : []),
           { label: tt("Altyazı ara…"), hint: "U", act: () => setSubDlg(s.path) },
           { label: tt("Altyazı senkronu"), hint: "S", act: () => setShowSync(true) },
+          { label: tt("Altyazı stüdyosu…"), act: () => { if (s.path) setStudio({ tab: "create", path: s.path }); } },
+          { label: tt("Replikler paneli"), hint: "R", on: transcript, act: () => setTranscript((v) => !v) },
+          ...(markKey ? [{ label: tt("İntro işareti (bu dizi)"), sub: [
+            { label: tt("İntro burada başlıyor"), hint: fmtTime(s.time), act: () => markIntro("introStart") },
+            { label: tt("İntro burada bitiyor"), hint: fmtTime(s.time), act: () => markIntro("introEnd") },
+            ...(marks ? [{ label: tt("İşareti sil"), act: () => markIntro(null) }] : []),
+          ] }] : []),
           { label: tt("Her zaman üstte"), on: onTop, act: () => { getCurrentWindow().setAlwaysOnTop(!onTop); setOnTop(!onTop); } },
           { label: tt("Tam ekran"), hint: "F", act: toggleFull },
           { label: tt("Adını kopyala"), act: () => { navigator.clipboard.writeText(titleParts.show + (titleParts.code ? " " + titleParts.code : "")); showOsd(tt("Ad kopyalandı")); } },
@@ -1630,6 +1859,7 @@ export default function App() {
       )}
       {toast && <div className={"toast " + toast.kind}>{toast.kind === "ok" && <Icon d={I.check} />}{toast.text}</div>}
       {mine && !playing && <MinePage tab={mine} setTab={setMine} items={lib.items} play={(p) => load(p)} onClose={() => { setMine(null); setMineOpen(null); }} openId={mineOpen} />}
+      <DebugHost page={browserOpen?browserTab?.url:`${mode}/${view}`}/>
       {settings && (
         <Settings onTour={() => { setSettings(false); setTourNew(false); setTour(true); }} onSetup={() => { setSettings(false); setSetup(true); }}
           onClose={() => setSettings(false)} />
@@ -1638,4 +1868,20 @@ export default function App() {
       {tour && !setup && !playing && <Tour news={tourNew} onClose={() => { setTour(false); setTourNew(false); }} onSettings={() => setSettings(true)} posters={lib.items.map((x) => x.meta?.poster ?? null).filter(Boolean).slice(0, 12)} />}
     </div>
   );
+}
+
+/** The clip maker and the scene grid need a film that is playing: say so instead of opening empty. */
+function PanelNeedsFilm({ onDone, flash }: { onDone: () => void; flash: (t: string, kind?: "ok" | "info" | "warn", ms?: number) => void }) {
+  useEffect(() => { flash(tt("Önce bir film aç: klip ve sahne ızgarası oynayan film için."), "info"); onDone(); }, []);
+  return null;
+}
+
+/** Ctrl+K › quote card while a film plays: the line on screen now (or the last one before it). */
+function QuoteFromPlayer({ playing, cues, time, onPick, onDone, flash }: { playing: boolean; cues: Cue[]; time: number; onPick: (c: Cue) => void; onDone: () => void; flash: (t: string, kind?: "ok" | "info" | "warn", ms?: number) => void }) {
+  useEffect(() => {
+    const c = playing ? (cues.find((x) => x.start <= time && time < x.end) ?? [...cues].reverse().find((x) => x.start <= time)) : undefined;
+    if (c) onPick(c); else flash(tt("Replik kartı için oynayan bir film ve altyazısı gerekir."), "info");
+    onDone();
+  }, []);
+  return null;
 }

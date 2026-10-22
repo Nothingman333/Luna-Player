@@ -75,7 +75,8 @@ export function storageRelink(snapshot: Record<string, string>, pairs: { from: s
   const next = { ...snapshot };
   for (const [key, raw] of Object.entries(snapshot)) {
     let target = key;
-    for (const p of pairs) if (/^[A-Za-z]+:/.test(key) && key.endsWith(p.from)) target = key.slice(0, -p.from.length) + p.to;
+    const setting=/^([A-Za-z][\w:]*?:)([a-z]:[\\/].*|\\\\.*)$/i.exec(key);
+    if(setting&&map.has(pathId(setting[2])))target=setting[1]+replace(setting[2]);
     if (target !== key && target in snapshot) throw Error("Hedefin kendi ayarı var: " + target);
     let updated = replace(raw);
     try { const parsed = JSON.parse(raw), converted = visit(parsed); if (JSON.stringify(parsed) !== JSON.stringify(converted)) updated = JSON.stringify(converted); } catch (e) { if (e instanceof Error && e.message.startsWith("Hedefte")) throw e; }
@@ -86,6 +87,7 @@ export function storageRelink(snapshot: Record<string, string>, pairs: { from: s
 }
 /** Check the complete plan first; preserve other user changes during undo. */
 export function writeDelta(storage: Pick<Storage, "getItem" | "setItem" | "removeItem">, delta: StorageDelta[], reverse = false) {
+  if(new Set(delta.map(d=>d.key)).size!==delta.length)throw Error("A storage transaction cannot contain duplicate keys.");
   const changes = delta.map(d => ({ key: d.key, before: reverse ? d.after : d.before, after: reverse ? d.before : d.after }));
   for (const d of changes) if (storage.getItem(d.key) !== d.before) throw Error("Kayıt değişmiş; önce önizlemeyi yenile.");
   const write = (key: string, value: string | null) => value === null ? storage.removeItem(key) : storage.setItem(key, value);

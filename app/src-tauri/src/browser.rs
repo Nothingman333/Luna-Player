@@ -7,8 +7,11 @@ use std::io::Write as _;
 
 /// Luna Web's detailed log (luna-debug.log in Luna's data folder): what the page layer, the bubble,
 /// menus and downloads did, so a "layer" problem can be read back afterwards. Kept under ~4 MB.
+static DEBUG_FILE_LOCK: Mutex<()> = Mutex::new(());
 pub fn dlog(app: &AppHandle, msg: &str) {
+    let Ok(_guard)=DEBUG_FILE_LOCK.lock() else{return};
     let Ok(dir) = app.path().app_local_data_dir() else { return };
+    let _=std::fs::create_dir_all(&dir);
     let path = dir.join("luna-debug.log");
     if std::fs::metadata(&path).map(|m| m.len() > 4_000_000).unwrap_or(false) {
         let _ = std::fs::rename(&path, dir.join("luna-debug.old.log"));
@@ -16,13 +19,14 @@ pub fn dlog(app: &AppHandle, msg: &str) {
     let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
         let _ = writeln!(f, "{ms} {msg}");
+        if !msg.starts_with("ui "){let _=app.emit_to("main","luna-native-debug",msg);}
     }
 }
 
 #[tauri::command]
 pub fn debug_log(app: AppHandle, caller: Webview, lines: Vec<String>) -> Result<(), String> {
     trusted(&caller)?;
-    for l in lines.iter().take(200) { dlog(&app, &format!("ui {}", l.chars().take(4000).collect::<String>())); }
+    for l in lines.iter().take(200) { dlog(&app, &format!("ui {}", l.chars().take(12000).collect::<String>())); }
     Ok(())
 }
 
@@ -217,7 +221,7 @@ fn page_shortcut(key: u32, ctrl: bool, shift: bool, alt: bool) -> Option<&'stati
             _ => None,
         },
         (true, true, false) => match key {
-            0x54 => Some("ctrl+shift+t"), 0x09 => Some("ctrl+shift+tab"), 0x52 => Some("ctrl+shift+r"), 0x41 => Some("ctrl+shift+a"), 0x2E => Some("ctrl+shift+delete"), 0x21 => Some("ctrl+shift+pageup"), 0x22 => Some("ctrl+shift+pagedown"),
+            0x44 => Some("ctrl+shift+d"), 0x54 => Some("ctrl+shift+t"), 0x09 => Some("ctrl+shift+tab"), 0x52 => Some("ctrl+shift+r"), 0x41 => Some("ctrl+shift+a"), 0x2E => Some("ctrl+shift+delete"), 0x21 => Some("ctrl+shift+pageup"), 0x22 => Some("ctrl+shift+pagedown"),
             _ => None,
         },
         (false, false, true) => if key == 0x24 { Some("alt+home") } else { None },
@@ -612,5 +616,30 @@ pub fn diagnostic_snapshot(app:AppHandle,caller:Webview)->Result<serde_json::Val
             logs.push(serde_json::json!({"name":name,"text":text}));
         }
     }
-    Ok(serde_json::json!({"version":app.package_info().version.to_string(),"os":std::env::consts::OS,"arch":std::env::consts::ARCH,"logs":logs}))
+    let os_version=diagnostic_os_version();
+    Ok(serde_json::json!({"version":app.package_info().version.to_string(),"os":std::env::consts::OS,"osVersion":os_version,"arch":std::env::consts::ARCH,"logPath":dir.join("luna-debug.log").to_string_lossy(),"logs":logs}))
+}
+
+fn diagnostic_os_version()->String {
+    static VERSION:std::sync::OnceLock<String>=std::sync::OnceLock::new();
+    VERSION.get_or_init(||{
+        #[cfg(windows)]
+        {use std::os::windows::process::CommandExt;
+        if let Ok(output)=std::process::Command::new("cmd.exe").args(["/D","/C","ver"]).creation_flags(0x08000000).output(){
+            if output.status.success(){return String::from_utf8_lossy(&output.stdout).trim().chars().take(160).collect();}
+        }}
+        std::env::consts::OS.to_string()
+    }).clone()
+}
+
+/// Open only Luna's fixed debug log, never an arbitrary path supplied by a page.
+#[tauri::command]
+pub fn debug_open_log(app:AppHandle,caller:Webview)->Result<(),String>{
+    trusted(&caller)?;
+    let dir=app.path().app_local_data_dir().map_err(|e|e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
+    let path=dir.join("luna-debug.log");
+    std::fs::OpenOptions::new().create(true).append(true).open(&path).map_err(|e|e.to_string())?;
+    std::process::Command::new("notepad.exe").arg(&path).spawn().map_err(|e|e.to_string())?;
+    Ok(())
 }

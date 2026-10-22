@@ -3,8 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
-  applySubOpts, loadSubOpts, mpv, MpvState, setProp, SUB_COLORS, SUB_FONTS, SUB_PRESETS, SubOpts, Track,
+  applySubOpts, loadSubOpts, mainSubTrack, mpv, MpvState, setProp, SUB_COLORS, SUB_FONTS, SUB_PRESETS, SubOpts, Track,
 } from "./mpv";
+import { anime4kChain, downloadShaders, loadShaders, newJob, onJob, shaders } from "./studioBridge";
 
 const LANGS: Record<string, string> = {
   tr: tt("Türkçe"), tur: tt("Türkçe"), en: tt("İngilizce"), eng: tt("İngilizce"), de: tt("Almanca"), ger: tt("Almanca"), deu: tt("Almanca"),
@@ -32,9 +33,15 @@ export function trackLabel(t: Track & Record<string, any>) {
 export type VideoSet = {
   brightness: number; contrast: number; saturation: number; gamma: number; hue: number;
   sharpen: number; denoise: number; deband: boolean; zoom: number; rotate: number; aspect: string; fill: boolean;
+  /** sharper scaling in mpv (ewa_lanczossharp) */
+  hq: boolean;
+  /** Anime4K shader chain for drawn animation */
+  a4k: "off" | "fast" | "hq";
+  /** frame interpolation synced to the display (smoother camera moves in 24 fps films) */
+  smooth: boolean;
 };
 export const VIDEO_DEFAULTS: VideoSet = {
-  brightness: 0, contrast: 0, saturation: 0, gamma: 0, hue: 0, sharpen: 0, denoise: 0, deband: false, zoom: 0, rotate: 0, aspect: "no", fill: false,
+  brightness: 0, contrast: 0, saturation: 0, gamma: 0, hue: 0, sharpen: 0, denoise: 0, deband: false, zoom: 0, rotate: 0, aspect: "no", fill: false, hq: false, a4k: "off", smooth: false,
 };
 export const loadVideoSet = (path: string): VideoSet => {
   try { return { ...VIDEO_DEFAULTS, ...JSON.parse(localStorage.getItem("vset:" + path) ?? "{}") }; }
@@ -59,8 +66,30 @@ export function applyVideoSet(v: VideoSet) {
   const hw = vf.length ? "auto-copy-safe" : "auto-safe";
   if (hw !== lastHwdec) { setProp("hwdec", hw); lastHwdec = hw; }
   setProp("vf", vf.join(","));
+  // Scaling and shaders change only when they differ (each change rebuilds mpv's render chain).
+  const hq = !!v.hq;
+  if (hq !== lastHq) {
+    setProp("scale", hq ? "ewa_lanczossharp" : "lanczos");
+    setProp("cscale", hq ? "ewa_lanczossharp" : "lanczos");
+    setProp("dscale", hq ? "mitchell" : "hermite");
+    lastHq = hq;
+  }
+  // interpolation only works with a display-synced video-sync mode (mpv silently ignores it otherwise), so both go together
+  const smooth = !!v.smooth;
+  if (smooth !== lastSmooth) {
+    setProp("video-sync", smooth ? "display-resample" : "audio");
+    setProp("interpolation", smooth);
+    if (smooth) setProp("tscale", "oversample");
+    lastSmooth = smooth;
+  }
+  const chain = v.a4k === "fast" || v.a4k === "hq" ? anime4kChain(v.a4k) : [];
+  const key = chain.join("|");
+  if (key !== lastShaders) { setProp("glsl-shaders", chain); lastShaders = key; }
 }
 let lastHwdec = "auto-safe";
+let lastHq = false;
+let lastSmooth = false;
+let lastShaders = "";
 
 const SLIDERS: [keyof VideoSet, string, number, number][] = [
   ["brightness", tt("Parlaklık"), -100, 100], ["contrast", tt("Kontrast"), -100, 100], ["saturation", tt("Doygunluk"), -100, 100],
@@ -69,7 +98,7 @@ const SLIDERS: [keyof VideoSet, string, number, number][] = [
 ];
 
 /** Gear panel: picture settings for the current video, saved for that video only. */
-export function VideoPanel({ path, onClose }: { path: string; onClose: () => void }) {
+export function VideoPanel({ path, onClose, onScenes, onClip }: { path: string; onClose: () => void; onScenes?: () => void; onClip?: () => void }) {
   const [v, setV] = useState<VideoSet>(() => loadVideoSet(path));
   const [frame, setFrame] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -135,6 +164,13 @@ export function VideoPanel({ path, onClose }: { path: string; onClose: () => voi
         
         {tt("Bant giderme (renk geçişlerindeki basamaklanma)")}
       </label>
+      <QualityBlock v={v} set={set} />
+      {(onScenes || onClip) && (
+        <div className="look-row">
+          {onScenes && <button className="chip" onClick={() => { onClose(); onScenes(); }}>{tt("Sahne ızgarası (Ctrl+G)")}</button>}
+          {onClip && <button className="chip" onClick={() => { onClose(); onClip(); }}>{tt("Klip kes (X)")}</button>}
+        </div>
+      )}
       <button className="vset-more" onClick={() => setFrame((f) => !f)} aria-expanded={frame}>
         
         {tt("Kadraj")} {frame ? "▾" : "▸"}
@@ -167,6 +203,42 @@ export function VideoPanel({ path, onClose }: { path: string; onClose: () => voi
         </div>
       )}
       <div className="muted small">{tt("Sadece bu video için kaydedilir · çift tık sıfırlar")}</div>
+    </div>
+  );
+}
+
+/** Scaling quality and the optional Anime4K shaders (downloaded on request, verified). */
+function QualityBlock({ v, set }: { v: VideoSet; set: (p: Partial<VideoSet>) => void }) {
+  const [files, setFiles] = useState<string[]>(shaders);
+  const [dl, setDl] = useState<number | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => { void loadShaders().then(setFiles); }, []);
+  const have = anime4kChain("hq", files).length > 0 && anime4kChain("fast", files).length > 0;
+  const get = async () => {
+    setErr(""); setDl(0);
+    const job = newJob();
+    const off = await onJob(job, (e) => setDl(e.pct ?? 0));
+    try { setFiles(await downloadShaders(job)); } catch (e) { setErr(String(e)); } finally { off(); setDl(null); }
+  };
+  return (
+    <div className="vset-quality">
+      <label className="look-check">
+        <input type="checkbox" checked={v.hq} onChange={(e) => set({ hq: e.target.checked })} />
+        {tt("Yüksek kalite ölçekleme (mpv, ekran kartını biraz daha yorar)")}
+      </label>
+      <div className="look-row">
+        <span className="muted small">{tt("Anime4K")}</span>
+        {([["off", tt("Kapalı")], ["fast", tt("Hızlı")], ["hq", tt("Kaliteli")]] as const).map(([k, l]) => (
+          <button key={k} className={"seg sm" + (v.a4k === k ? " on" : "")} disabled={k !== "off" && !have} onClick={() => set({ a4k: k })}>{l}</button>
+        ))}
+        {!have && <button className="chip" disabled={dl !== null} onClick={get}>{dl !== null ? tt("İndiriliyor… {0}%", Math.round(dl)) : tt("Shaderları indir (0,8 MB)")}</button>}
+      </div>
+      <div className="muted small">{tt("Anime4K çizgi film ve anime için gerçek zamanlı keskinleştirme ve büyütmedir (MIT lisanslı, bloc97/Anime4K v4.0.1). Lossless Scaling gerekmez.")}</div>
+      {err && <div className="muted small">{err}</div>}
+      <label className="look-check">
+        <input type="checkbox" checked={!!v.smooth} onChange={(e) => set({ smooth: e.target.checked })} />
+        {tt("Akıcı hareket (kare ara değerleme; kamera kaydırmaları daha yumuşak, ekran kartını biraz daha yorar)")}
+      </label>
     </div>
   );
 }
@@ -253,12 +325,15 @@ export function SubAppearance() {
 }
 
 /** Netflix-style "Audio & Subtitles" panel. */
-export function TracksPanel({ s, onSearch, onSync, onClose }: {
-  s: MpvState; onSearch: () => void; onSync: () => void; onClose: () => void;
+export function TracksPanel({ s, onSearch, onSync, onClose, onStudio, onTranscript }: {
+  s: MpvState; onSearch: () => void; onSync: () => void; onClose: () => void; onStudio?: () => void; onTranscript?: () => void;
 }) {
   const audio = s.tracks.filter((t) => t.type === "audio");
   const subs = s.tracks.filter((t) => t.type === "sub");
-  const subOff = !subs.some((t) => t.selected);
+  // mpv marks both the main and the second subtitle "selected": the main one is current-tracks/sub
+  const second = typeof s.secondarySid === "number" ? s.secondarySid : null;
+  const mainId = mainSubTrack(s.tracks, s.secondarySid)?.id ?? null;
+  const subOff = mainId == null;
   // Close on a click outside (not on mouse-leave: the font list opens outside the panel).
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -284,12 +359,23 @@ export function TracksPanel({ s, onSearch, onSync, onClose }: {
         <h3>{tt("Altyazılar")}</h3>
         <button className={"titem" + (subOff ? " on" : "")} onClick={() => setProp("sid", "no")}>{tt("Kapalı")}</button>
         {subs.map((t) => (
-          <button key={t.id} className={"titem" + (t.selected ? " on" : "")} onClick={() => setProp("sid", t.id)}>
+          <button key={t.id} className={"titem" + (t.id === mainId ? " on" : "")} onClick={() => { if (t.id === second) setProp("secondary-sid", "no"); setProp("sid", t.id); }}>
             {trackLabel(t)}
           </button>
         ))}
+        {subs.length > 1 && (
+          <>
+            <div className="tsub">{tt("İkinci altyazı")}</div>
+            <button className={"titem sec" + (second == null ? " on" : "")} onClick={() => setProp("secondary-sid", "no")}>{tt("Kapalı")}</button>
+            {subs.filter((t) => t.id !== mainId).map((t) => (
+              <button key={"2-" + t.id} className={"titem sec" + (t.id === second ? " on" : "")} onClick={() => setProp("secondary-sid", t.id)}>{trackLabel(t)}</button>
+            ))}
+          </>
+        )}
         <button className="titem link" onClick={onSearch}>{tt("Altyazı ara / yükle…")}</button>
         <button className="titem link" onClick={onSync}>{tt("Senkronu ayarla…")}</button>
+        {onStudio && <button className="titem link" onClick={onStudio}>{tt("Altyazı stüdyosu (Whisper, çeviri, sesle senkron)…")}</button>}
+        {onTranscript && <button className="titem link" onClick={onTranscript}>{tt("Replikler paneli (R)")}</button>}
       </div>
       <div className="tcol look">
         <h3>{tt("Altyazı ayarları")}</h3>
@@ -323,8 +409,8 @@ export function ContextMenu({ s, x, y, extra, onClose }: {
     "sep",
     { label: tt("Ses parçası"), sub: audio.length ? audio.map((t) => ({ label: trackLabel(t), on: t.selected, act: () => setProp("aid", t.id) })) : [{ label: tt("Yok"), act: () => {} }] },
     { label: tt("Altyazı parçası"), sub: [
-      { label: tt("Kapalı"), on: !subs.some((t) => t.selected), act: () => setProp("sid", "no") },
-      ...subs.map((t) => ({ label: trackLabel(t), on: t.selected, act: () => setProp("sid", t.id) })),
+      { label: tt("Kapalı"), on: !mainSubTrack(s.tracks, s.secondarySid), act: () => setProp("sid", "no") },
+      ...subs.map((t) => ({ label: trackLabel(t), on: t.id === mainSubTrack(s.tracks, s.secondarySid)?.id, act: () => setProp("sid", t.id) })),
     ] },
     ...(chapters.length ? [{ label: tt("Bölümler (chapter)"), sub: chapters.map((c, i) => ({
       label: c.title || tt("Bölüm {0}", i + 1), on: s.chapter === i, act: () => setProp("chapter", i),

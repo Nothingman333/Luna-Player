@@ -16,11 +16,10 @@ export const DEFAULT_READER_PREFS: ReaderPrefs = { theme: "night", size: 18, fon
 export function readerBlocks(text: unknown, max = 4000): ReaderBlock[] {
   if (typeof text !== "string") return [];
   const out: ReaderBlock[] = [];
-  let last = "";
+
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.replace(/\s+/g, " ").trim();
-    if (!line || line === last) continue; // menus and footers often repeat a line right after itself
-    last = line;
+    if (!line) continue;
     const heading = /^(#{1,6}) (.+)$/.exec(line);
     if (heading) out.push({ kind: "h", level: heading[1].length, text: heading[2], id: "reader-h-" + out.length });
     else if (/^- ./.test(line)) out.push({ kind: "li", text: line.slice(2) });
@@ -74,7 +73,8 @@ export function findInBlocks(blocks: ReaderBlock[], query: string, limit = 500):
       const at = f.text.indexOf(q, from);
       if (at < 0 || hits.length >= limit) break;
       const start = f.map[at], endChar = f.map[at + q.length - 1];
-      const end = endChar + String.fromCodePoint(original.codePointAt(endChar)!).length;
+      let end = endChar + String.fromCodePoint(original.codePointAt(endChar)!).length;
+      while(end<original.length){const ch=String.fromCodePoint(original.codePointAt(end)!);if(!/\p{M}/u.test(ch))break;end+=ch.length;}
       hits.push({ block, start, end });
       from = at + q.length;
     }

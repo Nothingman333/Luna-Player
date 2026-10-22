@@ -1,3 +1,4 @@
+import {savedFilmAnalysis} from "./filmAnalysisStorage";
 import { useEffect, useId, useRef, useState } from "react";
 import { store } from "./library";
 import { invoke } from "@tauri-apps/api/core";
@@ -7,7 +8,6 @@ import { ASPECTS, addAnalysis, cleanProfile, cleanWorkspace, filmKey, parseRevie
 import type { Aspect, FilmTarget, Mood, Workspace } from "./filmReviewModel";
 import { ReviewAiCard } from "./FilmReviewAi";
 import { TastePanel } from "./TastePanel";
-import { cleanRun } from "./reviewAnalysis";
 import "./FilmDecision.css";
 
 const labels: Record<Aspect, string> = { story: "Hikâye", pace: "Tempo", acting: "Oyunculuk", visuals: "Görsellik", emotion: "Karakter ve duygu", sound: "Müzik ve ses" };
@@ -71,7 +71,7 @@ function DecisionWorkspace({ film }: { film: FilmTarget }) {
       setStatus(tt("Analiz ve notlar dışa aktarıldı."));
     } catch { setStatus(tt("Dışa aktarılamadı. Kayıt yerini ve yazma iznini kontrol et.")); }
   };
-  const [aiRun, setAiRun] = useState(() => cleanRun(store.json("filmDecision:ai:" + filmKey(film), null)));
+  const [aiRun, setAiRun] = useState(() => savedFilmAnalysis(film));
   const filmScores: Partial<Record<Aspect, number>> = aiRun ? Object.fromEntries(aiRun.verdict.aspects.filter((x) => x.score != null).map((x) => [x.aspect, x.score!])) : {};
   return <section className="la" aria-label={tt("Luna Analiz")}>
     <ReviewAiCard film={film} profile={learnedProfile} mood={mood} setMood={setMood} label={label} onRun={setAiRun} onReviews={(json) => analyze(json, true, tt("Letterboxd yorumları yerel taramaya da eklendi."))} />

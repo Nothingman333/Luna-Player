@@ -18,8 +18,10 @@ const LANG_NAMES: Record<string, string> = {
 const SUB_EXT = ["srt", "ass", "ssa", "vtt", "sub"];
 
 /** Searches OpenSubtitles as soon as it opens; pick a result or load a file from disk. */
-export function SubtitleDialog({ path, onAttach, onClose }: {
+export function SubtitleDialog({ path, onAttach, onClose, onWhisper }: {
   path: string; onAttach: (file: string, label: string) => void; onClose: () => void;
+  /** opens the subtitle studio to make one from the audio (Whisper) */
+  onWhisper?: () => void;
 }) {
   const [key, setKey] = useState(store.get("osKey") ?? "");
   const [keyDraft, setKeyDraft] = useState("");
@@ -86,6 +88,7 @@ export function SubtitleDialog({ path, onAttach, onClose }: {
         <div className="row-head" style={{ margin: 0 }}>
           <h2>{tt("Altyazı ekle")}</h2>
           <span className="grow" />
+          {onWhisper && <button className="ghost sm" onClick={onWhisper} title={tt("Konuşmayı bilgisayarında yazıya döker (whisper.cpp)")}>{tt("Sesten oluştur…")}</button>}
           <button className="ghost sm" onClick={fromDisk}>{tt("Bilgisayardan yükle…")}</button>
         </div>
         <div className="muted small ellipsis">{path.split(/[\\/]/).pop()}</div>
@@ -126,7 +129,7 @@ export function SubtitleDialog({ path, onAttach, onClose }: {
             {err && <div className="sub-err">{err}</div>}
             <div className="sub-list">
               {hits === null && <div className="sub-loading"><span className="spinner" />  {tt("OpenSubtitles'ta aranıyor…")}</div>}
-              {hits && !list.length && !err && <div className="muted">{tt("Altyazı bulunamadı. Bilgisayardan yükleyebilirsin.")}</div>}
+              {hits && !list.length && !err && <div className="muted">{onWhisper ? tt("Altyazı bulunamadı. Bilgisayardan yükleyebilir ya da Sesten oluştur ile Whisper'a yazdırabilirsin.") : tt("Altyazı bulunamadı. Bilgisayardan yükleyebilirsin.")}</div>}
               {list.map((h) => (
                 <button key={h.fileId} className="sub-row" disabled={busy !== null} onClick={() => pick(h)}>
                   <span className="sub-lang">{(h.language || "?").toUpperCase()}</span>

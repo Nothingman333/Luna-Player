@@ -42,7 +42,7 @@ export function itemFacts(item: Item): ItemFacts {
   const m = item.meta, p = item.parsed;
   const facts: ItemFacts = {
     title: str(m?.title).trim() || str(p?.title),
-    year: libraryYear(m?.year || p?.year),
+    year: libraryYear(m?.year) || libraryYear(p?.year),
     runtime: libraryRuntime(m?.runtime),
     rating: libraryRating(m?.rating),
     genres: Array.isArray(m?.genres) ? m!.genres.filter((g): g is string => typeof g === "string" && !!g.trim()) : [],
@@ -77,7 +77,7 @@ type SearchIndex = { fields: SearchField[]; all: string };
 const searchCache = new WeakMap<Item, { meta: unknown; parsed: unknown; files: unknown; n: number; index: SearchIndex }>();
 /** The file's own name (no folder, no query string) as shown to the user. */
 export function fileBase(path: string): string {
-  const last = path.replace(/[?#].*$/, "").split(/[\\/]/).pop() ?? "";
+  const last = (/^https?:\/\//i.test(path)?path.replace(/[?#].*$/, ""):path).split(/[\\/]/).pop() ?? "";
   try { return decodeURIComponent(last); } catch { return last; }
 }
 /** Every searchable field of a record, folded once. Only data the catalog really holds: the matched title, the name taken

@@ -12,12 +12,14 @@ type Props = {
   onReset: () => void;
   onOther: () => void;
   onClose: () => void;
+  /** opens the studio's "listen to the audio" sync (external subtitle files only) */
+  onAuto?: () => void;
 };
 
 const fmtDelay = (d: number) =>
   (d > 0 ? "+" : d < 0 ? "−" : "") + Math.abs(d).toFixed(3).replace(".", DEC) + tt(" sn");
 
-export default function SubTimeline({ cues, time, delay, embedded, onReset, onOther, onClose }: Props) {
+export default function SubTimeline({ cues, time, delay, embedded, onReset, onOther, onClose, onAuto }: Props) {
   const strip = useRef<HTMLDivElement>(null);
   const drag = useRef<{ x: number; delay: number } | null>(null);
 
@@ -100,6 +102,7 @@ export default function SubTimeline({ cues, time, delay, embedded, onReset, onOt
           
           {tt("Sıradaki replik şimdi söylendi")}
         </button>
+        {onAuto && !embedded && <button className="chip" onClick={onAuto} title={tt("Videonun sesini dinleyip gecikmeyi kendisi bulur")}>{tt("Sesi dinleyerek senkronla")}</button>}
         <button className="chip" onClick={onOther}>{tt("Başka altyazı seç…")}</button>
       </div>
     </div>

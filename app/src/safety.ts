@@ -25,7 +25,7 @@ export function backupData(value: unknown, excluded: readonly string[]): Record<
     data[key] = item;
   }
   // Reject wrong-shaped boot data before touching any existing records.
-  const arrays = ["folders", "pinned", "recent", "collections", "playlists", "recs", "seenList", "laterList", "musicFolders", "bookFolders", "bookShelfNames", "bookWantToRead"];
+  const arrays = ["folders", "pinned", "recent", "collections", "playlists", "recs", "seenList", "laterList", "musicFolders", "bookFolders", "bookShelfNames", "bookWantToRead", "musicPlaylists", "musicLikes", "musicDislikes", "m3uRecent"];
   const objects = ["meta", "diary", "bookDiary", "readerSet", "ttsSet", "bookDetailsByPath", "bookShelves"];
   for (const key of [...arrays, ...objects]) {
     if (!(key in data)) continue;
@@ -41,7 +41,7 @@ export async function replaceStorage(storage: StringStorage, data: Record<string
   restoreDepth++;
   try { write(data); await persist(data); }
   catch (error) {
-    try { write(before); }
+    try { write(before); await persist(before); }
     catch (rollbackError) { throw new Error(`Restore and rollback failed; keep the backup file. ${String(error)}; ${String(rollbackError)}`); }
     throw error;
   }
@@ -52,7 +52,7 @@ export type CollectionIdentity = { kind: string; title: string; by?: string; yea
 export function sameCollectionItem(a: CollectionIdentity, b: CollectionIdentity): boolean {
   return a.kind === b.kind && identityText(a.title) === identityText(b.title)
     && identityText(a.by ?? "") === identityText(b.by ?? "")
-    && (a.kind !== "film" || (a.year ?? "") === (b.year ?? ""));
+    && (a.kind !== "film" || (a.year ?? "").trim() === (b.year ?? "").trim());
 }
 export function uniqueCollectionItems<T extends CollectionIdentity>(existing: T[], incoming: T[]): T[] {
   const added: T[] = [];
@@ -70,11 +70,12 @@ export function isLetterboxdUrl(input: string): boolean {
   catch { return false; }
 }
 export function sameTitleYear(saved: string, title: string, year?: string): boolean {
+  const requestedYear=year?.trim()||title.match(/\((\d{4})\)\s*$/)?.[1];
   const savedYear = saved.match(/\((\d{4})\)\s*$/)?.[1];
-  return identityText(saved.replace(/\s*\(\d{4}\)\s*$/, "")) === identityText(title.replace(/\s*\(\d{4}\)\s*$/, "")) && (!year || !savedYear || year === savedYear);
+  return identityText(saved.replace(/\s*\(\d{4}\)\s*$/, "")) === identityText(title.replace(/\s*\(\d{4}\)\s*$/, "")) && (!requestedYear || !savedYear || requestedYear === savedYear);
 }
 export function validStars(value: string): number | undefined {
   if (!value.trim()) return undefined;
-  const stars = Number(value);
+  const stars = Number(value.trim().replace(/^(\d+),(\d+)$/, "$1.$2"));
   return Number.isFinite(stars) && stars >= 0.5 && stars <= 5 && Number.isInteger(stars * 2) ? stars : undefined;
 }

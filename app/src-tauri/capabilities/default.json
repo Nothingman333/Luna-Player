@@ -14,7 +14,21 @@
     "window-state:default",
     "core:webview:allow-set-webview-focus",
     "opener:default",
-    "dialog:default"
+    "dialog:default",
+    "core:window:allow-set-progress-bar",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-unminimize",
+    "core:window:allow-set-focus",
+    "core:window:allow-is-visible",
+    "notification:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-unregister-all",
+    "global-shortcut:allow-is-registered",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
   ],
   "webviews": [
     "main",

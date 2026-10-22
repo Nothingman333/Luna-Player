@@ -1,3 +1,4 @@
+import {makeResolver,validTemplate} from "./webSearch";
 import { SitePreferencesPanel, RecoveryPanel, PageLibrarySignal } from "./BrowserDaily";
 import { cleanSitePreferences, siteOrigin, recoveryTabs } from "./everydayModel";
 import type { SitePreference, RecoveryTab } from "./everydayModel";
@@ -25,6 +26,7 @@ import { BrowserIcon as WebIcon } from "./BrowserIcons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { archivable, waybackApi, waybackSnapshot } from "./webArchive";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { browserAddress, cleanBrowserPage, friendlyBrowserError } from "./browserModel";
@@ -35,6 +37,8 @@ import { aiReady } from "./ai";
 import "./Browser.css";
 import "./BrowserPlus.css";
 import { store } from "./library";
+import {registerBrowserActions} from "./browserAssistantActions";
+import type {BrowserActionName,BrowserActionContext} from "./browserAssistantActions";
 import { putExtra } from "./Extras";
 import { browserRows, mergeReadingEntry } from "./browserRecords";
 import { ClearDataPanel, FindBar, HistoryPanel, ShortcutsPanel, SiteAvatar, SuggestList, WebMenu } from "./BrowserPanels";
@@ -128,8 +132,10 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
       return cleanWebTabs(raw,40);
     } catch { return []; }
   });
-  const [engineId, setEngineId] = useState<SearchEngineId>(() => { try { return searchEngine(localStorage.getItem(ENGINE_KEY)).id; } catch { return "google"; } });
-  const engine = searchEngine(engineId), engineRef = useRef(engine); engineRef.current = engine;
+  const choiceId=(choice:string|null):SearchEngineId=>choice?.startsWith("custom:")&&validTemplate(choice.slice(7))?"custom":searchEngine(choice==="ddg"?"duckduckgo":choice).id;
+  const [engineId,setEngineId]=useState<SearchEngineId>(()=>choiceId(store.get("webSearch")??store.get(ENGINE_KEY)));
+  useEffect(()=>{const changed=(e:Event)=>setEngineId(choiceId((e as CustomEvent<string|null>).detail));window.addEventListener("luna-search-engine",changed);return()=>window.removeEventListener("luna-search-engine",changed);},[]);
+  const engine = engineId==="custom"?{id:"custom" as const,name:lang()==="tr"?"Özel arama":"Custom search",mark:"⌕",home:"",search:makeResolver(store.get("webSearch"),lang())}:searchEngine(engineId), engineRef = useRef(engine); engineRef.current = engine;
   const [history, setHistory] = useState<WebVisit[]>(() => { try { return readVisits(localStorage.getItem(HISTORY_KEY)); } catch { return []; } });
   const [historyPaused, setHistoryPaused] = useState(() => { try { return localStorage.getItem(HISTORY_PAUSED_KEY) === "1"; } catch { return false; } });
   const [hiddenSites, setHiddenSites] = useState<string[]>(() => { try { const raw: unknown = JSON.parse(localStorage.getItem(HIDDEN_SITES_KEY) || "[]"); return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string").slice(0, 100) : []; } catch { return []; } });
@@ -233,12 +239,12 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
     finally { creatingRef.current = false; if (alive.current) setCreating(false); }
   }
   addRef.current=add;
-  async function closeTab(id: number) {
+  async function closeTab(id: number, allowed:()=>boolean=()=>true) {
     if(closingTabs.current.has(id)||!known.current.has(id))return;
     closingTabs.current.add(id);
     const tab=tabsRef.current.find(t=>t.id===id);
     try {
-      await native("browser_action", { id, action: "close" });
+      await native("browser_action", { id, action: "close" }, allowed);
       known.current.delete(id); revisions.current.delete(id); committed.current.delete(id);if(pendingScroll.current?.id===id)pendingScroll.current=null;
       titles.current.delete(id); loadingNow.current.delete(id); setMutedTabs(m => m.filter(x => x !== id));
       setTabNative(m => dropNative(m, id)); stopping.current.delete(id); setPinned(old => new Set([...old].filter(x => x !== id)));setFullTabs(old=>new Set([...old].filter(x=>x!==id)));tabMuteChoice.current.delete(id);
@@ -249,6 +255,32 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
       if(tab&&alive.current)setClosedTabs(rows=>[{title:tab.title,url:tab.url},...rows].slice(0,12));
     } catch (e) { showError(e); }finally{closingTabs.current.delete(id);}
   }
+  const assistantActions=useRef<(action:BrowserActionName,args:Record<string,any>)=>Promise<string>>(async()=>{throw Error("Web hazır değil.");});
+  const assistantContext=():BrowserActionContext=>{
+    if(!shown.current||!alive.current)throw Error("Web bölümü açık değil.");
+    const id=chosen.current,tab=tabsRef.current.find(t=>t.id===id);
+    return {id,revision:id===null?0:revisions.current.get(id)||0,url:tab?.url||"",title:tab?.title||"",tabs:tabsRef.current.map(t=>({id:t.id,title:t.title,url:t.url}))};
+  };
+  assistantActions.current=async(kind,args)=>{
+    const context=assistantContext(),id=context.id,tab=tabsRef.current.find(t=>t.id===id);
+    if(kind==="list")return JSON.stringify(context);
+    if(kind==="open"){if(!await addRef.current(args.url))throw Error("Sekme açılamadı; sekme sınırını ve adresi kontrol et.");return "Yeni sekme açıldı.";}
+    if(kind==="focus"){if(!context.tabs.some(t=>t.id===args.tabId))throw Error("Sekme bulunamadı.");chooseTab(args.tabId);return "Sekme seçildi.";}
+    if(id===null||!tab)throw Error("Önce bir Web sekmesi aç.");
+    if(kind==="close"){await closeTab(id,()=>shown.current&&chosen.current===id&&(revisions.current.get(id)||0)===context.revision);if(known.current.has(id))throw Error("Sekme kapatılamadı.");return "Sekme kapatıldı.";}
+    if(kind==="reload"){await native("browser_action",{id,action:"reload"},()=>shown.current&&chosen.current===id&&(revisions.current.get(id)||0)===context.revision);revisions.current.set(id,context.revision+1);invalidator.current();return "Sayfaya yenileme komutu gönderildi.";}
+    if(kind==="mute"){if(typeof args.muted!=="boolean")throw Error("Sessiz durumu true/false olmalı.");await native("browser_action",{id,action:args.muted?"mute":"unmute"},()=>shown.current&&chosen.current===id&&(revisions.current.get(id)||0)===context.revision);tabMuteChoice.current.set(id,{origin:siteOrigin(tab.url),muted:args.muted});setMutedTabs(m=>args.muted?[...new Set([...m,id])]:m.filter(x=>x!==id));return args.muted?"Sekmenin sesi kapatıldı.":"Sekmenin sesi açıldı.";}
+    if(kind==="find"){if(!args.text?.trim())throw Error("Aranacak metin gerekli.");openFind();setFindQuery(args.text);return "Sayfada arama kutusu açıldı; aranan metin: "+args.text;}
+    if(kind==="bookmark"){
+      const raw=store.get("lunaWebBookmarks");const rows=raw?JSON.parse(raw):[];
+      if(!Array.isArray(rows)||rows.some(v=>!v||typeof v.url!=="string"||typeof v.title!=="string"))throw Error("Favoriler kaydı hasarlı; üzerine yazılmadı.");
+      const next=upsertWebBookmark(rows,tab);if(!store.set("lunaWebBookmarks",JSON.stringify(next)))throw Error("Favori kaydedilemedi.");setBookmarks(next);return "Sayfa favorilere eklendi.";
+    }
+    if(kind==="read_later"){const rows=browserRows(localStorage,"lunaWebReading",validReading),old=rows.find(r=>r.url===tab.url);putExtra("lunaWebReading",mergeReadingEntry(rows,{url:tab.url,title:tab.title,progress:old?.progress??0,done:false,at:Date.now()}));return "Sayfa okuma kuyruğuna eklendi.";}
+    if(kind==="note"){if(!args.text?.trim()||args.text.length>5000)throw Error("Not 1–5000 karakter olmalı.");const rows=browserRows(localStorage,"lunaWebNotes",validPageNote),old=rows.find(r=>r.url===tab.url)?.text||"";const text=[old,args.text.trim()].filter(Boolean).join("\n\n");if(text.length>5000)throw Error("Sayfa notu sınırı dolu; mevcut not korunuyor.");putExtra("lunaWebNotes",mergePageNote(rows,tab.url,text,Date.now()));return "Not bu sayfanın notlarına eklendi.";}
+    throw Error("Bilinmeyen Web işlemi.");
+  };
+  useEffect(()=>{if(!active)return;return registerBrowserActions(assistantContext,(kind,args)=>assistantActions.current(kind,args));},[active]);
   async function reopenClosed(index=0){if(reopening.current||!closedTabs[index])return;reopening.current=true;const tab=closedTabs[index];try{if(await add(tab.url))setClosedTabs(rows=>{const at=rows.indexOf(tab);return at<0?rows:rows.filter((_,i)=>i!==at);});}finally{reopening.current=false;}}
   async function action(action: string, raw?: string) {
     if (action === "navigate" && raw !== undefined && !raw.trim()) { addressInput.current?.focus(); return; }
@@ -457,7 +489,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
     if (next !== historyRef.current) commitRef.current(next);
   }
   const forgetRef = useRef(forgetFailed); forgetRef.current = forgetFailed;
-  function chooseEngine(id: SearchEngineId) { setEngineId(id); store.set(ENGINE_KEY, id); }
+  function chooseEngine(id: SearchEngineId) { setEngineId(id); store.set(ENGINE_KEY, id);store.set("webSearch",id==="duckduckgo"?"ddg":id); }
   function setPaused(paused: boolean) { setHistoryPaused(paused); store.set(HISTORY_PAUSED_KEY, paused ? "1" : "0"); }
   function hideSite(host: string) { const next = [...hiddenSites.filter(h => h !== host), host].slice(-100); setHiddenSites(next); store.set(HIDDEN_SITES_KEY, JSON.stringify(next)); }
   useEffect(() => {
@@ -467,7 +499,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
     try { localStorage.setItem(SESSION_KEY, JSON.stringify(sessionTabs(tabs))); } catch { /* storage full: the next change tries again */ }
   }, [tabs, historyPaused]);
   useEffect(() => {
-    const refresh = () => setReadingRows(localList(localStorage, "lunaWebReading", validReading));
+    const refresh = () => {setReadingRows(localList(localStorage, "lunaWebReading", validReading));try{setBookmarks(cleanWebTabs(JSON.parse(store.get("lunaWebBookmarks")||"[]"),40));}catch{/* Preserve damaged stored data. */}};
     refresh(); window.addEventListener("luna-extras", refresh); return () => window.removeEventListener("luna-extras", refresh);
   }, [selected === null]);
   async function restoreSession() {
@@ -640,6 +672,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
     const digit = /^ctrl\+([1-9])$/.exec(name);
     if (digit) { const at = digit[1] === "9" ? tabs.length - 1 : Number(digit[1]) - 1; if (tabs[at]) { chooseTab(tabs[at].id); return true; } return false; }
     switch (name) {
+      case "ctrl+shift+d": window.dispatchEvent(new Event("luna-open-debug"));return true;
       case "ctrl+k": setToolsOpen(false); setPaletteOpen(true); return true;
       case "ctrl+l": case "f6": addressInput.current?.focus(); addressInput.current?.select(); return true;
       case "ctrl+shift+a": setToolsOpen(false); setWorkspaceOpen(true); return true;
@@ -732,7 +765,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
         // A late answer of an older navigation carries another address: it must not touch the page in use.
         const done = parseNavDone(e.value), tab = tabsRef.current.find(t => t.id === e.id);
         // History bookkeeping does not wait for the tab state: a failed address is never a visit, a loaded one is again allowed.
-        if (done) { if (done.ok) failedNav.current.delete(done.url); else if (!stopping.current.has(e.id)) forgetRef.current(done.url); }
+        if (done) { if (done.ok&&done.http<400) failedNav.current.delete(done.url); else if (!stopping.current.has(e.id)) forgetRef.current(done.url); }
         if (!done || !tab || tab.url !== done.url) return;
         const wasStopped = stopping.current.delete(e.id);
         setTabs(ts => ts.map(t => t.id === e.id ? { ...t, loading: false } : t));
@@ -896,6 +929,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
             <button className="browser-menu-action" onClick={() => { setToolsOpen(false); setClearOpen(true); }}><WebIcon name="trash" size={17}/>{label("Gezinme verilerini temizle", "Clear browsing data")}<small>Ctrl+Shift+Del</small></button>
             <button className="browser-menu-action" onClick={() => { setToolsOpen(false); setKeysOpen(true); }}><WebIcon name="keyboard" size={17}/>{label("Klavye kısayolları", "Keyboard shortcuts")}<small>Ctrl+/</small></button><hr/>
             <button className="browser-menu-action" onClick={()=>{setToolsOpen(false);setWorkspaceOpen(true);}}><WebIcon name="book" size={17}/>{label("Sekmeler ve favoriler","Tabs and favourites")}</button><button className="browser-menu-action" disabled={!closedTabs.length||creating||tabs.length>=8} onClick={()=>{setToolsOpen(false);void reopenClosed();}}><WebIcon name="reload" size={17}/>{label("Kapatılan sekmeyi geri aç","Reopen closed tab")}<small>Ctrl+Shift+T</small></button><button className="browser-menu-action" disabled={!current||creating||tabs.length>=8} onClick={()=>{setToolsOpen(false);if(current)void add(current.url);}}><WebIcon name="plus" size={17}/>{label("Sekmeyi çoğalt","Duplicate tab")}</button><button className="browser-menu-action" disabled={!current} onClick={()=>{setToolsOpen(false);if(current)void copyAssistantText(current.url).then(()=>{if(alive.current)setBrowserNotice(label("Sayfa bağlantısı kopyalandı.","Page link copied."));}).catch(showError);}}><WebIcon name="external" size={17}/>{label("Sayfa bağlantısını kopyala","Copy page link")}</button><hr/><div className="browser-pop-head"><b>{label("Bu sayfa", "This page")}</b><button aria-label={label("Kapat", "Close")} onClick={() => setToolsOpen(false)}><WebIcon name="close" size={15}/></button></div><label className="browser-language-label">{label("Çeviri dili", "Translate into")}<select aria-label={label("Sayfa çeviri dili", "Page translation language")} value={targetLanguage} onChange={e => {setTargetLanguage(e.target.value);try{localStorage.setItem("lunaWebTranslationLanguage",e.target.value);}catch(e){showError(e);}}}>{TRANSLATION_LANGUAGES.map(language => <option key={language}>{language}</option>)}</select></label><button className="browser-menu-action" disabled={!current || translating} onClick={() => { setToolsOpen(false); void translatePage(targetLanguage).catch(showError); }}><WebIcon name="translate" size={17}/>{translating ? label("Çevriliyor…", "Translating…") : label("Sayfayı çevir", "Translate page")}</button><button className="browser-menu-action" disabled={!current || translating} onClick={() => { setToolsOpen(false); void translatePage("restore").catch(showError); }}><WebIcon name="reload" size={17}/>{label("Özgün sayfaya dön", "Restore original")}</button><hr/><div className="browser-zoom-row" role="group" aria-label={label("Sayfa yakınlığı", "Page zoom")}><button disabled={!current} aria-label={label("Uzaklaştır", "Zoom out")} title="Ctrl -" onClick={() => zoomBy(-1)}>−</button><output aria-live="polite">{Math.round(nowNative.zoom * 100)}%</output><button disabled={!current} aria-label={label("Yakınlaştır", "Zoom in")} title="Ctrl +" onClick={() => zoomBy(1)}>+</button><button disabled={!current || nowNative.zoom === 1} onClick={() => setPageZoom(1)}>{label("Sıfırla", "Reset")}</button></div><hr/><button className="browser-menu-action" disabled={!current || reading} onClick={() => { setToolsOpen(false); void readPage(); }}><WebIcon name="spark" size={17}/>{label("Sayfayı asistana ver", "Share page with Luna")}</button><button className="browser-menu-action" disabled={!current} onClick={() => current && openUrl(current.url).catch(showError)}><WebIcon name="external" size={17}/>{label("Dış tarayıcıda aç", "Open in your browser")}</button><small>{label("Çeviri ve sayfa okuma seçili AI profilini kullanır.", "Translation and page questions use your selected AI profile.")}</small><hr/><BrowserExtras key={current?.url||"home"} url={current?.url} title={current?.title} position={async()=>{if(!current)throw Error("Önce sayfa aç.");return native<{url:string;progress:number}>("browser_position",{id:current.id,action:"read",expectedUrl:current.url});}} openReading={(url,progress)=>{pendingScroll.current={id:current?.id??null,url,progress};setToolsOpen(false);if(current?.url===url){pendingScroll.current=null;void native("browser_position",{id:current.id,action:"scroll",expectedUrl:url,fraction:progress}).catch(showError);}else void action("navigate",url);}}/></div>}
+            <button className="browser-menu-action" disabled={!current||!archivable(current.url)} title={label("Sayfa açılmıyorsa ya da değiştiyse Internet Archive'daki son kopyasını açar","Opens the Internet Archive's newest copy when a page is gone or has changed")} onClick={async()=>{setToolsOpen(false);if(!current)return;try{const text=await invoke<string>("http_text",{url:waybackApi(current.url)});const copy=waybackSnapshot(JSON.parse(text));if(copy)action("navigate",copy);else setError(label("Bu sayfanın arşivde kopyası yok.","There is no archived copy of this page."));}catch{setError(label("Arşiv şu an yanıt vermedi.","The archive did not answer."));}}}><WebIcon name="external" size={17}/>{label("Arşiv kopyasını aç","Open archived copy")}</button>
         </div>
       </div>
       {current?.loading && <div className="browser-progress" role="progressbar" aria-label={label("Sayfa yükleniyor", "Page loading")}/>}

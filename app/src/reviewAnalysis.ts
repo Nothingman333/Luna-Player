@@ -37,7 +37,7 @@ const ITEM_TONES: ItemTone[] = ["positive", "mixed", "negative", "neutral"];
 const TOPICS: Topic[] = [...ASPECTS, "general"];
 const str = (x: unknown, n: number) => (typeof x === "string" ? x.replace(/\s+/g, " ").trim().slice(0, n) : "");
 const list = (x: unknown, n = 6, len = 300) => (Array.isArray(x) ? x.map((s) => str(s, len)).filter(Boolean).slice(0, n) : []);
-const num = (x: unknown, lo: number, hi: number) => { const v = typeof x === "number" ? x : typeof x === "string" ? Number(x.replace(",", ".")) : NaN; return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : null; };
+const num = (x: unknown, lo: number, hi: number) => { const v = typeof x === "number" ? x : typeof x === "string" && x.trim() ? Number(x.replace(",", ".")) : NaN; return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : null; };
 const tone = (t: unknown): Tone => (TONES.includes(t as Tone) ? (t as Tone) : "unclear");
 const shares = (x: unknown): Share[] => (Array.isArray(x) ? x : []).map((s: any) => ({ name: str(s?.name, 60), share: Math.round(num(s?.share, 0, 100) ?? 0) })).filter((s) => s.name && s.share > 0).slice(0, 6);
 
@@ -76,7 +76,7 @@ export function cleanBatch(x: any, offset: number, size: number): { items: Map<n
     const q = num(it.quality, 1, 5);
     items.set(it.n, { tone: ITEM_TONES.includes(it.tone) ? it.tone : "neutral", quality: q ? Math.round(q) : 2, gist: str(it.gist, 240), topic: TOPICS.includes(it.topic) ? it.topic : "general" });
   }
-  const nums = (l: unknown) => (Array.isArray(l) ? l.filter(inBatch).slice(0, 2) as number[] : []);
+  const nums = (l: unknown) => (Array.isArray(l) ? [...new Set(l.filter(n=>inBatch(n)&&items.has(n)))].slice(0, 2) as number[] : []);
   const best = nums(x?.best), worst = nums(x?.worst).filter((n) => !best.includes(n));
   return { items, best, worst };
 }
@@ -92,7 +92,7 @@ export function communityScore(reviews: RunReview[]): number | null {
     const wt = 0.5 + r.read!.quality / 2;
     sum += v * wt; w += wt;
   }
-  const rated = reviews.filter((r) => r.stars);
+  const rated = reviews.filter((r) => typeof r.stars==="number"&&Number.isFinite(r.stars)&&r.stars>=.5&&r.stars<=5);
   const stars = rated.length ? (rated.reduce((s, r) => s + r.stars!, 0) / rated.length) * 2 : null;
   if (!w) return stars == null ? null : Math.round(stars * 10) / 10;
   const opinion = sum / w;
@@ -170,7 +170,7 @@ function cleanRead(x: any): ReadItem | null {
 }
 export function cleanRun(x: any): AiRun | null {
   const verdict = cleanVerdict(x?.verdict);
-  if (!verdict || typeof x.at !== "number") return null;
+  if (!verdict || typeof x.at !== "number" || !Number.isFinite(new Date(x.at).getTime())) return null;
   const reviews: RunReview[] = (Array.isArray(x.reviews) ? x.reviews : []).slice(0, 100).map((r: any) => ({
     author: str(r?.author, 60), stars: num(r?.stars, 0.5, 5), spoiler: !!r?.spoiler, text: typeof r?.text === "string" ? r.text.slice(0, 3000) : "",
     read: cleanRead(r?.read), best: !!r?.best, worst: !!r?.worst,

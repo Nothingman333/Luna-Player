@@ -30,6 +30,8 @@ export function friendlyBrowserError(error: unknown, tr: boolean): string {
   return hit ? (tr ? hit[1] : hit[2]) : raw;
 }
 export type WebTab = { id: number; title: string; url: string; loading: boolean };
+let searchResolver:((text:string)=>string)|undefined;
+export function setSearchResolver(resolver:((text:string)=>string)|null){searchResolver=resolver??undefined;}
 const DEFAULT_SEARCH = "https://www.google.com/search?q=%s";
 const LOCAL_HOST = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i;
 const IPV4 = /^(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
@@ -60,7 +62,7 @@ export function addressKind(input: string): "empty" | "address" | "search" {
   return hostLike(text) ? "address" : "search";
 }
 /** `searchTemplate` is an https address with one %s (see browserSearch.ts); anything else falls back to Google. */
-export function browserAddress(input: string, searchTemplate: string | ((query: string) => string) = DEFAULT_SEARCH): string {
+export function browserAddress(input: string, searchTemplate: string | ((query: string) => string) = searchResolver??DEFAULT_SEARCH): string {
   const text = input.trim();
   if (!text) throw new Error('Bir adres ya da arama yaz.');
   const kind = addressKind(text);

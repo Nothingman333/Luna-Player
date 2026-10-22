@@ -1,6 +1,16 @@
+import {DebugLauncher} from "./DebugPanel";
 import { FilmMetadataPanel, DiagnosticTools } from "./EverydayTools";
 import { editionLabels } from "./everydayModel";
+import { DiagnosticsCard, StudioSettings } from "./StudioExtras";
+import { ShellSettings, SoundWebSettings } from "./LunaPlusSettings";
+import { UpcomingStrip } from "./CalendarView";
+import { TitleLogo, WhereToWatch } from "./TitleExtras";
+import { openPanel } from "./paletteExtras";
+import { TonightPicker } from "./TonightPicker";
+import { OnThisDay } from "./OnThisDay";
+import { useTint } from "./posterTint";
 import { GeneralExtras, BulkRelink, PlaybackPreferences, SeriesTracker, MediaNotebook, extraText } from "./Extras";
+import { ExtrasSettings } from "./ExtrasSettings";
 import { defaultSubLangs, lang, setLang, tt, DEC } from "./i18n";
 import { BUILD_AGENT, BUILD_AGENT_NAMES, VERSION_LABEL } from "./version";
 import { UpdateSettings } from "./Update";
@@ -475,6 +485,9 @@ export function Home({ items, recent, hasFolders, a, onAddFolder, downloads }: {
 
       {downloads}
 
+      <TonightPicker items={items} recent={recent} onPlay={(p) => a.play(p)} onDetails={(k) => a.details(k)} />
+      <OnThisDay items={items} onOpen={(k) => a.details(k)} />
+
       {continuing.length > 0 && (
         <section className="row">
           <h2>{tt("İzlemeye devam et")}</h2>
@@ -492,6 +505,7 @@ export function Home({ items, recent, hasFolders, a, onAddFolder, downloads }: {
           </div>
         </section>
       )}
+      <UpcomingStrip items={items} onOpen={(k) => a.details(k)} onAll={() => openPanel("calendar")} />
       {shows.length > 0 && <PosterRow title={tt("Diziler")} items={shows} a={a} />}
       {movies.length > 0 && <PosterRow title={tt("Filmler")} items={besideCopies(movies)} a={a} />}
       {finishedItems.length > 0 && <PosterRow title={tt("Bitirdiklerim")} items={finishedItems} a={a} />}
@@ -691,6 +705,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
 }) {
   const [, rerender] = useState(0);
   const m = safeMeta(it.meta, it.parsed.kind);
+  const tint = useTint(m?.poster ? IMG + "w92" + m.poster : null);
   const isTv = it.parsed.kind === "tv";
   const seasons = [...new Set(it.files.map((f) => f.season ?? 1))].sort((x, y) => x - y);
   // a film found more than once: the user picks which copy to watch (last watched one first)
@@ -721,7 +736,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
   const longText = (m?.overview.length ?? 0) > 260;
 
   return (
-    <div className="details page-anim">
+    <div className={"details page-anim" + (tint ? " tinted" : "")} style={tint ? ({ "--tint-rgb": tint } as React.CSSProperties) : undefined}>
       <section className="d-hero">
         <div className={"hero-bg" + (it.files.every((f) => isRemote(f.path)) ? " remote" : "")} style={m?.backdrop ? { backgroundImage: `url(${IMG}w1280${m.backdrop})` } : undefined} />
         <div className="d-shade" />
@@ -730,7 +745,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
           <div className="brand"><LunaMark />  {tt("Luna Player")}</div>
         </header>
         <div className="d-body">
-          <h1>{m?.title || it.parsed.title}</h1>
+          <TitleLogo kind={m?.kind} id={m && m.id > 0 ? m.id : undefined} title={m?.title || it.parsed.title} />
           <div className="d-meta">
             {m && m.rating > 0 && (
               <button className="rating" title={extraText("TMDB topluluk puanı (senin puanın değil) · TMDB sayfasını aç", "TMDB community rating (not your own) · open the TMDB page")}
@@ -745,6 +760,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
             {m?.genres?.length ? <span>{m.genres.slice(0, 3).join(", ")}</span> : null}
           </div>
           <Badges path={file.path} big />
+          {m && m.id > 0 && <WhereToWatch kind={m.kind} id={m.id} />}
           {copies.length > 1 && (
             <div className="copies">
               <div className="muted small">{tt("Bu filmden {0} kopya var; izlemek istediğini seç:", copies.length)}</div>
@@ -1036,7 +1052,7 @@ export function Rematch({ it, onPick, onCustom, onClose }: {
   );
 }
 
-type SetSec = "general" | "keys" | "subs" | "upscaler" | "addons" | "downloads" | "backup";
+type SetSec = "general" | "keys" | "subs" | "upscaler" | "addons" | "downloads" | "extras" | "backup";
 const SET_ICONS: Record<SetSec, string> = {
   general: I.gear,
   keys: "M15 7a4 4 0 1 1-3.9 4.9L3 20v-3h3v-3h3l1.1-1.1A4 4 0 0 1 15 7zM16.5 10.5h.01",
@@ -1044,6 +1060,7 @@ const SET_ICONS: Record<SetSec, string> = {
   upscaler: "M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4zM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z",
   addons: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM16.5 13v7M13 16.5h7",
   downloads: I.down,
+  extras: "M9 18V6l10-2v12M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM19 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
   backup: "M12 3v12M7 10l5 5 5-5M5 21h14",
 };
 
@@ -1186,6 +1203,7 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
     ["upscaler", tt("Upscaler"), tt("Lossless Scaling ile yapay zekâ")],
     ["addons", tt("Eklentiler"), tt("Stremio, arama eklentileri, kitap kaynakları")],
     ["downloads", tt("İndirmeler"), tt("Torrent klasörü")],
+    ["extras", tt("Oynatma ve bağlantılar"), tt("SponsorBlock, scrobble, komutlar")],
     ["backup", tt("Yedekleme"), tt("Tek dosya, istersen buluta")],
   ];
   const cur = secs.find((x) => x[0] === sec) ?? secs[0];
@@ -1247,6 +1265,10 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                   </div>
                   <UpdateSettings onBackup={() => setSec("backup")} />
                   <GeneralExtras/>
+                  <StudioSettings/>
+                  <ShellSettings/>
+                  <SoundWebSettings/>
+                  <DiagnosticsCard/>
                   <div className="set-card">
                     <label className="look-check">
                       <input type="checkbox" checked={autoFull} onChange={(e) => setAutoFull(e.target.checked)} />
@@ -1416,7 +1438,8 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                   <div className="set-card"><SourceSettings /></div>
                 </>
               )}
-              {sec === "backup" && <><BackupSettings /><BulkRelink /><DiagnosticTools /></>}
+              {sec === "extras" && <ExtrasSettings />}
+              {sec === "backup" && <><BackupSettings /><BulkRelink /><DiagnosticTools /><DebugLauncher /></>}
               {sec === "downloads" && (
                 <div className="set-card">
                   <div className="field">

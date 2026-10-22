@@ -1,3 +1,4 @@
+import {cleanOverrides,applyMediaOverride} from "./assistantWorkspaceModel";
 import { scanChanges } from "./everydayModel";
 import type { ScanSummary } from "./everydayModel";
 import { naturalPath } from "./playbackModel";
@@ -9,7 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 /** API keys: kept by Windows (Credential Manager), held here in memory, never in localStorage, the
  *  state file or a backup. */
 /** (aiProfileKey1…8: the keys of the API profiles, see ai.ts) */
-export const SECRET_KEYS = ["geminiKey", "tmdbKey", "osKey", "openaiKey", "claudeKey", "customAiKey", ...Array.from({ length: 8 }, (_, i) => "aiProfileKey" + (i + 1))];
+export const SECRET_KEYS = ["geminiKey", "tmdbKey", "osKey", "openaiKey", "claudeKey", "customAiKey", "listenbrainzToken", "lastfmKey", "lastfmSecret", "lastfmSession", "traktSecret", "traktToken", "traktRefresh", ...Array.from({ length: 8 }, (_, i) => "aiProfileKey" + (i + 1))];
 const secrets = new Map<string, string>();
 const secretWrites = new Map<string, Promise<void>>();
 function queueSecret(key: string, value: string) {
@@ -82,7 +83,7 @@ export const torrentSrc = (path: string) => store.get("tsrc:" + path) || null;
 export const isRemote = (path: string) => !!torrentSrc(path) && store.get("tdone:" + path) !== "1";
 
 export type Recent = { path: string; title: string; time: number; duration: number };
-export const loadRecent = (): Recent[] => store.json("recent", []);
+export const loadRecent = (): Recent[] => {const raw=store.json<unknown>("recent",[]);return Array.isArray(raw)?raw.filter((x):x is Recent=>!!x&&typeof x.path==="string"&&typeof x.title==="string"&&Number.isFinite(x.time)&&x.time>=0&&Number.isFinite(x.duration)&&x.duration>=0):[];};
 
 // ---------- file name parsing ----------
 export type Parsed = { kind: "movie" | "tv"; title: string; year?: number; season?: number; episode?: number };
@@ -307,7 +308,7 @@ export const seasonKey = (tvId: number, season: number) => `season:${locale()}:$
 export async function seasonEpisodes(tvId: number, season: number): Promise<Episode[]> {
   const k = seasonKey(tvId, season);
   const cached = store.json<Episode[] | null>(k, null);
-  if (cached) return cached;
+  if (Array.isArray(cached)&&cached.every(e=>e&&Number.isInteger(e.episode)&&typeof e.name==="string")) return cached;
   if (!store.get("tmdbKey")) return [];
   try {
     const d = await tmdb(`/tv/${tvId}/season/${season}`, { language: locale() });
@@ -336,12 +337,14 @@ export function pinFile(path: string) {
 
 /** Watched to the end (or marked by hand). Credits don't count: the last 5 minutes are enough. */
 let finishedCache: Record<string, number> | null = null;
-export const loadFinished = () => (finishedCache ??= store.json<Record<string, number>>("finished", {}));
+export const loadFinished = () => {if(finishedCache)return finishedCache;const raw=store.json<unknown>("finished",{});return finishedCache=raw&&typeof raw==="object"&&!Array.isArray(raw)?Object.fromEntries(Object.entries(raw).filter(([,v])=>typeof v==="number"&&Number.isFinite(v)&&v>0)) as Record<string,number>:{};};
 export const isFinished = (path: string) => !!loadFinished()[path];
 export function setFinished(paths: string[], on: boolean) {
-  const f = loadFinished();
+  const raw=store.get("finished");if(raw!==null){const saved=JSON.parse(raw);if(!saved||typeof saved!=="object"||Array.isArray(saved)||Object.values(saved).some(v=>typeof v!=="number"||!Number.isFinite(v)))throw Error("Watched records are damaged; export a backup before editing.");}
+  const f = {...loadFinished()};
   for (const p of paths) { if (on) f[p] = Date.now(); else delete f[p]; }
-  store.set("finished", JSON.stringify(f));
+  if(!store.set("finished",JSON.stringify(f)))throw Error("Watched status could not be saved.");
+  finishedCache=f;
   window.dispatchEvent(new Event("luna-library"));
 }
 // the credits: the last 8% (at least a minute, at most five); a short clip only its last quarter
@@ -432,7 +435,7 @@ export function useLibrary(opened: string[] = []) {
   const [files, setFiles] = useState<string[]>(() => store.json("files", []));
   const [pinned, setPinned] = useState<string[]>(loadPinned);
   const [missing, setMissing] = useState<Set<string>>(new Set());
-  const [, bump] = useState(0);
+  const [libraryRevision, bump] = useState(0);
   useEffect(() => {
     const f = () => { setPinned(loadPinned()); setFiles(store.json("files", [])); setFoldersState(store.json("folders", [])); setKinds(loadFolderKinds()); setMeta(store.json("meta", {})); bump((n) => n + 1); };
     window.addEventListener("luna-library", f);
@@ -442,6 +445,12 @@ export function useLibrary(opened: string[] = []) {
   const [scanning, setScanning] = useState(false);
   const [scanSummary, setScanSummary] = useState<ScanSummary | null>(null);
   const [tick, setTick] = useState(0);
+  // the folder watcher (Settings › Luna and Windows) found new or removed film files
+  useEffect(() => {
+    const f = (e: Event) => { if (((e as CustomEvent).detail?.kinds ?? ["film"]).includes("film")) setTick((t) => t + 1); };
+    window.addEventListener("luna-rescan", f);
+    return () => window.removeEventListener("luna-rescan", f);
+  }, []);
 
   const setFolders = (f: string[]) => {
     store.set("folders", JSON.stringify(f));
@@ -478,24 +487,32 @@ export function useLibrary(opened: string[] = []) {
 
   const items = useMemo(() => {
     const map = new Map<string, Item>();
+    let overrides: ReturnType<typeof cleanOverrides> = {};
+    try { overrides=cleanOverrides(JSON.parse(store.get("lunaMediaOverrides")||"{}")); } catch { /* Preserve damaged source; assistant writes are blocked until recovery. */ }
+    const explicitKeys=new Set<string>();
     // Files opened directly (outside library folders) get posters and details too.
     const series = folders.filter((f) => kinds[f] === "tv").map((f) => [f, normDir(f)] as const);
     for (const path of [...new Set([...files, ...pinned, ...opened])]) {
       const inSeries = series.find(([, n]) => normDir(path).startsWith(n + "/"));
-      const parsed = inSeries ? parseInSeries(path, inSeries[0]) : parseName(path);
+      const detected = inSeries ? parseInSeries(path, inSeries[0]) : parseName(path);
+      const parsed = overrides[path] ? applyMediaOverride(detected,overrides[path]) : detected;
       const key = groupKey(parsed);
+      if(overrides[path])explicitKeys.add(key);
       const it = map.get(key) ?? { key, parsed, files: [], meta: meta[key] ?? null };
       it.files.push({ path, season: parsed.season, episode: parsed.episode });
       map.set(key, it);
     }
     for (const it of map.values()) {
-      if (it.meta && it.meta.kind !== it.parsed.kind) it.parsed = { ...it.parsed, kind: it.meta.kind };
+      if (it.meta && it.meta.kind !== it.parsed.kind) {
+        if(explicitKeys.has(it.key))it.meta=null;
+        else it.parsed = { ...it.parsed, kind: it.meta.kind };
+      }
     }
     // ties (two copies of an episode, files without a number) in natural name order, not in scan order
     for (const it of map.values())
       it.files.sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? 0) - (b.episode ?? 0) || naturalPath(a.path, b.path));
     return [...map.values()];
-  }, [files, pinned, meta, opened.join("\n"), folders, kinds]);
+  }, [files, pinned, meta, opened.join("\n"), folders, kinds, libraryRevision]);
 
   // Which videos are gone from disk (moved, deleted, drive unplugged).
   useEffect(() => {

@@ -134,7 +134,11 @@
 .browser-assistant-prompts button:hover { border-color:rgba(var(--acc-rgb),.4); }
 .browser-assistant-card > small { display:block; color:#756d68; font-size:9px; margin-top:12px; line-height:1.6; }
 .root:has(.browser-shell:not([hidden])) > .ai-bubble { bottom:76px; right:24px; width:54px; height:54px; z-index:350; }
-.root.has-dock .browser-shell { bottom:104px; }
+.root.has-dock .browser-shell { bottom:0; padding-bottom:104px; }
+/* Keep the active web workspace opaque below and around the floating music dock.
+   Only its content slot shrinks; native bounds continue to follow that slot. */
+.root:has(.browser-shell:not([hidden])) > .shell { overflow:hidden; padding-bottom:0; }
+.root:has(.browser-shell:not([hidden])) > .shell > .shell-body { display:none; }
 .root.has-dock:has(.browser-shell:not([hidden])) > .ai-bubble { bottom:150px; }
 .browser-alert { display:flex; align-items:center; gap:12px; flex:none; padding:10px 26px; border-bottom:1px solid rgba(var(--acc-rgb),.2); background:rgba(var(--acc-rgb),.055); color:var(--accent-soft); font-size:11px; }
 .browser-alert > span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -468,3 +472,5 @@
 .browser-history .browser-history-search input { border:0 !important; background:none !important; padding:0 !important; margin:0 !important; box-shadow:none !important; height:auto !important; width:auto; flex:1; min-width:0; border-radius:0; }
 .browser-history .browser-history-search > svg { flex:none; }
 .browser-history .browser-history-search { display:flex !important; flex-direction:row !important; align-items:center !important; gap:9px; }
+
+.quality-filter-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}.quality-filter-row select{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:7px 10px;max-width:100%;font:inherit;font-size:12px}.browser-history-confirm{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px;border:1px solid var(--line);border-radius:12px}.browser-history-row .bh-open{min-width:0;flex:1}.browser-history-bar{flex-wrap:wrap}.browser-history .browser-history-search{flex:1;min-width:160px}@media(max-width:600px){.quality-filter-row select{flex:1;min-width:110px}.browser-history .bh-time{font-size:10px}.browser-history .bh-text b{overflow-wrap:anywhere}.browser-history-row{gap:5px}}

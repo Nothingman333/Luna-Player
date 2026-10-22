@@ -44,6 +44,105 @@
 - Favourites bar: a "+N" button opens the full list when there are more than twelve. Small polish: accent line under the active tab, calmer inactive tab close buttons, address bar focus glow, lift on the start page's cards.
 - **Keyboard shortcuts panel:** F1 (or Ctrl+/) in Web, also under Tools › Keyboard shortcuts, lists every Web shortcut; a test checks that each listed key is really handled in the code.
 - Checks: `npm run test:browser-suggest` (21 tests: engines, address reading, suggestion ranking, visit list, shortcut table, wiring, styles) and `npm run test:browser-reader` (8 tests: page text to blocks, reading time, contents, accent-insensitive find mapped back to the original letters, highlights, reader settings, per-site zoom, wiring), both in CI.
+## 1.11.0CC — 2026-10-22 (beta, not built yet: try it with Luna Dev.cmd)
+
+- **Replik ara (Ctrl+K, and on the home page):** type what was said ("köprüde buluşalım") and see every film and moment of your library where it is said, with the line before and after and your words marked. Case, Turkish letters and punctuation don't matter ("koprude bulusalim" finds "Köprüde buluşalım."), a phrase split over two subtitle lines is found, and Enter plays the film from two seconds before the line. It reads the subtitle files beside your films (the Turkish one first, else English, else any; hearing-impaired and forced-only files last) and keeps them in memory for the session; subtitles inside the video file aren't read.
+- **Anime openings and endings (AniSkip, off by default):** for animation shows Luna asks AniList for the show's MyAnimeList id and AniSkip's community data for the episode, and the "Skip intro" button appears for the opening, the ending and the recap. It is strict so it never skips the wrong minute: the title must agree, later seasons are used only when an entry names the season, the answer's episode length must be within 15 s of your file, and anything you marked yourself or that the file's chapter names give wins. What is sent: the show's name, the episode number and its length. Settings › General.
+- **Comics:** CBZ files that carry a `ComicInfo.xml` are shown as "Saga #12: Fire & Ice" with the writer as author and the language set; comics without it are as before. Comics already in the library are read once more to pick this up.
+- **A year ago today (home page):** the films and episodes you finished on this day in earlier years, under the "what to watch tonight" card.
+- Native: `library_subtitles` (which subtitle file to read for each film).
+- Checks: `npm run test:library` (9 tests, the AniSkip answers are real ones) and 4 more Rust unit tests (ComicInfo fields and titles, subtitle ranking). Every new text has English.
+- Not in this version: gapless music playback (it needs a test against a real mpv), `.nfo` files, batch renaming, smart lists, an ad blocker, MCP client, server clients, live captions, vocal separation, song recognition. The Now Playing screen already has a blurred cover background, so a cover tint was not added.
+
+## 1.10.0CC — 2026-10-22 (beta, not built yet: try it with Luna Dev.cmd)
+
+- **Luna Özet (Ctrl+K, and from the home page):** your year, last 30 days or all time as a short story: hours of films and music, the films and episodes you finished with their posters and your top genres, your diary's average and favourites, your most played artists and the hours of the day you listen (a 24-hour dial), the books you finished, and a heat map of the days Luna was open with your longest streak. A playful portrait sums it up (night owl, marathoner, bookworm, music lover, critic, explorer, dreamer). The last page draws a 1080×1350 card you can save as PNG or copy. Everything comes from what Luna already keeps on this computer; nothing is sent.
+- **"Bu akşam ne izlesem?" (home page):** tell Luna how much time you have and the mood you're in (tense, light, thoughtful, adventure, moving); it shuffles through your unwatched films and the next episode of shows you've started, picks one that fits, and says why (length, mood, rating, waiting for a while). "Another one" never repeats the last few picks.
+- **Quote cards:** the ❝ button on a line in the Lines panel (or Ctrl+K while a film plays) sets that line over a full-size frame of the moment it is said, in Literata italic, with the film's name and time. Three looks (cinema, poster, plain), 4:5 or 16:9, the accent colour taken from the frame itself; save as PNG or copy.
+- **Poster colours:** a film's page takes a soft tint from its poster.
+- **Scene grid** shows the line being said under each picture; the **clip maker** shows the first and last frame of the clip while you choose.
+- **Fix:** `Cargo.lock` now carries the crates 1.9.0 added (notify and the notification, global-shortcut and autostart plugins); before, Cargo added them on the first build.
+- Native: `still_frame` (a 1600-px frame as a data address, so the page can draw it) and `save_image` (only PNG or JPEG data with a matching file name; written to a temporary name, then renamed).
+- Checks: `npm run test:creative` (10 tests) and 2 more Rust unit tests (base64, picture data). Every new text has English.
+
+## 1.9.0CC — 2026-10-22 (beta, not built yet: try it with Luna Dev.cmd)
+
+New in this version, on top of the merged 1.8.0CC:
+
+- **Luna and Windows (Settings › General):** close to the system tray (music, podcasts and radio go on; a film pauses), media keys that work in every program, start with Windows (to the tray), a library-folder watcher that refreshes films, music and books by itself and can start Whisper for new films without subtitles, and Windows notifications (Whisper finished, new files, a new episode today, backup) shown only while Luna is in the background. All of it is off until switched on. Whisper, downloads and batches show their progress on the taskbar button.
+- **Whisper:** speed presets (fast, balanced, quality), Silero voice-activity detection (skips silence and music, so fewer invented lines and a faster run; the 0.9 MB model is downloaded and verified on first use), and the film's names are carried through every window of the audio, not only the first. The command line now comes from a small tested core.
+- **Library health (Ctrl+K):** copies of the same file (size plus a hash of the first and last 64 KiB), sample clips, missing files, films without a subtitle file and films without a TMDB match. Nothing is deleted by itself; "Delete…" asks again and sends to the Recycle Bin. Films without subtitles can go to the Whisper queue in one click.
+- **Scene grid (Ctrl+G) and clip maker (X):** the playing film as a sheet of 36 pictures, and an MP4, WebM or GIF cut between two moments with mpv's own encoder (size cap 8, 25 or 50 MB, subtitles burnt in on request).
+- **Episode calendar (Ctrl+K and the home page):** the next episode of every show in the library from TMDB.
+- **Title pages:** the title's own logo when TMDB has one, and "where to watch" (JustWatch data through TMDB, with the source named).
+- **Sound and picture:** ReplayGain (track or album), AutoEq headphone correction from a ParametricEQ.txt file (works with the equaliser of the Sound panel), and smooth motion (frame interpolation synchronised to the display) in the video settings.
+- **Luna Web:** choose the search engine for the address bar (or your own address) and use bangs such as `!yt`, `!imdb`, `!w`; "Open archived copy" opens the Internet Archive's newest copy of a page.
+- **Books:** Atkinson Hyperlegible Next, Lexend and OpenDyslexic as reading typefaces.
+- Checks: `npm run test:shell-extras` (9 tests; the AutoEq filter strings are also run through ffmpeg when it is installed) and 7 more Rust unit tests (`shell_core`: folder classification, debouncing, the Whisper and clip command lines). Every new text has English.
+- Not in this version (suggested in the ideas list): ComicInfo and CBR comics, gapless playback, `.nfo` files, batch renaming, smart lists, year-in-review, AniSkip, an ad blocker, MCP client, server clients, live captions, vocal separation, song recognition.
+
+## 1.8.0CC — 2026-10-22 (beta, not built yet: try it with Luna Dev.cmd)
+
+Two work streams merged into one tree: the subtitle studio and skipping (1.7.0–1.7.1CC, below as "part A") and the playback extras (sound panel, SponsorBlock, scrobbling, podcast chapters, fast reading, command palette, Trakt, Discord; "part B").
+
+- **One SponsorBlock, one sound panel:** the earlier music-only SponsorBlock switch and the "night mode" menu item of part A were removed; part B's versions (films and songs, categories, ask-first, coloured seek-bar marks; per-part sound profiles with night mode, balance, clear speech and the equaliser) replace them.
+- `StudioExtras.tsx` (part A's Settings cards: auto-skip, diagnostics report) was renamed from `PlaybackExtras.tsx`, which part B uses for the sound and SponsorBlock settings.
+- Checks: `npm run test:subtitle-studio` and `npm run test:extras-plus` both pass on the merged tree.
+
+## 1.7.1CC (part A) — 2026-10-22 (beta, not built yet: try it with Luna Dev.cmd)
+
+The subtitle studio, finished. Checked with the isolated UI fixture (screenshots in the delivery), the regression scripts and `cargo check`; not run in a real Windows Luna window yet.
+
+- **A studio that explains itself:** a rail on the left with each tool and its state (progress, "needs a file"); Create is three numbered steps. Engines and models are cards: speed and accuracy, "Recommended", "In use", the download progress inside the card, "Use this" for what is installed. Time left is shown for downloads, audio and transcription.
+- **Better Whisper subtitles:** the title and the cast's character names from TMDB go to Whisper as its prompt (plain ASCII only, which whisper-cli can read), so names are spelled right; lines Whisper makes up in silence or music ("Thanks for watching", "Altyazı M.K.", amara.org credits, subscribe requests, loops of the same line) are removed and counted. "All episodes without subtitles" / "Only this video" in one click.
+- **Whisper pill:** while Whisper works, a small ring with the phase, percent and time left sits in the player's top bar; a click opens the studio.
+- **Translation:** "Natural" or "Close to the original (for learning)", how many requests it will take, the latest translated lines side by side as they arrive, and after Stop "Carry on where it stopped".
+- **Sync you can see:** a strip shows where the speech is in the audio, where the lines are now and where they go after the fix (a movable 90-second window), a match meter and the overlap with speech before and after. "Preview in the video" tries it without saving; closing the preview puts the old timing back.
+- **Clean-up with every change listed:** each fix shows how many lines it alone would change; the lines that will change are listed (removed, new text, longer display).
+- **Transcript:** the second subtitle under each line, "Follow playback" and "Back to now", keyboard (↑ ↓, Enter to go there, E to edit), export as text or Markdown (Obsidian) with both languages, explanations remembered per word and line, "In the notebook ✓".
+- **Skip intro:** a thin line in the button shows how much of the part is left.
+- Fix: a label rule of Luna's dialogs stacked the clean-up options vertically; they are rows again.
+- `npm run test:subtitle-studio`: 26 tests (was 21); `studio_core`: 12 unit tests.
+
+## 1.7.0CC — 2026-10-22 (beta, not built yet: try it with Luna Dev.cmd)
+
+Subtitle studio and playback extras. Checked with the isolated UI fixture, the regression scripts and `cargo check`; nothing here has been run in a real Windows Luna window yet.
+
+- **Subtitle studio** (Audio & subtitles › "Subtitle studio…", the right-click menu, or "Make from the audio…" in the subtitle search window):
+  - **Create:** local Whisper transcription with whisper.cpp. Download the engine (processor build 4 MB, NVIDIA CUDA 12 build 457 MB; pinned to v1.8.4 and verified by size and SHA-256) and a model (tiny … large-v3-turbo), or point Luna at your own `whisper-cli.exe` and `.bin` model. One video or the episodes of a series that have no subtitle go into a queue that keeps running when the window is closed. The result is written next to the video as `Film.<language>.srt` (never over an existing file), long segments are split into readable lines. Nothing is sent anywhere.
+  - **Translate:** the subtitle in another language with the assistant's AI: 40 lines at a time with the lines before and after as context, character names from TMDB kept, timing unchanged, each answer checked (only the asked ids, missing lines keep their text), a stopped run can be kept. The translation can be shown as a second subtitle.
+  - **Sync:** Luna listens to the video's audio once, finds where speech is and lines the subtitle up with it: the delay and 23.976 / 24 / 25 fps mix-ups (`sub-delay` and `sub-speed`), remembered per file. It shows how sure it is and how much of the subtitle falls on speech before and after.
+  - **Clean up:** hearing-impaired notes, speaker labels, song lines, overlaps, lines shown too briefly to read, long lines, repeats. SRT and VTT are changed in place after a copy of the original is kept in Luna's cache; an ASS file is left alone and a cleaned SRT is saved beside it.
+- **Transcript panel (R):** every line of the subtitle with search, click-to-jump, the current line followed, click a word to ask what it means in that line (assistant's AI), add it to the vocabulary notebook or copy it; SRT/VTT lines can be edited. For embedded subtitles the lines seen while watching are kept instead.
+- **Second subtitle:** pick one in Audio & subtitles (mpv's `secondary-sid`). The main subtitle is now found as the selected track that is not the second one, so the remembered choice for a video can no longer be the second subtitle by mistake.
+- **Skip intro (I):** from the video's chapter names (Intro, Opening, Recap, Previously, Credits, Preview and the Turkish equivalents) or from an intro you marked once for a series (right-click › Intro mark). Settings › General can skip each kind by itself.
+- **SponsorBlock in YouTube songs (music, off by default):** skips non-music parts and sponsor talk. Only the first 4 characters of the video id's SHA-256 are sent to sponsor.ajay.app (their privacy lookup); the data is CC BY-NC-SA 4.0.
+- **Night mode** (right-click › Audio): evens out quiet speech and loud effects; it can start on for every film (Settings › General) and is removed again for music.
+- **Picture:** "High-quality scaling" and **Anime4K** (Fast / High quality) in the video panel; the shaders (0.8 MB, v4.0.1) are downloaded on request and verified. No Lossless Scaling needed.
+- **Assistant:** while a film plays it also gets the subtitle lines shown so far (never later lines; no claim to see the picture or hear the sound), and the lines seen while watching for embedded subtitles.
+- **Automatic backup** (Settings › Backup): a folder, daily or weekly, how many to keep (3–30). Choose a OneDrive / Google Drive / Dropbox folder and it reaches the cloud by itself. Only Luna's own `Luna auto-backup …json` files are ever removed (to the Recycle Bin).
+- **Vocabulary notebook:** export for Anki (tab-separated text with header lines).
+- **Settings › General:** a diagnostics report to copy into a bug report (versions, mpv/Vulkan, Whisper and shader setup, the chosen AI service, storage size; no keys, no user name).
+- **Safer files:** new subtitles are written through a temporary file and renamed; downloads are size- and hash-checked and deleted when cancelled or incomplete; archive entries are flattened to checked names.
+- Windows user names with letters outside plain ASCII: Whisper's command line is given 8.3 short paths (or `C:\Users\Public\Luna-Studio` for its temporary files); when that is impossible the message says which folder to use.
+- New: `npm run test:subtitle-studio` (21 tests) and `studio_core` unit tests (11, `cargo test`).
+- Not in this version (suggested earlier): podcast transcripts, Whisper lyrics for songs, OCR for picture subtitles, watching together, page/comic/PDF translation, LibriVox audio–text alignment.
+
+## 1.8.0CC part B — playback extras, scrobbling, podcast chapters, fast reading, command palette (side chat, merged)
+
+- **Sound (films):** a new button in the player bar opens Sound: three effect tiles (balance, night mode, clear speech), a 10-band equaliser drawn as a curve you drag (or set with the arrow keys; double-click flattens a band) with 9 presets, and an A-B loop that stays when the panel closes and is marked on the seek bar. Films and music keep separate settings. Only Luna's own labelled mpv filters are added or removed, so other filters stay.
+- **Sound and sleep timer (music):** a button on the Now playing screen with the same equaliser and a sleep timer (15, 30, 45 minutes, 1 hour, or when the song ends) that fades the music before it pauses.
+- **SponsorBlock:** YouTube links (films and songs) skip the parts the SponsorBlock community marked (sponsor, self-promotion, reminders, music-video parts without music…). Choose the categories and automatic or ask-first in Settings › Playback and connections. Only the first 4 characters of the video id's SHA-256 are sent; a skipped part shows "Undo".
+- **Scrobbling:** ListenBrainz (token, own server possible) and Last.fm (own API key and secret; the password is used once and not kept). A listen counts after half the song or 4 minutes; radio, podcasts and audiobooks are never sent. Keys and sessions are kept in Windows' credential store; listens that could not be sent wait and are sent later.
+- **Podcast chapters and transcript:** episodes whose feed carries `<podcast:chapters>` or `<podcast:transcript>` (Podcasting 2.0) show the chapters (click to jump) and a searchable transcript that follows the voice, in "About this episode".
+- **Fast reading (EPUB):** a button in the reader shows one word at a time at a steady pace (150–900 words/min) with the recognition letter marked; it starts on the page on screen, goes on into the next chapter and the book turns to the word reached when it closes.
+- **Command palette (Ctrl+K):** go to any part, open a film from the library (with its poster), run common actions or ask the assistant; recent choices come first, groups stay together, Turkish and English words both find a place.
+- **Trakt:** films and episodes from the library show as "watching" on Trakt while they play and are marked watched past 80 %. Sign-in with a code on trakt.tv (device flow) using the user's own Trakt app; tokens in Windows' credential store, refreshed before they run out.
+- **Discord:** optional "Watching / Listening to" presence through the Discord app on the computer (the user's own application id); off by default.
+- **Seek bars:** SponsorBlock parts are drawn in their category colour on the film and music bars.
+- **Assistant:** `/karşılaştır question` asks the same question to the saved API profiles and shows each answer with its time; `/komut` adds, lists and deletes your own commands (`/komut ekle özet3 = Summarise: {metin}`), also manageable in Settings. Your commands appear in the "/" list.
+- **Native:** `http_send` (GET/POST for ListenBrainz, Last.fm and Trakt; https or this computer only, only Authorization, Content-Type and Trakt's two API headers, no redirects, answer cut at 64 KB) and `discord_presence` (Discord's local pipe, Windows).
+- Checks: `npm run test:extras-plus` (20 tests), also in CI; Rust unit test for the allowed addresses. Every new text has English.
 
 ## Unreleased — assistant and browser review (bug fixes and small improvements, not yet released)
 - Assistant (Web part): a question or a refusal about the page ("do not translate this page", "is the translation right?", "what is the original price?") no longer translates the page or undoes a translation; only plain commands do, with the right language direction ("from German into English") and the interface language as the default.

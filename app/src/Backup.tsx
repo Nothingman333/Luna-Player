@@ -21,6 +21,75 @@ const CLOUDS: [string, string][] = [
 
 const snapshot = () => storageSnapshot(localStorage, SECRET_KEYS);
 
+/** Automatic backups: one file a day or a week in a folder the user chose (for example a OneDrive
+ *  or Google Drive folder, so it reaches the cloud by itself); only the newest few are kept. */
+export async function runAutoBackup(force = false): Promise<string | null> {
+  const dir = store.get("autoBackupDir");
+  const every = store.get("autoBackupEvery") ?? "off";
+  if (!dir || (every !== "daily" && every !== "weekly" && !force)) return null;
+  const last = Number(store.get("autoBackupAt") ?? 0);
+  const gap = every === "weekly" ? 7 * 86400000 : 86400000;
+  if (!force && Number.isFinite(last) && Date.now() - last < gap - 3600000) return null;
+  const now = new Date();
+  const name = `Luna auto-backup ${localBackupDay(now)} ${String(now.getHours()).padStart(2, "0")}-${String(now.getMinutes()).padStart(2, "0")}.json`;
+  const json = JSON.stringify({ luna: "backup", version: VERSION_LABEL, at: now.toISOString(), auto: true, data: snapshot() });
+  const keep = Math.max(1, Math.min(60, Number(store.get("autoBackupKeep") ?? 7) || 7));
+  try {
+    const path = await invoke<string>("backup_auto", { dir, name, json, keep });
+    store.set("autoBackupAt", String(Date.now()));
+    store.remove("autoBackupErr");
+    return path;
+  } catch (e) {
+    store.set("autoBackupErr", String(e));
+    throw e;
+  }
+}
+
+function AutoBackup() {
+  const [dir, setDir] = useState(store.get("autoBackupDir") ?? "");
+  const [every, setEvery] = useState(store.get("autoBackupEvery") ?? "off");
+  const [keep, setKeep] = useState(store.get("autoBackupKeep") ?? "7");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const last = Number(store.get("autoBackupAt") ?? 0);
+  const err = store.get("autoBackupErr");
+  const pick = async () => {
+    const d = await open({ directory: true, multiple: false });
+    if (typeof d === "string") { store.set("autoBackupDir", d); setDir(d); }
+  };
+  const now = async () => {
+    setBusy(true); setMsg("");
+    try { const p = await runAutoBackup(true); setMsg(p ? tt("Kaydedildi: {0}", p) : tt("Önce bir klasör seç.")); }
+    catch (e) { setMsg(String(e)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="set-card">
+      <div className="field">
+        <span>{tt("Otomatik yedek")}</span>
+        <div className="set-hint">{tt("Luna açıkken günde ya da haftada bir yedek dosyası seçtiğin klasöre yazılır. OneDrive / Google Drive / Dropbox klasörü seçersen yedek buluta kendiliğinden gider. Yalnız Luna'nın kendi otomatik yedekleri silinir: en yeni birkaç tanesi kalır, eskiler Geri Dönüşüm Kutusu'na gider.")}</div>
+        <div className="backup-row">
+          <button className="chip" onClick={pick}>{dir ? tt("Klasörü değiştir…") : tt("Klasör seç…")}</button>
+          {dir && <span className="backup-file ellipsis" title={dir}>{dir}</span>}
+        </div>
+        <div className="backup-row">
+          {([["off", tt("Kapalı")], ["daily", tt("Her gün")], ["weekly", tt("Her hafta")]] as const).map(([k, l]) => (
+            <button key={k} className={"seg sm" + (every === k ? " on" : "")} disabled={k !== "off" && !dir} onClick={() => { store.set("autoBackupEvery", k); setEvery(k); }}>{l}</button>
+          ))}
+          <label className="look-field">{tt("Saklanacak yedek")}
+            <select value={keep} onChange={(e) => { store.set("autoBackupKeep", e.target.value); setKeep(e.target.value); }}>
+              {["3", "7", "14", "30"].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
+          <button className="chip" disabled={busy || !dir} onClick={now}>{busy ? tt("Hazırlanıyor…") : tt("Şimdi yedekle")}</button>
+        </div>
+        {last > 0 && <div className="set-hint">{tt("Son otomatik yedek: {0}", new Date(last).toLocaleString())}</div>}
+        {err && !msg && <div className="plugin-msg small err">{tt("Son otomatik yedek başarısız: {0}", err)}</div>}
+        {msg && <div className="set-hint">{msg}</div>}
+      </div>
+    </div>
+  );
+}
+
 export function BackupSettings() {
   const [file, setFile] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -87,6 +156,7 @@ export function BackupSettings() {
           </div>
         </div>
       )}
+      <AutoBackup />
     </>
   );
 }

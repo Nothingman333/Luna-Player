@@ -9,7 +9,7 @@ export const naturalPath = (a: string, b: string) => a.localeCompare(b, undefine
  *  duration, so until its resume point has been read (`ready`), nothing may be recorded for it: film A's place
  *  must never be saved onto film B. */
 export function recordableProgress(path: string | null, title: string, time: number, duration: number, ready: string | null, music: boolean): Progress | null {
-  return path && duration > 0 && !music && ready === path ? { path, title, time: Number.isFinite(time) && time > 0 ? time : 0, duration } : null;
+  return path && Number.isFinite(duration) && duration > 0 && !music && ready === path ? { path, title, time: Number.isFinite(time) && time > 0 ? Math.min(time,duration) : 0, duration } : null;
 }
 
 /** The last place to write when playback leaves `before` (for another file, or for none). Nothing is written for a

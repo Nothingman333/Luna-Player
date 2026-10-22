@@ -34,6 +34,10 @@ mod music;
 mod pgs;
 mod screen;
 mod secrets;
+mod shell;
+mod shell_core;
+mod studio;
+mod studio_core;
 mod subs;
 mod torrent;
 mod tts;
@@ -339,6 +343,56 @@ async fn seek_preview(app: AppHandle, path: String, secs: u32) -> Result<String,
     let exe = mpv_exe(&app);
     let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("previews");
     blocking(move || files::frame_at(&exe, &path, secs, &cache)).await
+}
+
+/// The subtitle file to read for each film (see `files::best_subs`); used by the line search.
+#[tauri::command]
+async fn library_subtitles(paths: Vec<String>, lang: String) -> Result<Vec<Option<String>>, String> {
+    if paths.len() > 5000 {
+        return Err(tr!("Çok fazla dosya", "Too many files"));
+    }
+    let want = if lang == "tr" { "tr" } else { "en" };
+    blocking(move || Ok(files::best_subs(&paths, want))).await
+}
+
+/// A large frame of `path` at `secs` as a `data:` address, so the page can draw it into a card and save it.
+#[tauri::command]
+async fn still_frame(app: AppHandle, path: String, secs: f64) -> Result<String, String> {
+    if !(secs.is_finite() && (0.0..=86_400.0).contains(&secs)) {
+        return Err(tr!("Geçersiz zaman", "Invalid time"));
+    }
+    let exe = mpv_exe(&app);
+    let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("stills");
+    blocking(move || {
+        let file = files::still(&exe, &path, secs, &cache)?;
+        let bytes = std::fs::read(&file).map_err(|e| e.to_string())?;
+        cache_tools::enforce(&app);
+        Ok(format!("data:image/jpeg;base64,{}", shell_core::b64_encode(&bytes)))
+    })
+    .await
+}
+
+/// Writes a PNG or JPEG the page drew (a quote card, a recap card) to the file the user chose.
+#[tauri::command]
+async fn save_image(path: String, data: String) -> Result<String, String> {
+    blocking(move || {
+        let (mime, bytes) = shell_core::data_url_bytes(&data)?;
+        if bytes.len() > 25_000_000 {
+            return Err(tr!("Görsel çok büyük", "The picture is too large"));
+        }
+        let target = std::path::PathBuf::from(&path);
+        if !shell_core::image_target_ok(&path, mime) || !target.parent().is_some_and(|p| p.is_dir()) {
+            return Err(tr!("Kayıt yeri geçersiz", "Invalid destination"));
+        }
+        let tmp = target.with_extension("luna-tmp");
+        std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, &target).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            e.to_string()
+        })?;
+        Ok(target.to_string_lossy().into_owned())
+    })
+    .await
 }
 
 /// Which of these files still exist (library entries whose video was moved or deleted show as missing).
@@ -839,6 +893,164 @@ async fn get_text(url: String, bearer: Option<String>) -> Result<(String, String
     Ok((at, String::from_utf8_lossy(&bytes).into_owned()))
 }
 
+/// The only extra headers `http_send` passes on (Trakt's API key and version).
+const SEND_EXTRA_HEADERS: [&str; 2] = ["trakt-api-key", "trakt-api-version"];
+
+/// Hosts on this computer may be reached without TLS (a self-hosted ListenBrainz); everything else needs https.
+fn send_target_ok(url: &str) -> bool {
+    match reqwest::Url::parse(url) {
+        Ok(u) => {
+            let local = matches!(u.host_str(), Some("localhost") | Some("127.0.0.1") | Some("[::1]"));
+            u.username().is_empty() && u.password().is_none() && (u.scheme() == "https" || (u.scheme() == "http" && local))
+        }
+        Err(_) => false,
+    }
+}
+
+/// One GET or POST for the scrobblers (ListenBrainz, Last.fm), done here because their servers do not all
+/// send CORS headers. Only an Authorization and a Content-Type header can be set, only https (or this
+/// computer) can be reached, redirects are not followed and the answer is cut at 64 KB, so the page cannot
+/// use it as a general proxy. `extra` may carry only Trakt's two API headers. Returns the status code and the answer's text.
+#[tauri::command]
+async fn http_send(method: String, url: String, auth: Option<String>, content_type: String, body: String, extra: Option<Vec<(String, String)>>) -> Result<(u16, String), String> {
+    if !send_target_ok(&url) {
+        return Err(tr!("Geçersiz adres", "Invalid address"));
+    }
+    let method = match method.as_str() {
+        "GET" => reqwest::Method::GET,
+        "POST" => reqwest::Method::POST,
+        _ => return Err(tr!("Geçersiz istek türü", "Invalid request type")),
+    };
+    if body.len() > 256 * 1024 {
+        return Err(tr!("İstek çok büyük", "The request is too big"));
+    }
+    let mut req = reqwest::Client::builder()
+        .user_agent("Luna Player")
+        .timeout(std::time::Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| e.to_string())?
+        .request(method.clone(), &url);
+    if let Some(a) = auth {
+        req = req.header(reqwest::header::AUTHORIZATION, a);
+    }
+    for (k, v) in extra.unwrap_or_default() {
+        if !SEND_EXTRA_HEADERS.contains(&k.to_ascii_lowercase().as_str()) {
+            return Err(tr!("Bu başlık gönderilemez: {}", "This header can't be sent: {}", k));
+        }
+        req = req.header(k, v);
+    }
+    if method == reqwest::Method::POST {
+        let ct = match content_type.as_str() {
+            "application/json" | "application/x-www-form-urlencoded" => content_type,
+            _ => return Err(tr!("Geçersiz içerik türü", "Invalid content type")),
+        };
+        req = req.header(reqwest::header::CONTENT_TYPE, ct).body(body);
+    }
+    let mut res = req
+        .send()
+        .await
+        .map_err(|e| tr!("Ulaşılamadı: {}", "Couldn't reach it: {}", err_chain(&e)))?;
+    let status = res.status().as_u16();
+    // Stop reading at the budget rather than allocating an arbitrary response first.
+    let mut bytes = Vec::with_capacity(64 * 1024);
+    while bytes.len() < 64 * 1024 {
+        let Some(chunk) = res.chunk().await.map_err(|e| e.to_string())? else { break };
+        let keep = chunk.len().min(64 * 1024 - bytes.len());
+        bytes.extend_from_slice(&chunk[..keep]);
+    }
+    Ok((status, String::from_utf8_lossy(&bytes).into_owned()))
+}
+
+/// Discord "Rich Presence" over Discord's local pipe: what Luna plays shows on the user's Discord profile.
+/// Nothing leaves the computer except through the Discord app itself; the user supplies their own application id.
+#[cfg(windows)]
+mod discord {
+    use serde_json::{json, Value};
+    use std::fs::{File, OpenOptions};
+    use std::io::{Read, Write};
+    use std::sync::Mutex;
+
+    static CONN: Mutex<Option<(File, String)>> = Mutex::new(None);
+
+    pub fn frame(op: u32, payload: &str) -> Vec<u8> {
+        let mut out = Vec::with_capacity(8 + payload.len());
+        out.extend_from_slice(&op.to_le_bytes());
+        out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        out.extend_from_slice(payload.as_bytes());
+        out
+    }
+    fn read_frame(f: &mut File) -> std::io::Result<(u32, Value)> {
+        let mut head = [0u8; 8];
+        f.read_exact(&mut head)?;
+        let op = u32::from_le_bytes([head[0], head[1], head[2], head[3]]);
+        let len = u32::from_le_bytes([head[4], head[5], head[6], head[7]]) as usize;
+        if len > 64 * 1024 {
+            return Err(std::io::Error::other("frame too large"));
+        }
+        let mut body = vec![0u8; len];
+        f.read_exact(&mut body)?;
+        Ok((op, serde_json::from_slice(&body).unwrap_or(Value::Null)))
+    }
+    fn connect(client_id: &str) -> Result<File, String> {
+        for i in 0..10 {
+            let Ok(mut f) = OpenOptions::new().read(true).write(true).open(format!(r"\\.\pipe\discord-ipc-{i}")) else { continue };
+            let hello = json!({ "v": 1, "client_id": client_id }).to_string();
+            if f.write_all(&frame(0, &hello)).is_err() {
+                continue;
+            }
+            match read_frame(&mut f) {
+                Ok((1, v)) if v["evt"] == "READY" => return Ok(f),
+                Ok((_, v)) => return Err(v["message"].as_str().unwrap_or("Discord refused the connection").to_string()),
+                Err(_) => continue,
+            }
+        }
+        Err("Discord is not running".into())
+    }
+    /// Shows `activity` (None clears it). One reconnect is tried when Discord was restarted meanwhile.
+    pub fn set(client_id: &str, activity: Option<Value>) -> Result<(), String> {
+        let mut conn = CONN.lock().map_err(|_| "busy".to_string())?;
+        for attempt in 0..2 {
+            if conn.as_ref().map(|(_, id)| id != client_id).unwrap_or(true) {
+                *conn = Some((connect(client_id)?, client_id.to_string()));
+            }
+            let (f, _) = conn.as_mut().unwrap();
+            let nonce = format!("luna-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+            let msg = json!({ "cmd": "SET_ACTIVITY", "args": { "pid": std::process::id(), "activity": activity }, "nonce": nonce }).to_string();
+            if f.write_all(&frame(1, &msg)).is_ok() {
+                if let Ok((_, v)) = read_frame(f) {
+                    if v["evt"] == "ERROR" {
+                        return Err(v["data"]["message"].as_str().unwrap_or("Discord error").to_string());
+                    }
+                    return Ok(());
+                }
+            }
+            *conn = None;
+            if attempt == 1 {
+                break;
+            }
+        }
+        Err("Discord connection lost".into())
+    }
+}
+#[cfg(not(windows))]
+mod discord {
+    pub fn set(_client_id: &str, _activity: Option<serde_json::Value>) -> Result<(), String> {
+        Err("Discord presence works on Windows only".into())
+    }
+}
+
+/// Sets (or clears, with no activity) Luna's Discord presence; the pipe is used off the async runtime.
+#[tauri::command]
+async fn discord_presence(client_id: String, activity: Option<Value>) -> Result<(), String> {
+    if !client_id.chars().all(|c| c.is_ascii_digit()) || client_id.len() < 15 || client_id.len() > 22 {
+        return Err(tr!("Geçersiz Discord uygulama kimliği", "Not a valid Discord application id"));
+    }
+    tauri::async_runtime::spawn_blocking(move || discord::set(&client_id, activity))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// One GET from a Stremio addon (manifest, catalog, meta or streams), as JSON. Done here rather than
 /// in the page because not every addon sends CORS headers.
 #[tauri::command]
@@ -1155,6 +1367,14 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                shell::on_close_requested(window, api);
+            }
+        })
         .manage(update::Pending::default())
         .manage(browser::BrowserState::default())
         .manage(browser_downloads::Downloads::default())
@@ -1174,6 +1394,13 @@ pub fn run() {
                 torrent::resume(local.join("torrent-session"), dl);
             }
             clipboard::watch(app.handle().clone());
+            // started by Windows with --minimized: the tray icon shows and the window stays hidden until clicked
+            let minimized = std::env::args().skip(1).any(|a| a == "--minimized");
+            if let Err(e) = shell::setup_tray(app.handle(), minimized) {
+                eprintln!("tray: {e}");
+            } else if minimized {
+                let _ = win.hide();
+            }
             let _ = MPV.set(mpv::start(app.handle().clone(), exe, hwnd, fonts));
             Ok(())
         })
@@ -1188,6 +1415,7 @@ pub fn run() {
             browser::browser_create,
             browser::debug_log,
             browser::diagnostic_snapshot,
+            browser::debug_open_log,
             browser_downloads::browser_downloads,
             browser_extensions::browser_extension_prepare,
             browser_extensions::browser_extension_manage,
@@ -1248,6 +1476,8 @@ pub fn run() {
             addon_get,
             http_text,
             http_text_at,
+            http_send,
+            discord_presence,
             read_export,
             letterboxd_read,
             letterboxd_reviews,
@@ -1278,7 +1508,27 @@ pub fn run() {
             backup_write,
             backup_read,
             text_file_read,
-            clipboard_offer
+            clipboard_offer,
+            studio::studio_cancel,
+            studio::studio_sync,
+            studio::whisper_status,
+            studio::whisper_get_model,
+            studio::whisper_get_engine,
+            studio::whisper_run,
+            studio::shaders_status,
+            studio::shaders_get,
+            studio::subtitle_text,
+            studio::subtitle_save,
+            studio::subtitle_overwrite,
+            studio::backup_auto,
+            studio::whisper_get_vad,
+            studio::library_fingerprints,
+            studio::make_clip,
+            shell::set_tray_mode,
+            shell::watch_folders,
+            still_frame,
+            save_image,
+            library_subtitles
             ];
             handler(invoke)
         })
@@ -1319,4 +1569,22 @@ mod export_budget_tests{
     #[test]fn csv_reads_share_one_total_budget(){let mut left=6;assert_eq!(read_export_text(&b"abc"[..],&mut left).unwrap(),"abc");assert_eq!(left,3);assert_eq!(read_export_text(&b"def"[..],&mut left).unwrap(),"def");assert_eq!(left,0);assert!(read_export_text(&b"x"[..],&mut left).is_err());}
     #[test]fn csv_over_budget_is_rejected_instead_of_truncated(){let mut left=3;assert!(read_export_text(&b"abcd"[..],&mut left).is_err());assert_eq!(left,3);}
     #[test]fn csv_invalid_utf8_is_an_error(){let mut left=10;assert!(read_export_text(&[255u8][..],&mut left).is_err());}
+}
+
+#[cfg(test)]
+mod send_tests {
+    use super::send_target_ok;
+
+    #[test]
+    fn only_https_or_this_computer() {
+        assert!(send_target_ok("https://api.listenbrainz.org/1/submit-listens"));
+        assert!(send_target_ok("http://localhost:8000/x"));
+        assert!(send_target_ok("http://127.0.0.1/x"));
+        assert!(send_target_ok("http://[::1]:8000/x"));
+        assert!(!send_target_ok("http://api.listenbrainz.org/x"));
+        assert!(!send_target_ok("http://localhost.evil.example/x"));
+        assert!(!send_target_ok("file:///C:/x"));
+        assert!(!send_target_ok("ftp://example.org/x"));
+        assert!(!send_target_ok("not a url"));
+    }
 }

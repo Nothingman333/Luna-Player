@@ -9,7 +9,7 @@ import { matchKey } from "./textMatch";
  *  followed by an address) opens as a channel list to pick from, like VLC's playlist. */
 export type Channel = { name: string; url: string; group: string; logo?: string };
 export type M3uList = { name: string; src: string; channels: Channel[] };
-export const isM3u = (p: string) => /\.m3u8?([?#]|$)/i.test(p);
+export const isM3u = (p: string) => /\.m3u8?$/i.test(/^https?:/i.test(p)?p.split(/[?#]/)[0]:p);
 
 /** The title after the first comma that is not inside quotes: `#EXTINF:-1 group-title="A, B",Dune, Part Two`
  *  gives "Dune, Part Two". null when the line has no title part. */
@@ -27,12 +27,14 @@ export const isRelativeLocal = (u: string) => !/^[a-z][a-z0-9+.-]*:/i.test(u) &&
 /** `dir` plus a relative path: "." and ".." are resolved and the drive is never popped. */
 export function joinLocal(dir: string, rel: string): string {
   const sep = dir.includes("\\") || !dir.includes("/") ? "\\" : "/";
-  const parts = dir.split(/[\\/]/).filter((p, i) => p || i === 0);
+  const unc=/^[\\/]{2}/.test(dir);
+  const parts = dir.split(/[\\/]/).filter(Boolean);
+  const root=unc?2:1;
   for (const seg of rel.split(/[\\/]/)) {
     if (!seg || seg === ".") continue;
-    if (seg === "..") { if (parts.length > 1) parts.pop(); } else parts.push(seg);
+    if (seg === "..") { if (parts.length > root) parts.pop(); } else parts.push(seg);
   }
-  return parts.join(sep);
+  return (unc?sep+sep:"")+parts.join(sep);
 }
 /** The channels shown for a group and a search text (case, accents and Turkish I/ı do not matter). */
 export function filterChannels(channels: Channel[], group: string, query: string): Channel[] {
@@ -41,12 +43,13 @@ export function filterChannels(channels: Channel[], group: string, query: string
 }
 
 export function parseM3u(text: string, base?: string, dir?: string): Channel[] | "stream" {
+  if(text.length>8*1024*1024)throw Error("M3U list too large (8 MiB maximum).");
   text = text.replace(/^\uFEFF/, "");
-  if (/#EXT-X-(TARGETDURATION|STREAM-INF|MEDIA-SEQUENCE|VERSION|PLAYLIST-TYPE|ENDLIST)/i.test(text)) return "stream";
+  if (/^#EXT-X-(TARGETDURATION|STREAM-INF|MEDIA-SEQUENCE|VERSION|PLAYLIST-TYPE|ENDLIST)(?::|\s|$)/im.test(text)) return "stream";
   const out: Channel[] = [];
   let info: { name: string; group: string; logo?: string } | null = null;
   let group = "";
-  for (const raw of text.split(/\r?\n/)) {
+  for (const raw of text.split(/\r\n|\r|\n/)) {
     const line = raw.trim();
     if (!line) continue;
     if (/^#EXTINF/i.test(line)) {
@@ -55,11 +58,14 @@ export function parseM3u(text: string, base?: string, dir?: string): Channel[] |
       // one has no title, so tvg-name is used rather than the whole line
       const name = extinfTitle(line) || attr("tvg-name") || "";
       info = { name, group: attr("group-title") || group, logo: attr("tvg-logo") || undefined };
-    } else if (/^#EXTGRP:/i.test(line)) group = line.slice(8).trim();
+    } else if (/^#EXTGRP:/i.test(line)) {group = line.slice(8).trim();if(info)info.group=group;}
     else if (!line.startsWith("#")) {
       let url = line;
       if (base && !/^[a-z][a-z0-9+.-]*:/i.test(url)) { try { url = new URL(url, base).href; } catch {} }
       else if (dir && isRelativeLocal(url)) url = joinLocal(dir, url);
+      else if(dir&&/^[\\/](?![\\/])/.test(url)){const root=/^[a-z]:/i.exec(dir)?.[0]||/^\\\\[^\\/]+[\\/][^\\/]+/.exec(dir)?.[0];if(root)url=joinLocal(root,url.replace(/^[\\/]+/,""));}
+      if(out.length>=20000)throw Error("M3U list too large (20000 channels maximum).");
+      if(info?.logo&&base){try{info.logo=new URL(info.logo,base).href;}catch{info.logo=undefined;}}
       out.push({ name: info?.name || url.split(/[\\/]/).pop() || url, url, group: info?.group || group, logo: info?.logo });
       info = null;
     }
@@ -67,6 +73,8 @@ export function parseM3u(text: string, base?: string, dir?: string): Channel[] |
   return out;
 }
 
+const validM3uRecent=(x:any):x is {name:string;src:string}=>!!x&&typeof x.name==="string"&&typeof x.src==="string";
+function m3uRecent(){const raw=store.json<unknown>("m3uRecent",[]);return Array.isArray(raw)?raw.filter(validM3uRecent):[];}
 /** Reads a list from disk or the web. "stream" when it is one HLS stream to play directly. */
 export async function readM3u(src: string): Promise<M3uList | "stream"> {
   const web = /^https?:\/\//i.test(src);
@@ -75,10 +83,12 @@ export async function readM3u(src: string): Promise<M3uList | "stream"> {
   const got = parseM3u(text, web ? src : undefined, !web && /[\\/]/.test(src) ? src.replace(/[\\/][^\\/]*$/, "") : undefined);
   if (got === "stream") return "stream";
   if (!got.length) throw new Error(tt("Bu listede oynatılacak bir adres yok"));
-  const name = decodeURIComponent(src.split(/[\\/]/).pop() ?? src).replace(/[?#].*$/, "").replace(/\.m3u8?$/i, "") || tt("Liste");
+  const rawName=(web?src.split(/[?#]/)[0]:src).split(/[\\/]/).pop()??src;
+  let decoded=rawName;try{decoded=decodeURIComponent(rawName);}catch{}
+  const name = decoded.replace(/\.m3u8?$/i, "") || tt("Liste");
   // recent lists, to open again from the channel window
-  const recent = store.json<{ name: string; src: string }[]>("m3uRecent", []).filter((x) => x.src !== src);
-  store.set("m3uRecent", JSON.stringify([{ name, src }, ...recent].slice(0, 8)));
+  const rawRecent=store.json<unknown>("m3uRecent",null),recent=m3uRecent().filter(x=>x.src!==src);
+  if(store.get("m3uRecent")===null||Array.isArray(rawRecent)&&rawRecent.every(validM3uRecent))store.set("m3uRecent",JSON.stringify([{name,src},...recent].slice(0,8)));
   return { name, src, channels: got };
 }
 
@@ -87,7 +97,7 @@ export function M3uDialog({ list, onPlay, onClose, onOpen }: { list: M3uList; on
   const [group, setGroup] = useState<string>("");
   const groups = useMemo(() => [...new Set(list.channels.map((c) => c.group).filter(Boolean))], [list]);
   const shown = filterChannels(list.channels, group, q);
-  const recent = store.json<{ name: string; src: string }[]>("m3uRecent", []).filter((x) => x.src !== list.src);
+  const recent = m3uRecent().filter(x=>x.src!==list.src);
   return createPortal(
     <div className="modal-bg" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal wide m3u">

@@ -18,16 +18,17 @@ export function salvageConversations(raw: unknown, cleanMessages: (m: unknown) =
     if (!msgs.length) { dropped++; return; }
     let fixed = msgs.length !== Math.min(entry.msgs.length, 60);
     const firstUser = msgs.find((m) => m?.role === "user")?.text ?? "Sohbet";
-    const id = typeof entry.id === "string" && entry.id ? entry.id : (fixed = true, "recovered-" + i + "-" + hash(JSON.stringify(msgs).slice(0, 300)));
-    if (ids.has(id)) { dropped++; return; }
+    let id = typeof entry.id === "string" && entry.id ? entry.id : (fixed = true, "recovered-" + i + "-" + hash(JSON.stringify(msgs).slice(0, 300)));
+    if (ids.has(id)) { const stem=id+"-recovered-"+i;id=stem;let suffix=2;while(ids.has(id))id=stem+"-"+suffix++;fixed=true; }
     ids.add(id);
     const title = typeof entry.title === "string" && entry.title ? entry.title : (fixed = true, String(firstUser).slice(0, 60));
     const ctx = typeof entry.ctx === "string" ? entry.ctx : (fixed = true, "Genel");
-    const at = Number.isFinite(entry.at) ? entry.at : (fixed = true, 0);
+    const at = typeof entry.at==="number" && Number.isFinite(new Date(entry.at).getTime()) ? entry.at : (fixed = true, 0);
     const ctxKind = CTX_KINDS.includes(entry.ctxKind) ? entry.ctxKind : (fixed = true, "general");
     if (fixed) repaired++;
     convs.push({ ...entry, id, title, ctx, at, ctxKind, msgs });
   });
+  dropped+=Math.max(0,convs.length-60);
   return { convs: convs.slice(0, 60), dropped, repaired, damaged: dropped > 0 || repaired > 0 };
 }
 
@@ -40,8 +41,16 @@ export function unreadableHistory(rawText: string | null | undefined): boolean {
 export type ModelTurn = { role: string; parts?: { text?: string }[] };
 const textLen = (c: ModelTurn) => (c.parts ?? []).reduce((n, p) => n + (typeof p?.text === "string" ? p.text.length : 0), 0);
 const MARK = "…[kısaltıldı]";
-const shrink = (c: ModelTurn, max: number): ModelTurn => textLen(c) <= max ? c
-  : { ...c, parts: (c.parts ?? []).map((p) => typeof p?.text === "string" && p.text.length > max ? { ...p, text: p.text.slice(0, max) + MARK } : p) };
+const shrink = (c: ModelTurn, max: number): ModelTurn => {
+ if(textLen(c)<=max)return c;
+ let left=Math.max(0,Math.floor(max));
+ return {...c,parts:(c.parts??[]).map(p=>{
+  if(typeof p?.text!=="string")return p;
+  const budget=Math.min(left,p.text.length);left-=budget;
+  const text=p.text.length<=budget?p.text:budget>=MARK.length?p.text.slice(0,budget-MARK.length)+MARK:p.text.slice(0,budget);
+  return {...p,text};
+ })};
+};
 
 /** Keeps what is sent to a model inside a budget without touching the saved conversation: very long old
  *  messages are shortened, the oldest turns are left out (never the newest question), and the request still
@@ -58,6 +67,7 @@ export function budgetContents<T extends ModelTurn>(contents: T[], o: { maxChars
   if (start > 0 && kept[0]?.role === "user") {
     const note = `[Bu sohbetin önceki ${start} mesajı model isteğinin boyut sınırı için bu çağrıya dahil edilmedi; sohbet geçmişi saklı.]\n`;
     const first = kept[0];
+    if(total+note.length>max)return {contents:kept,dropped:start,shortened};
     kept[0] = { ...first, parts: [{ text: note + (first.parts?.[0]?.text ?? "") }, ...(first.parts ?? []).slice(1)] } as T;
   }
   return { contents: kept, dropped: start, shortened };

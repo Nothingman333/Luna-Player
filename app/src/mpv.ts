@@ -38,6 +38,8 @@ export type MpvState = {
   volumeMax?: number;
   deinterlace?: boolean | string;
   rotate?: number;
+  secondarySid?: number | string | false;
+  subSpeed?: number;
 };
 
 const initial: MpvState = {
@@ -57,6 +59,12 @@ const initial: MpvState = {
 /** Picture-based subtitles (Blu-ray PGS, DVD, DVB): mpv can draw them but has no text for them. */
 export const isPgs = (t?: Track | null) => !!t && /pgs/i.test(t.codec ?? "");
 export const isImageSub = (t?: Track | null) => !!t && /pgs|dvd_sub|dvdsub|dvb|xsub|vobsub/i.test(t.codec ?? "");
+
+/** mpv marks both the main and the second subtitle "selected": the main one is the selected subtitle that is not the second. */
+export function mainSubTrack(tracks: Track[], secondary: unknown): Track | undefined {
+  const second = typeof secondary === "number" ? secondary : null;
+  return tracks.find((t) => t.type === "sub" && t.selected && t.id !== second);
+}
 
 export const mpv = (...args: unknown[]) => invoke("mpv_command", { args });
 export const setProp = (name: string, value: unknown) => mpv("set_property", name, value);
@@ -84,6 +92,8 @@ const keyOf: Record<string, keyof MpvState> = {
   "video-rotate": "rotate",
   "sub-text": "subText",
   "osd-dimensions": "osd",
+  "secondary-sid": "secondarySid",
+  "sub-speed": "subSpeed",
 };
 
 /** Live mpv state plus a callback for raw events (file-loaded, end-file…). */

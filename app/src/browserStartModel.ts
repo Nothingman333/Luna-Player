@@ -41,6 +41,7 @@ export function topSites(rows: VisitLike[], now: number, limit = 8): TopSite[] {
   const sites = new Map<string, { pages: VisitLike[]; score: number; visits: number; at: number }>();
   for (const r of rows) {
     if (!r || typeof r.url !== "string" || !Number.isFinite(r.at)) continue;
+    let u:URL;try{u=new URL(r.url);}catch{continue;}if(!["http:","https:"].includes(u.protocol)||u.username||u.password)continue;
     const host = hostKey(r.url); if (!host) continue;
     const age = Math.max(0, now - r.at), weight = age < DAY ? 1 : age < 7 * DAY ? 0.7 : age < 30 * DAY ? 0.4 : 0.2;
     const visits = Number.isFinite(r.visits) && r.visits > 0 ? Math.min(9999, r.visits) : 1;
@@ -104,7 +105,7 @@ export type HistoryGroup<T> = { key: string; label: string; rows: T[] };
  */
 export function historyGroups<T extends { url: string; title: string; at: number }>(rows: T[], now: number, tr: boolean, query = ""): HistoryGroup<T>[] {
   const words = fold(query).split(/\s+/).filter(Boolean);
-  const keep = rows.filter(r => r && Number.isFinite(r.at) && words.every(w => fold((r.title || "") + " " + r.url).includes(w))).sort((a, b) => b.at - a.at);
+  const keep = rows.filter(r => r && Number.isFinite(new Date(r.at).getTime()) && words.every(w => fold((r.title || "") + " " + r.url).includes(w))).sort((a, b) => b.at - a.at);
   const dayStart = (t: number) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
   const today = dayStart(now), groups: HistoryGroup<T>[] = [];
   const locale = tr ? "tr-TR" : "en-GB";
@@ -113,8 +114,8 @@ export function historyGroups<T extends { url: string; title: string; at: number
     let group = groups[groups.length - 1];
     if (!group || group.key !== key) {
       const daysAgo = Math.round((today - start) / DAY);
-      const label = daysAgo <= 0 ? (tr ? "Bugün" : "Today") : daysAgo === 1 ? (tr ? "Dün" : "Yesterday")
-        : daysAgo < 7 ? new Date(start).toLocaleDateString(locale, { weekday: "long" })
+      const label = daysAgo === 0 ? (tr ? "Bugün" : "Today") : daysAgo === 1 ? (tr ? "Dün" : "Yesterday")
+        : daysAgo > 1 && daysAgo < 7 ? new Date(start).toLocaleDateString(locale, { weekday: "long" })
         : new Date(start).toLocaleDateString(locale, { day: "numeric", month: "long", year: new Date(start).getFullYear() === new Date(now).getFullYear() ? undefined : "numeric" });
       group = { key, label: label.charAt(0).toLocaleUpperCase(locale) + label.slice(1), rows: [] }; groups.push(group);
     }

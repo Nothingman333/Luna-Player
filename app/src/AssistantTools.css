@@ -43,3 +43,7 @@
 :is(.chat-panel,.ws-main) .msg.model ul{padding-left:1.2em;margin:.4em 0}:is(.chat-panel,.ws-main) .msg.model code{overflow-wrap:anywhere;white-space:pre-wrap}
 :is(.chat-panel,.ws-main) .msg-sources{flex-wrap:wrap;max-width:100%}:is(.chat-panel,.ws-main) .src-chip{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lib-choices .choice{min-width:0}.assistant-find-row input{min-width:0}
+
+.assistant-more{position:relative;display:inline-block}.assistant-more summary{cursor:pointer;list-style:none;border:1px solid var(--line);border-radius:8px;padding:2px 9px;color:var(--muted);font-size:17px;line-height:22px}.assistant-more summary::-webkit-details-marker{display:none}.assistant-more[open]>div{position:absolute;right:0;top:calc(100% + 5px);z-index:12;display:flex;flex-direction:column;align-items:stretch;min-width:210px;max-width:calc(100vw - 50px);padding:7px;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:0 12px 30px #0006}.assistant-more small{font-size:10px;color:var(--muted);padding:5px}.assistant-more button{text-align:left;justify-content:flex-start!important;width:100%}.assistant-more summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.assistant-message-actions .assistant-more[open]>div{top:auto;bottom:calc(100% + 5px)}

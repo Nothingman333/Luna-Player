@@ -1,3 +1,4 @@
+import {installDebugTelemetry,debugSecrets} from "./debugTelemetry";
 import { durableState } from "./safety";
 import { applyAccessibility } from "./Extras";
 import React from "react";
@@ -14,7 +15,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { loadedLang } from "./i18n";
 import { SubsOverlay } from "./Upscaler";
 import { invoke } from "@tauri-apps/api/core";
-import { loadSecrets, SECRET_KEYS } from "./library";
+import { loadSecrets, SECRET_KEYS, store } from "./library";
 import { storageRestoreInProgress } from "./safety";
 
 // Every image fades in once it has loaded; one that fails to load is hidden instead of
@@ -33,7 +34,7 @@ document.addEventListener("error", (e) => {
 window.addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || e.defaultPrevented) return;
   const bgs = document.querySelectorAll<HTMLElement>(".modal-bg");
-  const top = bgs[bgs.length - 1];
+  const top = Array.from(bgs).reverse().find(bg=>bg.getClientRects().length&&getComputedStyle(bg).visibility!=="hidden"&&!bg.inert);
   if (!top) return;
   e.preventDefault();
   e.stopImmediatePropagation();
@@ -41,6 +42,7 @@ window.addEventListener("keydown", (e) => {
 }, true);
 
 const isSubs = new URLSearchParams(location.search).has("subs");
+if(!isSubs){debugSecrets(()=>SECRET_KEYS.map(key=>store.get(key)||""));installDebugTelemetry();}
 
 // ---------- durable state ----------
 // WebView2 keeps localStorage in a database it may throw away after a crash. Luna mirrors it to

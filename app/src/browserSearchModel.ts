@@ -5,7 +5,7 @@ import { browserAddress } from "./browserModel";
  * Luna Web search: which engine answers plain words, and the "!" shortcuts that jump straight to a
  * site's own search ("!yt dune trailer", "!w Ay"). Pure helpers; Browser.tsx stores the choice.
  */
-export type SearchEngineId = "google" | "duckduckgo" | "bing" | "brave" | "startpage" | "ecosia" | "yandex";
+export type SearchEngineId = "google" | "duckduckgo" | "bing" | "brave" | "startpage" | "ecosia" | "yandex" | "kagi" | "custom";
 export type SearchEngine = { id: SearchEngineId; name: string; mark: string; home: string; search: (query: string) => string };
 
 const q = encodeURIComponent;
@@ -17,6 +17,7 @@ export const SEARCH_ENGINES: SearchEngine[] = [
   { id: "startpage", name: "Startpage", mark: "S", home: "https://www.startpage.com/", search: s => "https://www.startpage.com/do/search?q=" + q(s) },
   { id: "ecosia", name: "Ecosia", mark: "E", home: "https://www.ecosia.org/", search: s => "https://www.ecosia.org/search?q=" + q(s) },
 ];
+SEARCH_ENGINES.push({id:"kagi",name:"Kagi",mark:"K",home:"https://kagi.com/",search:s=>"https://kagi.com/search?q="+q(s)});
 SEARCH_ENGINES.push({ id: "yandex", name: "Yandex", mark: "Y", home: "https://yandex.com/", search: s => "https://yandex.com/search/?text=" + q(s) });
 export const ENGINE_KEY = "lunaWebSearchEngine";
 

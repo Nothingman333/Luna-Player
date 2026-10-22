@@ -134,6 +134,42 @@ pub fn thumbnail(mpv_exe: &Path, file: &str, cache: &Path) -> Result<String, Str
     Ok(target.to_string_lossy().into_owned())
 }
 
+/// A large frame (1600 px wide) at `secs`, for cards people share (cached per file and tenth of a second).
+pub fn still(mpv_exe: &Path, file: &str, secs: f64, cache: &Path) -> Result<std::path::PathBuf, String> {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    file.hash(&mut h);
+    ((secs * 10.0).round() as u64).hash(&mut h);
+    let target = cache.join(format!("{:016x}.jpg", h.finish()));
+    if target.exists() {
+        return Ok(target);
+    }
+    std::fs::create_dir_all(cache).map_err(|e| e.to_string())?;
+    let tmp = cache.join(format!("tmp-{:016x}", h.finish()));
+    let _ = std::fs::create_dir_all(&tmp);
+    let mut cmd = Command::new(mpv_com(mpv_exe));
+    cmd.args([
+        "--no-config", "--ao=null", "--sid=no", "--frames=1", "--hwdec=no",
+        "--vo=image", "--vo-image-format=jpg", "--vo-image-jpeg-quality=90",
+        "--vf=scale=1600:-2", "--really-quiet",
+    ])
+    .arg(format!("--start={secs:.2}"))
+    .arg(format!("--vo-image-outdir={}", tmp.display()))
+    .arg(file);
+    let ran = run_limited(cmd, 40);
+    let produced = std::fs::read_dir(&tmp)
+        .ok()
+        .and_then(|rd| rd.flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|x| x == "jpg")));
+    let Some(produced) = produced else {
+        let _ = std::fs::remove_dir_all(&tmp);
+        ran?;
+        return Err(tr!("Kare alınamadı", "Couldn't grab a frame"));
+    };
+    std::fs::rename(&produced, &target).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_dir_all(&tmp);
+    Ok(target)
+}
+
 /// A small frame at `secs` for the seek-bar hover preview (cached per file and second).
 pub fn frame_at(mpv_exe: &Path, file: &str, secs: u32, cache: &Path) -> Result<String, String> {
     use std::hash::{Hash, Hasher};
@@ -245,6 +281,21 @@ fn own_subs(p: &Path) -> Vec<PathBuf> {
         })
         .map(|e| e.path())
         .collect()
+}
+
+/// For each video, the subtitle file to read its lines from: the one in the wanted language ("tr" or "en"), else English,
+/// else any (hearing-impaired and forced-only files last). Empty for links, missing files and videos without a text subtitle.
+pub fn best_subs(paths: &[String], want: &str) -> Vec<Option<String>> {
+    paths.iter().map(|f| {
+        let p = Path::new(f);
+        if f.contains("://") || !p.is_file() { return None; }
+        let stem = p.file_stem()?.to_str()?.to_lowercase();
+        own_subs(p).into_iter()
+            .filter(|s| matches!(s.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).as_deref(), Some("srt" | "vtt" | "ass" | "ssa")))
+            .map(|s| { let n = s.file_name().and_then(|n| n.to_str()).unwrap_or("").to_lowercase(); (crate::shell_core::rank_sub(&n, &stem, want), s) })
+            .max_by_key(|(r, s)| (*r, std::cmp::Reverse(s.as_os_str().len())))
+            .map(|(_, s)| s.to_string_lossy().into_owned())
+    }).collect()
 }
 
 /// How many subtitle files sit next to each video (0 for links and missing files).

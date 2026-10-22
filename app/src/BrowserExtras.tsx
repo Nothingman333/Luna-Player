@@ -39,4 +39,5 @@ export function rememberReadingPosition(url:string,progress:number) {
   const old=list.find(x=>x.url===url)!;
   if(Math.abs(old.progress-progress)<.005)return;
   if(!store.set("lunaWebReading",JSON.stringify(list.map(x=>x.url===url?{...x,progress:Math.max(0,Math.min(1,progress))}:x))))return;
+  window.dispatchEvent(new Event("luna-extras"));
 }

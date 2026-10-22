@@ -39,7 +39,7 @@ export function matchesBook(folded: string, b: ListedBook): boolean {
 export function visibleBooks<B extends ListedBook>(all: B[], o: { shelf: BookShelfKey; topic: string; query: string; sort: BookOrder; format?: string; covers?: string; recent: string[]; env: ShelfEnv<B> }): B[] {
   const q = bookFold(o.query);
   const order = o.sort === "plan" ? o.env.later : o.recent;
-  const ranks = new Map(order.map((p,i)=>[p,i]));
+  const ranks = new Map<string,number>();order.forEach((p,i)=>{if(!ranks.has(p))ranks.set(p,i);});
   const rank = (p: string) => ranks.get(p) ?? Number.MAX_SAFE_INTEGER;
   return all
     .filter((b) => inBookShelf(b, o.shelf, o.env))

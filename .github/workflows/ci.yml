@@ -67,6 +67,17 @@ jobs:
           npm run test:browser-reader
           npm run test:browser-magic
           npm run test:everyday
+          npm run test:assistant-actions
+          npm run test:quality-30
+          npm run test:quality-50
+          npm run test:debug
+          npm run test:extras-plus
+          npm run test:subtitle-studio
+          npm run test:shell-extras
+          npm run test:creative
+          npm run test:library
+          npm run test:round-50
+          npm run test:unified
 
   rust:
     name: Rust (build, tests)

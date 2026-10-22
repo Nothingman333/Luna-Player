@@ -3,7 +3,7 @@ import { matchKey } from "./textMatch";
 
 /** The assistant's "/" commands. They are handled by Luna itself, before any model sees them, so
  *  they work the same with Gemini, OpenAI, Claude or a local model. */
-export type SlashId = "help" | "new" | "model" | "big" | "small" | "settings" | "history" | "collections" | "next" | "prev" | "pause" | "resume" | "translate" | "original";
+export type SlashId = "help" | "new" | "model" | "big" | "small" | "settings" | "history" | "collections" | "next" | "prev" | "pause" | "resume" | "translate" | "original" | "compare" | "commands";
 /** `web`: only listed (and explained) while the Web part is open. */
 export const SLASH: { id: SlashId; cmd: string; alias: string[]; about: () => string; web?: true }[] = [
   { id: "help", cmd: "/help", alias: ["/yardım", "/yardim", "/komutlar", "/?"], about: () => tt("Bütün komutları ve asistanın yapabildiklerini gösterir") },
@@ -18,6 +18,8 @@ export const SLASH: { id: SlashId; cmd: string; alias: string[]; about: () => st
   { id: "resume", cmd: "/devam", alias: ["/resume", "/play"], about: () => tt("Duraklatılanı sürdürür") },
   { id: "next", cmd: "/sonraki", alias: ["/next"], about: () => tt("Sonraki şarkıya geçer") },
   { id: "prev", cmd: "/önceki", alias: ["/onceki", "/prev"], about: () => tt("Önceki şarkıya döner") },
+  { id: "compare", cmd: "/karşılaştır", alias: ["/karsilastir", "/compare"], about: () => tt("Soruyu kayıtlı yapay zekâlara birlikte sorar, cevapları alt alta gösterir: /karşılaştır sorun") },
+  { id: "commands", cmd: "/komut", alias: ["/command", "/commands"], about: () => tt("Kendi komutlarını gösterir, ekler ya da siler: /komut ekle ad = istem metni") },
   { id: "translate", cmd: "/çevir", alias: ["/cevir", "/translate"], web: true, about: () => tt("Açık web sayfasını çevirir: /çevir almanca (dil yazmazsan arayüz dili)") },
   { id: "original", cmd: "/orijinal", alias: ["/original", "/restore"], web: true, about: () => tt("Çevrilmiş sayfayı özgün diline döndürür") },
 ];
@@ -29,10 +31,13 @@ export function findSlash(text: string) {
   return SLASH.find((c) => matchKey(c.cmd) === w || c.alias.some((a) => matchKey(a) === w)) ?? null;
 }
 /** Commands that start with what is typed (for the list over the input). */
-export const slashMatches = (typed: string, web = false) => {
+export const slashMatches = (typed: string, web = false, user: { name: string; prompt: string }[] = []): { id: string; cmd: string; alias: string[]; about: () => string; web?: true }[] => {
   const w = matchKey(typed.trim());
   // In the Web part its own commands come first: they are what is wanted there.
-  return SLASH.filter((c) => (!c.web || web) && (matchKey(c.cmd).startsWith(w) || c.alias.some((a) => matchKey(a).startsWith(w)))).sort((a, b) => Number(!!b.web) - Number(!!a.web));
+  const own = SLASH.filter((c) => (!c.web || web) && (matchKey(c.cmd).startsWith(w) || c.alias.some((a) => matchKey(a).startsWith(w)))).sort((a, b) => Number(!!b.web) - Number(!!a.web));
+  // the user's own commands (Settings › Playback and connections, or /komut ekle) come after Luna's
+  const mine = user.filter((c) => matchKey("/" + c.name).startsWith(w)).map((c) => ({ id: "user:" + c.name, cmd: "/" + c.name, alias: [] as string[], about: () => c.prompt.replace(/\s+/g, " ").slice(0, 70) }));
+  return [...own, ...mine];
 };
 
 /** "/help": the commands, the instant phrases and what can be asked, by part of Luna. */

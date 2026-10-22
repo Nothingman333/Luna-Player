@@ -49,29 +49,31 @@ const placeholderTitle = (title: string, url: string) => !title || title === hos
 const tidyTitle = (value: unknown) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, 160) : "");
 
 /** Reads stored visits defensively: bad rows are dropped, duplicates merged, newest first, at most `limit`. */
-export function cleanRecent(raw: unknown, limit: number = MAX_RECENT): RecentVisit[] {
+export function cleanRecent(raw: unknown, limit: number = MAX_RECENT, options:{includeSearch?:boolean;preserveFragments?:boolean} = {}): RecentVisit[] {
   if (!Array.isArray(raw) || !Number.isFinite(limit) || limit < 1) return [];
   const rows: RecentVisit[] = [];
   const seen = new Set<string>();
   for (const x of raw) {
     if (!x || typeof x !== "object") continue;
-    const url = visitAddress((x as any).url);
-    if (!url || isSearchResultUrl(url) || !Number.isFinite((x as any).at) || (x as any).at < 0) continue;
+    const address = visitAddress((x as any).url),url=address&&options.preserveFragments?new URL((x as any).url).href:address;
+    if (!url || (!options.includeSearch&&isSearchResultUrl(url)) || !Number.isFinite((x as any).at) || !Number.isFinite(new Date((x as any).at).getTime()) || (x as any).at < 0) continue;
     const visits = Number.isInteger((x as any).visits) && (x as any).visits >= 1 ? Math.min(9999, (x as any).visits) : 1;
     rows.push({ url, title: tidyTitle((x as any).title) || hostName(url), at: (x as any).at, visits });
   }
   rows.sort((a, b) => b.at - a.at);
-  return rows.filter(r => !seen.has(r.url) && seen.add(r.url)).slice(0, Math.min(200, Math.floor(limit)));
+  const merged:RecentVisit[]=[];
+  for(const r of rows){if(!seen.has(r.url)){seen.add(r.url);merged.push({...r});}else{const old=merged.find(x=>x.url===r.url)!;old.visits=Math.max(old.visits,r.visits);if(placeholderTitle(old.title,old.url)&&!placeholderTitle(r.title,r.url))old.title=r.title;}}
+  return merged.slice(0, Math.min(1000, Math.floor(limit)));
 }
 
 /** Notes that a page finished loading. Reloads within ten seconds count once. */
 export function recordVisit(rows: RecentVisit[], visit: { url: string; title?: string }, now: number, limit: number = MAX_RECENT): RecentVisit[] {
   const url = visitAddress(visit.url);
-  if (!url || isSearchResultUrl(url) || !Number.isFinite(now)) return rows;
+  if (!url || isSearchResultUrl(url) || !Number.isFinite(new Date(now).getTime()) || now<0) return rows;
   const title = tidyTitle(visit.title);
   const at = rows.findIndex(r => r.url === url);
   if (at >= 0) {
-    const old = rows[at], quick = now - old.at < 10_000;
+    const old = rows[at], quick = now>=old.at && now - old.at < 10_000;
     const next: RecentVisit = { ...old, title: placeholderTitle(title, url) ? old.title : title, at: now, visits: quick ? old.visits : Math.min(9999, old.visits + 1) };
     return [next, ...rows.filter((_, i) => i !== at)].slice(0, limit);
   }
@@ -91,6 +93,7 @@ export const forgetVisit = (rows: RecentVisit[], url: string): RecentVisit[] => 
 
 /** "3 min ago" in the interface language. Used on the start page. */
 export function relativeTime(at: number, now: number, tr: boolean): string {
+  if(!Number.isFinite(new Date(at).getTime())||!Number.isFinite(new Date(now).getTime()))return "";
   const seconds = Math.max(0, Math.floor((now - at) / 1000));
   if (seconds < 60) return tr ? "az önce" : "just now";
   const minutes = Math.floor(seconds / 60);
@@ -99,7 +102,7 @@ export function relativeTime(at: number, now: number, tr: boolean): string {
   if (hours < 24) return tr ? `${hours} sa önce` : `${hours} h ago`;
   const days = Math.floor(hours / 24);
   if (days < 7) return tr ? `${days} gün önce` : `${days} d ago`;
-  return new Date(at).toISOString().slice(0, 10);
+  const d=new Date(at);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 
 const keyOf = (url: string) => url.replace(/#.*$/, "");
@@ -111,7 +114,7 @@ const keyOf = (url: string) => url.replace(/#.*$/, "");
  */
 export function suggestAddresses(query: string, ctx: SuggestContext, limit: number = 8): Suggestion[] {
   const text = (query ?? "").trim(), cap = Math.max(1, Math.min(20, Math.floor(limit)));
-  if (!text) return ctx.recent.slice(0, Math.min(cap, 6)).map(r => ({ kind: "recent" as const, title: r.title, url: r.url }));
+  if (!text) return cleanRecent(ctx.recent).slice(0, Math.min(cap, 6)).map(r => ({ kind: "recent" as const, title: r.title, url: r.url }));
   const now = Number.isFinite(ctx.now) ? (ctx.now as number) : Date.now();
   let typed: { url: string; kind: "go" | "search"; engine?: string } | null = null;
   try { typed = ctx.resolve(text); } catch { typed = null; }

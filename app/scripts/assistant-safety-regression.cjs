@@ -8,7 +8,11 @@ const P = load('assistantProviderModel.ts'), T = load('assistantToolRun.ts'), H 
 const taste = fs.readFileSync(src('Taste.tsx'), 'utf8').replace(/\r\n/g, '\n');
 const from = taste.indexOf('const TOOLS = ') + 'const TOOLS = '.length, to = taste.indexOf('\nconst TOOL_MODE');
 const lit = taste.slice(from, to), body = lit.slice(0, lit.lastIndexOf('}];') + 3);
-const TOOLS = new Function('tt', 'extraText', 'return ' + body)((s) => s, (a) => a);
+const actionSource=fs.readFileSync(src('assistantWorkspaceActions.ts'),'utf8');
+const actionDecl=actionSource.slice(actionSource.indexOf('const string='),actionSource.indexOf('export const WORKSPACE_NAMES')).replace('export const WORKSPACE_DECLARATIONS','const WORKSPACE_DECLARATIONS');
+const actionJS=ts.transpileModule(actionDecl,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
+const workspaceDecls=new Function(actionJS+';return WORKSPACE_DECLARATIONS')();
+const TOOLS = new Function('tt', 'extraText','WORKSPACE_DECLARATIONS', 'return ' + body)((s) => s, (a) => a, workspaceDecls);
 const DECLS = TOOLS.flatMap((t) => t.functionDeclarations);
 const tests = [], test = (n, f) => tests.push([n, f]);
 const sample = (s) => { switch (String(s.type).toUpperCase()) { case 'STRING': return s.enum ? s.enum[0] : 'x'; case 'NUMBER': return 3; case 'INTEGER': return 3; case 'BOOLEAN': return true; case 'ARRAY': return [s.items ? sample(s.items) : 'x']; case 'OBJECT': return Object.fromEntries(Object.entries(s.properties ?? {}).filter(([k]) => (s.required ?? []).includes(k)).map(([k, v]) => [k, sample(v)])); default: return 'x'; } };
@@ -153,9 +157,9 @@ test('Text read from outside is wrapped as data and cannot close its own wrapper
 test('A saved conversation that lacks a title or context is repaired, not dropped; unreadable ones are counted', () => {
   const clean = (m) => Array.isArray(m) ? m.filter((x) => x && (x.role === 'user' || x.role === 'model') && typeof x.text === 'string') : [];
   const r = H.salvageConversations([{ id: 'a', title: 'T', ctx: 'Genel', at: 5, ctxKind: 'film', msgs: [{ role: 'user', text: 'selam' }] }, { id: 'b', msgs: [{ role: 'user', text: 'eski kayıt' }, { role: 'model', text: 'yanıt' }] }, { id: 'c', title: 'x', ctx: 'y', at: 1, msgs: 'bozuk' }, null, { id: 'a', title: 'kopya', msgs: [{ role: 'user', text: 'tekrar' }] }, { msgs: [{ role: 'user', text: 'kimliksiz' }] }], clean);
-  assert.deepEqual(r.convs.map((c) => c.id).slice(0, 2), ['a', 'b']); assert.equal(r.convs.length, 3);
-  assert.equal(r.convs[1].title, 'eski kayıt'); assert.equal(r.convs[1].ctxKind, 'general'); assert.ok(r.convs[2].id.startsWith('recovered-'));
-  assert.equal(r.dropped, 3); assert.equal(r.repaired, 2); assert.equal(r.damaged, true);
+  assert.deepEqual(r.convs.map((c) => c.id).slice(0, 2), ['a', 'b']); assert.equal(r.convs.length, 4);
+  assert.equal(r.convs[1].title, 'eski kayıt'); assert.equal(r.convs[1].ctxKind, 'general'); assert.ok(r.convs[2].id.startsWith('a-recovered-')); assert.ok(r.convs[3].id.startsWith('recovered-'));
+  assert.equal(r.dropped, 2); assert.equal(r.repaired, 3); assert.equal(r.damaged, true);
   assert.equal(H.salvageConversations({ not: 'array' }, clean).damaged, true); assert.equal(H.salvageConversations(null, clean).damaged, false);
   assert.equal(H.unreadableHistory('{"a":'), true); assert.equal(H.unreadableHistory('[]'), false); assert.equal(H.unreadableHistory(''), false);
 });

@@ -1,3 +1,4 @@
+import {savedFilmAnalysis} from "./filmAnalysisStorage";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -116,7 +117,7 @@ export function ReviewAiCard({ film, profile, mood, setMood, label, onReviews, o
   const book = medium === "book";
   const site = book ? "1000Kitap" : "Letterboxd";
   const key = book ? "bookAnalysis:" + encodeURIComponent(normalizeText(film.title + "|" + (author ?? "")).trim()) : "filmDecision:ai:" + filmKey(film);
-  const [run, setRun] = useState<AiRun | null>(() => cleanRun(store.json(key, null)));
+  const [run, setRun] = useState<AiRun | null>(() => book?cleanRun(store.json(key, null)):savedFilmAnalysis(film));
   const [phase, setPhase] = useState<Phase>("");
   const [status, setStatus] = useState(""), [error, setError] = useState("");
   const [feed, setFeed] = useState<RunReview[]>([]);
@@ -214,6 +215,7 @@ export function ReviewAiCard({ film, profile, mood, setMood, label, onReviews, o
       };
       rememberAspects(film, verdict.aspects, book ? "book" : "film");
       if (!store.set(key, JSON.stringify(next))) setError(tt("Analiz yapıldı ama kaydedilemedi."));
+      else window.dispatchEvent(new CustomEvent("film-decision-changed",{detail:{key}}));
       setRun(next); onRun?.(next); setShowAll(false); setFilter("all");
     } catch (e) {
       if (!live()) return;

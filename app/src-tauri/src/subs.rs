@@ -249,20 +249,38 @@ async fn fetch_once(http: &reqwest::Client, key: &str, hit_id: i64) -> Result<Ve
 
 /// The subtitle beside the video (or in Luna's cache when that folder can't be written).
 fn save(video: &str, language: &str, cache: PathBuf, bytes: &[u8]) -> Result<String, String> {
+    save_named(video, language, "srt", cache, bytes)
+}
+
+/// Writes a new subtitle file "<video stem>.<language>.<ext>" beside the video, numbered when the
+/// name is taken (never overwriting the user's files), through a temporary file so a crash can't
+/// leave half a subtitle. Falls back to Luna's cache when the video's folder is read-only.
+pub fn save_named(video: &str, language: &str, ext: &str, cache: PathBuf, bytes: &[u8]) -> Result<String, String> {
     let path = Path::new(video);
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("video");
-    // the language code comes from the server: only letters and "-" go into the file name
+    // the language code comes from the server or the UI: only letters and "-" go into the file name
     let language: String = language.chars().filter(|c| c.is_ascii_alphabetic() || *c == '-').take(8).collect();
     let language = if language.is_empty() { "sub".to_string() } else { language };
-    let mut name = format!("{stem}.{language}.srt");
+    let ext: String = ext.chars().filter(|c| c.is_ascii_alphanumeric()).take(4).collect();
+    let ext = if ext.is_empty() { "srt".to_string() } else { ext };
+    let write_new = |target: &Path| -> std::io::Result<()> {
+        let name = target.file_name().and_then(|n| n.to_str()).unwrap_or("subtitle");
+        let tmp = target.with_file_name(format!(".{name}.luna-tmp"));
+        let res = std::fs::write(&tmp, bytes).and_then(|_| std::fs::rename(&tmp, target));
+        if res.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        res
+    };
+    let mut name = format!("{stem}.{language}.{ext}");
     // Don't overwrite a different subtitle the user already has.
     let mut n = 2;
     while path.with_file_name(&name).exists() {
-        name = format!("{stem}.{language}.{n}.srt");
+        name = format!("{stem}.{language}.{n}.{ext}");
         n += 1;
     }
     let beside = path.with_file_name(&name);
-    if std::fs::write(&beside, bytes).is_ok() {
+    if !video.contains("://") && write_new(&beside).is_ok() {
         return Ok(beside.to_string_lossy().into_owned());
     }
     std::fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
@@ -273,8 +291,9 @@ fn save(video: &str, language: &str, cache: PathBuf, bytes: &[u8]) -> Result<Str
         video.to_lowercase().hash(&mut h);
         h.finish()
     };
-    let p = cache.join(format!("{id:016x}-{name}"));
-    std::fs::write(&p, bytes).map_err(|e| e.to_string())?;
+    let safe: String = name.chars().map(|c| if r#"\/:*?"<>|"#.contains(c) || c.is_control() { '_' } else { c }).collect();
+    let p = cache.join(format!("{id:016x}-{safe}"));
+    write_new(&p).map_err(|e| e.to_string())?;
     Ok(p.to_string_lossy().into_owned())
 }
 
@@ -298,7 +317,7 @@ fn parse_time(s: &str) -> Option<f64> {
 }
 
 /// A subtitle file's text: UTF-16 (with its byte order mark, as Notepad saves it) or UTF-8.
-fn decode_text(raw: &[u8]) -> String {
+pub fn decode_text(raw: &[u8]) -> String {
     let utf16 = |b: &[u8], le: bool| {
         let units: Vec<u16> = b.chunks_exact(2).map(|c| if le { u16::from_le_bytes([c[0], c[1]]) } else { u16::from_be_bytes([c[0], c[1]]) }).collect();
         String::from_utf16_lossy(&units)

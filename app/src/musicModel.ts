@@ -29,6 +29,7 @@ export function restoreIndex<T extends Playable>(original: T[], cur: T | undefin
 export function playingRowIndex(items: Playable[], now: Playable | undefined, queueIndex: number, ours: boolean, shuffled: boolean): number {
   if (!ours || !now) return -1;
   if (!shuffled && items[queueIndex]?.src === now.src) return queueIndex;
+  const exact=items.indexOf(now);if(exact>=0)return exact;
   return items.findIndex((x) => x.src === now.src);
 }
 
