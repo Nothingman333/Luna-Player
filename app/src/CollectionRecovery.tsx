@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readCollections } from "./collectionStorage";
 import { store } from "./library";

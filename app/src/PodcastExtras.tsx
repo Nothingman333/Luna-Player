@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { lang, tt } from "./i18n";
 import { fmtTime, mpv } from "./mpv";
 import { indexAt, mergeCues, parseChaptersJson, parseCues, parseTranscriptJson, pickTranscript, PodChapter, PodCue, PodLink, textParagraphs } from "./podcastExtrasModel";

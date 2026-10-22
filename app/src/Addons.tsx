@@ -2,7 +2,7 @@
 // Keşfet) and streams (sources on a title's page). Luna ships none of them.
 import { tt } from "./i18n";
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { store } from "./library";
 import { I, Icon } from "./Screens";

@@ -17,7 +17,7 @@ import { UpdateSettings } from "./Update";
 import { STACK } from "./Mine";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { open } from "@tauri-apps/plugin-dialog";
 import { FilmDecisionPanel } from "./FilmDecision";
 import { Switch } from "./FilmReviewAi";

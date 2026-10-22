@@ -10,7 +10,7 @@ import { IMG, Item, store } from "./library";
 import { I, Icon, MenuEntry, menuAgain, openMenu } from "./Screens";
 import { askAssistant, libMatch, youtubeTrailer } from "./Taste";
 import { loadHistory, playQueue, QItem, useMusic } from "./Music";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Book, fetchBook, loadBookLibrary, loadReadHistory, requestOpenBook } from "./Books";
 

@@ -2,7 +2,7 @@
 // Project Gutenberg is read this way, and so is any catalog the user adds by address.
 import { tt } from "./i18n";
 import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { store } from "./library";
 
 export type Acq = { href: string; type: string; open: boolean };

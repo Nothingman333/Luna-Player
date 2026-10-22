@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { tt } from "./i18n";
 import { store } from "./library";
 import { matchKey } from "./textMatch";

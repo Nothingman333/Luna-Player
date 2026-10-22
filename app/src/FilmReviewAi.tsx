@@ -1,6 +1,6 @@
 import {savedFilmAnalysis} from "./filmAnalysisStorage";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { store } from "./library";

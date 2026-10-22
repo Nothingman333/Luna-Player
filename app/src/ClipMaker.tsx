@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "./nativeCore";
 import { save } from "@tauri-apps/plugin-dialog";
 import { tt } from "./i18n";
 import { fmtTime } from "./mpv";

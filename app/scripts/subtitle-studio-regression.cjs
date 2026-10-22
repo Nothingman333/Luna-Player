@@ -124,7 +124,7 @@ test('S14', 'marked intros and merging of skippable parts are validated', () => 
   assert.equal(G.activeSegment([m[0]], 89.5), null); assert.equal(G.activeSegment(m, 10).kind, 'intro'); assert.equal(G.activeSegment(m, 89.5).kind, 'credits');
 });
 test('S15', 'Anime4K chain needs every shader of the mode and keeps Windows paths', () => {
-  const B = load('src/studioBridge.ts', (n) => n === './subtitleModel' ? M : n === './library' ? { store: { get: () => null, set: () => true } } : n === '@tauri-apps/api/core' ? { invoke: async () => [] } : { listen: async () => () => {} });
+  const B = load('src/studioBridge.ts', (n) => n === './subtitleModel' ? M : n === './library' ? { store: { get: () => null, set: () => true } } : (n==='@tauri-apps/api/core'||n==='./nativeCore') ? { invoke: async () => [] } : { listen: async () => () => {} });
   const names = ['Clamp_Highlights', 'Restore_CNN_VL', 'Upscale_CNN_x2_VL', 'AutoDownscalePre_x2', 'AutoDownscalePre_x4', 'Upscale_CNN_x2_M', 'Restore_CNN_M', 'Upscale_CNN_x2_S'];
   const files = names.map((n) => 'C:\\Users\\A\\AppData\\Local\\shaders\\anime4k\\Anime4K_' + n + '.glsl');
   assert.equal(B.anime4kChain('hq', files).length, 6); assert.equal(B.anime4kChain('fast', files)[1], files[6]);
@@ -151,7 +151,7 @@ test('S18', 'the second subtitle is switched off for every new file', () => {
   assert(/setProp\("secondary-sid", "no"\);/.test(app));
 });
 test('S19', 'the main subtitle is the selected one that is not the second (both are flagged selected)', () => {
-  const N = load('src/mpv.ts', (n) => n === '@tauri-apps/api/core' ? { invoke: async () => {} } : n === './i18n' ? { tt: (s) => s } : n === 'react' ? {} : { listen: async () => () => {} });
+  const N = load('src/mpv.ts', (n) => (n==='@tauri-apps/api/core'||n==='./nativeCore') ? { invoke: async () => {} } : n === './i18n' ? { tt: (s) => s } : n === 'react' ? {} : { listen: async () => () => {} });
   const tracks = [{ id: 1, type: 'sub', selected: true }, { id: 2, type: 'sub', selected: true }, { id: 3, type: 'sub' }, { id: 1, type: 'audio', selected: true }];
   assert.equal(N.mainSubTrack(tracks, 1).id, 2); assert.equal(N.mainSubTrack(tracks, 2).id, 1);
   assert.equal(N.mainSubTrack([{ id: 2, type: 'sub', selected: true }], 2), undefined); // main off, only the second is on

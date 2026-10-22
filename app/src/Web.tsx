@@ -1,7 +1,7 @@
 // Web search through the user's own plugins (indexer definitions run inside Luna).
 import { tt } from "./i18n";
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { open } from "@tauri-apps/plugin-dialog";
 import { fmtSize, store } from "./library";
 import { I, Icon } from "./Screens";

@@ -13,7 +13,7 @@ import type { BrowserPage } from "./browserModel";
 import { createPortal } from "react-dom";
 import { defaultSubLangs, tt, pctText, lang } from "./i18n";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "./nativeCore";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";

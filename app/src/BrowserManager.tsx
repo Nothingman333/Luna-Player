@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState} from "react";
-import {invoke,isTauri} from "@tauri-apps/api/core";
+import {invoke,isTauri} from "./nativeCore";
 import {listen} from "@tauri-apps/api/event";
 import {open} from "@tauri-apps/plugin-dialog";
 import {ExtraModal,extraText as t} from "./Extras";

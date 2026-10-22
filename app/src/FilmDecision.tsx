@@ -1,7 +1,7 @@
 import {savedFilmAnalysis} from "./filmAnalysisStorage";
 import { useEffect, useId, useRef, useState } from "react";
 import { store } from "./library";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { tt, locale } from "./i18n";
 import { ASPECTS, addAnalysis, cleanProfile, cleanWorkspace, filmKey, parseReviews, personalFit } from "./filmReviewModel";

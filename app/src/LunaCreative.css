@@ -92,7 +92,7 @@
 @media (prefers-reduced-motion: reduce) { .rc *, .rc-glow { animation: none !important; transition: none !important; } }
 
 /* ---------- Bu akşam ne izlesem? ---------- */
-.tn { --tn-rgb: 232, 112, 26; position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 28px; margin: 26px 48px 8px; padding: 26px 28px; border-radius: 24px; overflow: hidden; transition: box-shadow .6s; }
+.tn { --tn-rgb: 232, 112, 26; position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 28px; margin: 26px 0 8px; padding: 26px 28px; border-radius: 24px; overflow: hidden; transition: box-shadow .6s; }
 .tn::before { content: ""; position: absolute; inset: -40% -10% auto auto; width: 70%; height: 140%; background: radial-gradient(circle at 70% 40%, rgba(var(--tn-rgb), .22), transparent 60%); pointer-events: none; transition: background 1s; }
 .tn.tinted { box-shadow: 0 0 0 1px rgba(var(--tn-rgb), .35), 0 24px 60px rgba(var(--tn-rgb), .12); }
 .tn > * { position: relative; }
@@ -129,7 +129,7 @@
 .tn-other { display: inline-flex; align-items: center; gap: 6px; max-width: 160px; padding: 3px 10px 3px 3px; border-radius: 14px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); font-size: 12px; color: #d6d6dc; }
 .tn-other img { width: 20px; height: 30px; border-radius: 4px; object-fit: cover; }
 .tn-other span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 980px) { .tn { grid-template-columns: 1fr; margin: 20px 20px 4px; } }
+@media (max-width: 980px) { .tn { grid-template-columns: 1fr; margin: 20px 0 4px; } }
 
 /* ---------- quote cards ---------- */
 .transcript .tr-quote { opacity: 0; font-size: 15px; color: var(--muted); padding: 2px 4px; line-height: 1; }
@@ -211,3 +211,8 @@
 .otd-item b { font-size: 13px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .otd-item small { font-size: 11.5px; color: var(--accent-soft, #ffb070); }
 @media (max-width: 980px) { .otd { margin: 10px 20px 0; } }
+
+/* The picker shares the page gutter; its actions keep readable labels at smaller widths. */
+.tn-ask,.tn-out{min-width:0}.tn-head{flex-wrap:wrap;row-gap:10px}.tn-head h2{flex:1 1 240px;line-height:1.35}.tn-head-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.tn-recap{flex:none;white-space:nowrap}.tn-info h3{overflow-wrap:anywhere}.tn-acts{flex-wrap:wrap}
+@media(max-width:980px){.tn-out:has(.tn-fan){display:none}.tn-out{min-height:0}.tn{gap:20px}.tn-out:has(.tn-fan){margin-top:-20px}}
+@media(max-width:640px){.tn{padding:22px 20px;border-radius:18px}.tn-result{align-items:flex-start;gap:14px}.tn-poster{width:100px}.tn-info h3{font-size:20px}.tn-chip{padding:0 11px}.tn-head-actions{width:100%}}

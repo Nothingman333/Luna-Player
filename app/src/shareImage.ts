@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { save } from "@tauri-apps/plugin-dialog";
 
 /** Saves a drawn canvas as PNG where the user chooses; returns the file, or null when cancelled. */

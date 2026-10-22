@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState} from "react";
 import {createPortal} from "react-dom";
-import {invoke} from "@tauri-apps/api/core";
+import {invoke} from "./nativeCore";
 import {extraText,exportExtra} from "./Extras";
 import {copyAssistantText} from "./AssistantTools";
 import {VERSION_LABEL} from "./version";

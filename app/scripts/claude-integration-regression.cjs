@@ -3,7 +3,7 @@ const root=path.resolve(__dirname,'..'),cache={};let map=new Map(),flushFail=fal
 const storage={getItem:k=>map.get(k)??null,setItem:(k,v)=>map.set(k,String(v)),removeItem:k=>map.delete(k)};
 const store={get:storage.getItem,set:(k,v)=>{storage.setItem(k,v);return true},remove:storage.removeItem,json:(k,f)=>{try{return JSON.parse(map.get(k))??f}catch{return f}}};
 global.localStorage=storage;global.window={dispatchEvent:()=>true};
-function load(name){if(cache[name])return cache[name];const m={exports:{}};const code=ts.transpileModule(fs.readFileSync(path.join(root,'src',name+'.ts'),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;new Function('require','exports','module',code)(dep=>dep==='./library'?{store,flushSecrets:async()=>{if(flushFail){flushFail=false;throw Error('vault unavailable')}}}:dep==='@tauri-apps/api/core'?{invoke:async(cmd,args)=>{requests.push(args.url);return reply(args.url)}}:load(dep.replace('./','')),m.exports,m);return cache[name]=m.exports;}
+function load(name){if(cache[name])return cache[name];const m={exports:{}};const code=ts.transpileModule(fs.readFileSync(path.join(root,'src',name+'.ts'),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;new Function('require','exports','module',code)(dep=>dep==='./library'?{store,flushSecrets:async()=>{if(flushFail){flushFail=false;throw Error('vault unavailable')}}}:(dep==='@tauri-apps/api/core'||dep==='./nativeCore')?{invoke:async(cmd,args)=>{requests.push(args.url);return reply(args.url)}}:load(dep.replace('./','')),m.exports,m);return cache[name]=m.exports;}
 const b=load('filmCatalogModel'),d=load('BookData'),tests=[];const test=(n,f)=>tests.push([n,f]);
 
 

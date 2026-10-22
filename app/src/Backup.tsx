@@ -6,7 +6,7 @@ import "./BackupTools.css";
 // the cloud buttons only open the site, the user uploads the file there themselves.
 import { tt } from "./i18n";
 import { useState, useEffect, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { SECRET_KEYS, store } from "./library";

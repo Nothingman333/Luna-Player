@@ -29,7 +29,7 @@ test('B02','quota failure restores the original storage',async()=>{const e=backu
 test('B03','durable save failure rolls back and prevents reload',async()=>{const e=backupEnv({luna:'backup',data:{lang:'tr',lunaMark:'1'}},{persistFail:true});await e.restore();assert(!e.reloaded());assert.match(e.msg(),/disk/);assert.equal(e.ls.getItem('diary'),'{"old":true}');});
 test('B04','failed backup must not record a successful backup date',async()=>{const e=backupEnv(null,{writeFail:true});await compile(variable('src/Backup.tsx','make','BackupSettings'),e.env)();assert.equal(e.store.get('backupAt'),null);});
 test('B05','secret writes must finish and failures propagate before reload',async()=>{
- let reject;const e=load('src/library.ts',{localStorage:storage(),window:{dispatchEvent:noop},CustomEvent:class{},Event:class{}},n=>n==='@tauri-apps/api/core'?{invoke:()=>new Promise((_,r)=>reject=r)}:{});
+ let reject;const e=load('src/library.ts',{localStorage:storage(),window:{dispatchEvent:noop},CustomEvent:class{},Event:class{}},n=>(n==='@tauri-apps/api/core'||n==='./nativeCore')?{invoke:()=>new Promise((_,r)=>reject=r)}:{});
  e.store.set('geminiKey','test');await flush();const pending=e.flushSecrets?.();reject(Error('vault failure'));if(pending)await assert.rejects(pending,/vault failure/);await flush();assert.equal(e.store.get('geminiKey'),null);
 });
 // B06 has native Rust coverage / manual Windows acceptance, not a JS simulation of WinAPI.

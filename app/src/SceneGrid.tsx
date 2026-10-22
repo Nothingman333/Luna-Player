@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "./nativeCore";
 import { tt } from "./i18n";
 import { fmtTime } from "./mpv";
 import type { Cue } from "./subtitleModel";

@@ -3,7 +3,7 @@
  * job ids and progress events, the chosen Whisper engine/model/language, the cached Anime4K
  * shader list, and the "scene" the assistant may read (subtitle lines shown so far).
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { listen } from "@tauri-apps/api/event";
 import { store } from "./library";
 import { Cue, sceneLines } from "./subtitleModel";

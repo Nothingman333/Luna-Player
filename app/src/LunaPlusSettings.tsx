@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { open } from "@tauri-apps/plugin-dialog";
 import { tt } from "./i18n";
 import { store } from "./library";

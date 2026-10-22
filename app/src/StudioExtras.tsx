@@ -5,7 +5,7 @@
  */
 import { tt, lang } from "./i18n";
 import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { store } from "./library";
 import { aiName, aiReady, captureAiUse } from "./ai";
 import { SegKind } from "./segmentModel";

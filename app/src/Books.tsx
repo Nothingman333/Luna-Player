@@ -13,7 +13,7 @@ import { ExtraModal, exportExtra, extraText } from "./Extras";
 import { lang, tt } from "./i18n";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "./nativeCore";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { store } from "./library";

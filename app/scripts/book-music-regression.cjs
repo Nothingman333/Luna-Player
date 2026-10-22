@@ -21,7 +21,7 @@ function load(name) {
   if (cache[name]) return cache[name];
   const m = { exports: {} };
   const code = ts.transpileModule(fs.readFileSync(path.join(root, 'src', name + '.ts'), 'utf8'), tsOpts).outputText;
-  new Function('require', 'exports', 'module', code)((dep) => dep === './library' ? { store } : dep === '@tauri-apps/api/core' ? { invoke: async () => ({}) } : load(dep.replace('./', '')), m.exports, m);
+  new Function('require', 'exports', 'module', code)((dep) => dep === './library' ? { store } : (dep==='@tauri-apps/api/core'||dep==='./nativeCore') ? { invoke: async () => ({}) } : load(dep.replace('./', '')), m.exports, m);
   return (cache[name] = m.exports);
 }
 

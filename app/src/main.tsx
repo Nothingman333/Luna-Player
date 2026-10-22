@@ -1,3 +1,4 @@
+import {startupPhase,startupFailure,startupReady} from "./startupStatus";
 import {installDebugTelemetry,debugSecrets} from "./debugTelemetry";
 import { durableState } from "./safety";
 import { applyAccessibility } from "./Extras";
@@ -14,7 +15,7 @@ import App from "./App";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { loadedLang } from "./i18n";
 import { SubsOverlay } from "./Upscaler";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { loadSecrets, SECRET_KEYS, store } from "./library";
 import { storageRestoreInProgress } from "./safety";
 
@@ -56,6 +57,7 @@ const snapshot = () => {
   } catch {}
 };
 async function restore() {
+  startupPhase("state_load · Kayıtlı veriler / Saved data");
   try {
     const raw = await invoke<string | null>("state_load");
     if (!raw) return;
@@ -73,7 +75,9 @@ async function restore() {
   if (!isSubs) {
     await restore();
     // the API keys from Windows (an old plain copy, also one the state file just brought back, moves there)
+    startupPhase("secrets_load · Anahtarlar / Credentials");
     await loadSecrets();
+    startupPhase("preferences · Görünüm ayarları / Display preferences");
     applyAccessibility();
     // a restored backup can carry another language than the one the texts were loaded in
     if (localStorage.getItem("lang") === "tr" ? loadedLang !== "tr" : loadedLang !== "en") { location.reload(); return; }
@@ -84,9 +88,13 @@ async function restore() {
     document.addEventListener("visibilitychange", snapshot);
     setTimeout(snapshot, 5000);
   }
+  startupPhase("react_render · Arayüz / Interface");
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
       {isSubs ? <SubsOverlay /> : <ErrorBoundary><App /></ErrorBoundary>}
+      <StartupComplete/>
     </React.StrictMode>,
   );
-})();
+})().catch(error=>{startupFailure(error);console.error("Luna startup failed",error);});
+
+function StartupComplete(){React.useEffect(()=>{startupReady();},[]);return null;}

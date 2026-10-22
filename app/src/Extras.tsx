@@ -1,7 +1,7 @@
 import { createPortal } from "react-dom";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { lang, tt } from "./i18n";
 import { SECRET_KEYS, store } from "./library";

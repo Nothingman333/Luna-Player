@@ -3,7 +3,7 @@ import { scanChanges } from "./everydayModel";
 import type { ScanSummary } from "./everydayModel";
 import { naturalPath } from "./playbackModel";
 import { locale, DEC } from "./i18n";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "./nativeCore";
 import { useEffect, useMemo, useState } from "react";
 
 // ---------- small persistent store ----------

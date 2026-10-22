@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { aiKey, aiModel, aiProvider, otherAi } from "./ai";
 import type { BrowserPage } from "./browserModel";
 

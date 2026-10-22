@@ -1,5 +1,5 @@
 import{useEffect,useRef,useState}from"react";
-import{convertFileSrc}from"@tauri-apps/api/core";
+import{convertFileSrc}from"./nativeCore";
 import{open}from"@tauri-apps/plugin-dialog";
 import type{Book}from"./Books";
 import{ExtraModal,extraText}from"./Extras";

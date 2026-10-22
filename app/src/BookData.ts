@@ -1,5 +1,5 @@
 import {reorderReadingPlan} from "./bookLibraryModel";
-import{invoke}from"@tauri-apps/api/core";
+import{invoke}from"./nativeCore";
 import{store}from"./library";
 import type{Book}from"./Books";
 import{writeDelta}from"./extrasModel";

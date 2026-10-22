@@ -1,5 +1,5 @@
 import { tt } from "./i18n";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef, useState } from "react";
 

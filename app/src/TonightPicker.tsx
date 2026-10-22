@@ -80,8 +80,8 @@ export function TonightPicker({ items, recent, onPlay, onDetails }: { items: Ite
       <div className="tn-ask">
         <div className="tn-head">
           <h2>{tt("Bu akşam ne izlesem?")}</h2>
-          <button className="tn-recap" onClick={() => openPanel("lines")} title={tt("Replik ara")}>{tt("Replik ara")} ›</button>
-          <button className="tn-recap" onClick={() => openPanel("recap")} title={tt("Luna Özet")}>{tt("Luna Özet")} ›</button>
+          <div className="tn-head-actions"><button className="tn-recap" onClick={() => openPanel("lines")} title={tt("Replik ara")}>{tt("Replik ara")} ›</button>
+          <button className="tn-recap" onClick={() => openPanel("recap")} title={tt("Luna Özet")}>{tt("Luna Özet")} ›</button></div>
         </div>
         <p className="tn-sub">{tt("Kütüphanende bekleyenlerden, vaktine ve ruh haline göre.")}</p>
         <div className="tn-row" role="radiogroup" aria-label={tt("Ne kadar vaktin var?")}>

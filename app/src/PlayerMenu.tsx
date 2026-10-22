@@ -1,6 +1,6 @@
 import { tt, DEC } from "./i18n";
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   applySubOpts, loadSubOpts, mainSubTrack, mpv, MpvState, setProp, SUB_COLORS, SUB_FONTS, SUB_PRESETS, SubOpts, Track,

@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { tt, lang } from "./i18n";
 import { isRemote, isUrl, Item } from "./library";
 import { fmtTime } from "./mpv";

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { tt } from "./i18n";
 import { isUrl, Item, store } from "./library";
 import { ExtraModal } from "./Extras";

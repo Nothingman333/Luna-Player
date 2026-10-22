@@ -1,7 +1,7 @@
 // Sesli okuma: the open EPUB read aloud with Microsoft Edge's natural voices (as Edge's "Read
 // aloud" does), the sentence and the word being read marked on the page, the pages turning by
 // themselves. If Edge's service can't be reached, Windows' own voice reads on.
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { useEffect, useState } from "react";
 import { tt } from "./i18n";
 import { store } from "./library";

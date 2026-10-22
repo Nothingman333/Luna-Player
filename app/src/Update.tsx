@@ -2,7 +2,7 @@
 // "a new version is ready", and on a click downloads, checks the signature, installs and reopens.
 // Betas (GitHub pre-releases) only when the user turns them on, after a warning.
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { tt } from "./i18n";

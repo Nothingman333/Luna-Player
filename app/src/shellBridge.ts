@@ -3,7 +3,7 @@
  * Windows, notifications, the taskbar progress bar and the library-folder watcher. Every call here
  * can fail (a key another program owns, a notification permission denied): it then does nothing.
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { isRegistered, register, unregister } from "@tauri-apps/plugin-global-shortcut";

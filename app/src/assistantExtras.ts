@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { aiProfiles, AiUse, captureAiUse, otherAi, useOfProfile } from "./ai";
 import { lang, tt } from "./i18n";
 import { store } from "./library";

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { tt } from "./i18n";
 import { mpv, MpvState, setProp } from "./mpv";
 import { nextTrack, prevTrack, toggleMusicPause, useMusic } from "./Music";

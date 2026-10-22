@@ -1,7 +1,7 @@
 // Upscaler: Lossless Scaling driven from Luna, with subtitles kept out of frame generation.
 import { tt } from "./i18n";
 import { useEffect, useState } from "react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "./nativeCore";
 import { listen } from "@tauri-apps/api/event";
 import { store } from "./library";
 import { loadSubOpts, SubOpts } from "./mpv";

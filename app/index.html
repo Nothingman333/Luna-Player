@@ -8,7 +8,15 @@
   </head>
 
   <body>
+    <div id="luna-boot" style="position:fixed;inset:0;z-index:2147483647;background:#0a0a0b;color:#eee;display:flex;flex-direction:column;align-items:center;justify-content:center;font:14px system-ui;padding:28px;gap:16px">
+      <strong style="color:#e8701a;font-size:26px">luna.</strong>
+      <h1 id="luna-boot-title" style="font-size:20px;margin:0">Luna</h1>
+      <p id="luna-boot-phase" style="color:#aaa;margin:0"></p>
+      <pre id="luna-boot-detail" tabindex="0" hidden style="white-space:pre-wrap;overflow-wrap:anywhere;max-width:850px;max-height:45vh;overflow:auto;user-select:text"></pre>
+      <div id="luna-boot-actions" hidden><button id="luna-boot-reload" type="button">Retry</button> <button id="luna-boot-copy" type="button">Copy details</button></div>
+    </div>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script src="/boot.js"></script>
+    <script type="module" src="/src/startup.ts"></script>
   </body>
 </html>

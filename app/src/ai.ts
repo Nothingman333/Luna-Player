@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { store, flushSecrets } from "./library";
 import { fromAnthropic, fromOpenAi, providerPayloadError } from "./assistantProviderModel";
 

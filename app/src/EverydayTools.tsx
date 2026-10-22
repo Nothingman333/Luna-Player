@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./nativeCore";
 import { ExtraModal, extraText as tr, exportExtra } from "./Extras";
 import { SECRET_KEYS, store } from "./library";
 import type { Item, Meta } from "./library";
@@ -10,6 +10,7 @@ import "./Everyday.css";
 export function LibraryScanNotice({summary,scanning,retry}:{summary:ScanSummary|null;scanning:boolean;retry:()=>void}){
  const [open,setOpen]=useState(false),[dismissed,setDismissed]=useState(0);
  if(!summary||summary.at===dismissed)return null;
+ if(!summary.error&&![summary.added,summary.removed,summary.relinked,summary.offline,summary.metadata].some(rows=>rows.length))return null;
  const groups:[string,string[]][]=[[tr("Eklenen","Added"),summary.added],[tr("Artık taramada bulunmayan","No longer found"),summary.removed],[tr("Yeri değişmiş olabilecek","Possibly relocated"),summary.relinked.map(x=>x.from+" → "+x.to)],[tr("Erişilemeyen klasörler","Unavailable folders"),summary.offline],[tr("Bilgisi güncellenen","Metadata updated"),summary.metadata]];
  return <><div className={"luna-status scan-notice"+(summary.error?" is-error":"")} role="status"><span><b>{summary.error?tr("Tarama tamamlanamadı","Scan could not finish"):tr("Kütüphane güncellendi","Library updated")}</b><small>{summary.error||groups.filter(([,rows])=>rows.length).map(([name,rows])=>`${rows.length} ${name.toLocaleLowerCase()}`).join(" · ")||tr("Değişiklik yok","No changes")}</small></span><button className="chip" onClick={()=>setOpen(true)}>{tr("Özeti gör","View summary")}</button>{summary.error&&<button className="chip" disabled={scanning} onClick={retry}>{tr("Tekrar dene","Retry")}</button>}<button className="round" aria-label={tr("Bildirimi kapat","Dismiss notice")} onClick={()=>setDismissed(summary.at)}>×</button></div>{open&&<ExtraModal title={tr("Son kütüphane taraması","Latest library scan")} close={()=>setOpen(false)}><div className="luna-extra"><p className="muted">{new Date(summary.at).toLocaleString()} · {tr("Olası taşınmalar dosya adına göre önerilir; otomatik yeniden bağlama yapılmaz.","Possible moves are suggested by file name; files are not relinked automatically.")}</p>{groups.map(([name,rows])=><section key={name}><h3>{name} · {rows.length}</h3><div className="extra-list">{rows.slice(0,200).map((path,i)=><div className="extra-item" key={i}><span className="everyday-path">{path}</span></div>)}</div>{rows.length>200&&<p>{tr("İlk 200 kayıt gösteriliyor.","Showing the first 200 entries.")}</p>}</section>)}</div></ExtraModal>}</>;
 }
