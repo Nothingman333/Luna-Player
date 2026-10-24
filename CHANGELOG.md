@@ -1,3 +1,7 @@
+## 1.8.3CC — 2026-10-24
+
+- Geliştirici araçları yalnız sahibinin geliştirici şifresiyle açılır; ilk açılışta şifre belirleme adımı kaldırıldı.
+
 ## 1.8.2C — 2026-10-24
 
 - F3 geliştirici girişi, yerel şifre kurulumu ve 30 dakikalık kilitli oturum eklendi.
