@@ -13,15 +13,25 @@ export function cleanQuote(text: string): string {
     .map((l) => l.replace(/^\s*[-–—]\s*/, "").replace(/^[A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜ .'-]{1,24}:\s*/, "").replace(/\s+/g, " ").trim())
     .filter(Boolean);
   const out = lines.join("\n");
-  return out.length > 280 ? out.slice(0, 279).replace(/\s+\S*$/, "") + "…" : out;
+  const points = Array.from(out);
+  return points.length > 280 ? points.slice(0, 279).join("").replace(/\s+\S*$/, "") + "…" : out;
 }
 
-/** Word-wraps text to a width; explicit line breaks are kept; a single overlong word stays on its own line. */
+/** Word-wraps text to a width, retaining paragraph breaks and splitting long tokens at code points. */
 export function wrapText(text: string, width: number, measure: (s: string) => number): string[] {
   const out: string[] = [];
   for (const para of text.split("\n")) {
+    if (!para.trim()) { out.push(""); continue; }
     let line = "";
     for (const w of para.split(/\s+/).filter(Boolean)) {
+      if (measure(w) > width) {
+        if (line) { out.push(line); line = ""; }
+        for (const ch of w) {
+          if (line && measure(line + ch) > width) { out.push(line); line = ""; }
+          line += ch;
+        }
+        continue;
+      }
       const next = line ? line + " " + w : w;
       if (!line || measure(next) <= width) line = next;
       else { out.push(line); line = w; }

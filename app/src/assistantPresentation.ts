@@ -1,5 +1,20 @@
 export type AssistantMessage = {role:"user"|"model";text:string;sources?:{title:string;uri:string}[];pinned?:boolean};
 export const assistantFold=(text:string)=>text.normalize("NFKD").replace(/[\u0300-\u036f]/g,"").replace(/ı/g,"i").toLowerCase();
+export type ConversationEntry={index:number;text:string;question:string};
+export function sourceHost(uri:string):string{try{const url=new URL(uri);return ["https:","http:"].includes(url.protocol)&&!url.username&&!url.password?url.hostname:"";}catch{return "";}}
+export function sourceListText(rows:{title:string;uri:string}[]):string{
+ return rows.filter(r=>sourceHost(r.uri)).map(r=>r.title.replace(/[\r\n]+/g," ").trim()+"\n"+r.uri).join("\n\n");
+}
+export function conversationOutline(messages:AssistantMessage[]){
+ const questions:ConversationEntry[]=[],pinned:ConversationEntry[]=[],sources:{uri:string;title:string;index:number}[]=[];
+ const seen=new Set<string>();let question="";
+ messages.forEach((m,index)=>{
+  if(m.role==="user"&&m.text.trim()){question=m.text.trim();questions.push({index,text:question,question});}
+  if(m.role==="model"&&m.pinned&&m.text.trim())pinned.push({index,text:m.text.trim(),question});
+  for(const source of cleanSources(m.sources,200)){const id=urlId(source.uri);if(seen.has(id))continue;seen.add(id);sources.push({...source,index});}
+ });
+ return {questions,pinned,sources};
+}
 export function conversationMatches(messages:AssistantMessage[],query:string){const words=assistantFold(query.trim()).split(/\s+/).filter(Boolean);return words.length?messages.flatMap((m,i)=>words.every(w=>assistantFold(m.text).includes(w))?[i]:[]):[];}
 const sourceLines=(m:AssistantMessage)=>(m.sources??[]).map(s=>{try{const u=new URL(s.uri);if(!["http:","https:"].includes(u.protocol)||u.username||u.password)return "";return "- "+s.title.replace(/[\r\n]+/g," ")+": "+u.href;}catch{return "";}}).filter(Boolean);
 export function conversationMarkdown(messages:AssistantMessage[],title:string){

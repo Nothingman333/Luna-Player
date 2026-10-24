@@ -3,6 +3,7 @@
  * caring about case, Turkish letters or punctuation ("kopruede bulusalim" finds "Köprüde buluşalım.").
  * Pure; the reading of the files is in LineSearch.tsx.
  */
+import { decodeTextEntities } from "./textEntities";
 export type Line = { start: number; text: string; fold: string };
 export type Entry = { path: string; title: string; lines: Line[] };
 export type Hit = { path: string; title: string; start: number; text: string; before?: string; after?: string; score: number; ranges: [number, number][] };
@@ -17,13 +18,13 @@ export function foldKeep(s: string): string {
 
 /** A subtitle line as plain text: styling tags, ASS codes and line breaks removed. */
 export function cleanLine(text: string): string {
-  return String(text ?? "").replace(/\{[^}]*\}/g, "").replace(/<br\s*\/?>/gi, " ").replace(/<[^>]*>/g, "").replace(/\\N|\\n|\r?\n/g, " ").replace(/\s+/g, " ").trim();
+  return decodeTextEntities(String(text ?? "").replace(/\{[^}]*\}/g, "").replace(/<br\s*\/?>/gi, " ").replace(/<[^>]*>/g, "")).replace(/\\N|\\n|\r?\n/g, " ").replace(/\s+/g, " ").trim();
 }
 
 /** Lines of one film (empty ones dropped). */
-export function indexFilm(path: string, title: string, cues: { start: number; text: string }[]): Entry {
+export function indexFilm(path: string, title: string, cues: { start: number; text: string }[], alreadyPlain = false): Entry {
   const lines: Line[] = [];
-  for (const c of cues) { const text = cleanLine(c.text); if (text) lines.push({ start: c.start, text, fold: foldKeep(text) }); }
+  for (const c of cues) { const text = alreadyPlain ? c.text.replace(/\s+/g, " ").trim() : cleanLine(c.text); if (text) lines.push({ start: c.start, text, fold: foldKeep(text) }); }
   return { path, title, lines };
 }
 
@@ -36,11 +37,19 @@ const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 export function highlightRanges(line: Line, query: string): [number, number][] {
   const t = tokens(query);
   if (!t.length) return [];
-  const phrase = new RegExp(t.map(esc).join("[^\\p{L}\\p{N}]+"), "u").exec(line.fold);
-  if (phrase) return [[phrase.index, phrase.index + phrase[0].length]];
   const out: [number, number][] = [];
-  for (const w of t) { const i = line.fold.indexOf(w); if (i >= 0) out.push([i, i + w.length]); }
-  return out.sort((a, b) => a[0] - b[0]);
+  const phrase = new RegExp(t.map(esc).join("[^\\p{L}\\p{N}]+"), "gu");
+  for (const m of line.fold.matchAll(phrase)) out.push([m.index!, m.index! + m[0].length]);
+  for (const w of new Set(t)) {
+    let at = 0, i: number;
+    while ((i = line.fold.indexOf(w, at)) >= 0) { out.push([i, i + w.length]); at = i + 1; }
+  }
+  const merged: [number, number][] = [];
+  for (const range of out.sort((a, b) => a[0] - b[0] || b[1] - a[1])) {
+    const last = merged[merged.length - 1];
+    if (last && range[0] < last[1]) last[1] = Math.max(last[1], range[1]); else merged.push([...range]);
+  }
+  return merged;
 }
 
 const PER_FILM = 5;

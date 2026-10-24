@@ -71,6 +71,10 @@ pub struct MediaInfo {
 
 /// Reads the real stream properties by letting mpv open the file without output.
 pub fn probe(mpv_exe: &Path, file: &str) -> Result<MediaInfo, String> {
+    crate::media_probe::probe(mpv_exe, file).or_else(|_| probe_once(mpv_exe, file))
+}
+
+fn probe_once(mpv_exe: &Path, file: &str) -> Result<MediaInfo, String> {
     let fmt = "--term-playing-msg=MPINFO|${width}|${height}|${current-tracks/video/codec}|\
 ${video-params/gamma}|${current-tracks/video/dolby-vision-profile}|${current-tracks/audio/codec}|\
 ${current-tracks/audio/demux-channel-count}|${=duration}";
@@ -98,19 +102,42 @@ ${current-tracks/audio/demux-channel-count}|${=duration}";
     })
 }
 
+/// Size and modification time of `file`: part of the cached frames' keys, so a video replaced by
+/// another one (a better release under the same name) does not keep showing the old one's frames
+/// (seek previews and stills were keyed by the path alone).
+fn file_stamp(file: &str) -> (u64, u64) {
+    let meta = std::fs::metadata(file).ok();
+    let mtime = meta.as_ref().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos() as u64).unwrap_or(0);
+    (meta.map(|m| m.len()).unwrap_or(0), mtime)
+}
+
+/// A scratch folder of its own for one mpv run: two requests for the same video (the library and the
+/// details page asking at once) used to share one folder, and one of them then reported no frame.
+fn scratch_dir(cache: &Path, key: &str) -> PathBuf {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    cache.join(format!("tmp-{key}-{}-{n}", std::process::id()))
+}
+
+/// Moves the frame mpv wrote to `target`; when another run finished first, its picture is used.
+fn keep_frame(produced: &Path, target: &Path) -> Result<(), String> {
+    match std::fs::rename(produced, target) {
+        Ok(()) => Ok(()),
+        Err(_) if target.exists() => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// A frame from ~15% into the video, cached as JPEG.
 pub fn thumbnail(mpv_exe: &Path, file: &str, cache: &Path) -> Result<String, String> {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    file.hash(&mut h);
-    std::fs::metadata(file).map(|m| m.len()).unwrap_or(0).hash(&mut h);
-    let name = format!("{:016x}.jpg", h.finish());
+    let key = crate::stable_cache::file_key("thumbnail", file, b"");
+    let name = format!("{key}.jpg");
     let target = cache.join(&name);
     if target.exists() {
         return Ok(target.to_string_lossy().into_owned());
     }
     std::fs::create_dir_all(cache).map_err(|e| e.to_string())?;
-    let tmp = cache.join(format!("tmp-{:016x}", h.finish()));
+    let tmp = scratch_dir(cache, &key);
     let _ = std::fs::create_dir_all(&tmp);
     let mut cmd = Command::new(mpv_com(mpv_exe));
     cmd.args([
@@ -129,23 +156,21 @@ pub fn thumbnail(mpv_exe: &Path, file: &str, cache: &Path) -> Result<String, Str
         ran?;
         return Err(tr!("Kare alınamadı", "Couldn't grab a frame"));
     };
-    std::fs::rename(&produced, &target).map_err(|e| e.to_string())?;
+    let kept = keep_frame(&produced, &target);
     let _ = std::fs::remove_dir_all(&tmp);
+    kept?;
     Ok(target.to_string_lossy().into_owned())
 }
 
 /// A large frame (1600 px wide) at `secs`, for cards people share (cached per file and tenth of a second).
 pub fn still(mpv_exe: &Path, file: &str, secs: f64, cache: &Path) -> Result<std::path::PathBuf, String> {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    file.hash(&mut h);
-    ((secs * 10.0).round() as u64).hash(&mut h);
-    let target = cache.join(format!("{:016x}.jpg", h.finish()));
+    let key = crate::stable_cache::file_key("still", file, &((secs * 10.0).round() as u64).to_le_bytes());
+    let target = cache.join(format!("{key}.jpg"));
     if target.exists() {
         return Ok(target);
     }
     std::fs::create_dir_all(cache).map_err(|e| e.to_string())?;
-    let tmp = cache.join(format!("tmp-{:016x}", h.finish()));
+    let tmp = scratch_dir(cache, &key);
     let _ = std::fs::create_dir_all(&tmp);
     let mut cmd = Command::new(mpv_com(mpv_exe));
     cmd.args([
@@ -165,24 +190,28 @@ pub fn still(mpv_exe: &Path, file: &str, secs: f64, cache: &Path) -> Result<std:
         ran?;
         return Err(tr!("Kare alınamadı", "Couldn't grab a frame"));
     };
-    std::fs::rename(&produced, &target).map_err(|e| e.to_string())?;
+    let kept = keep_frame(&produced, &target);
     let _ = std::fs::remove_dir_all(&tmp);
+    kept?;
     Ok(target)
 }
 
 /// A small frame at `secs` for the seek-bar hover preview (cached per file and second).
 pub fn frame_at(mpv_exe: &Path, file: &str, secs: u32, cache: &Path) -> Result<String, String> {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    file.hash(&mut h);
-    let dir = cache.join(format!("{:016x}", h.finish()));
+    let key = crate::stable_cache::file_key("preview", file, b"");
+    let dir = cache.join(key);
     let target = dir.join(format!("{secs}.jpg"));
     if target.exists() {
         return Ok(target.to_string_lossy().into_owned());
     }
     let jpg = crate::preview::frame(mpv_exe, file, secs)?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    std::fs::write(&target, jpg).map_err(|e| e.to_string())?;
+    // written beside and then renamed: the page may load the picture while it is still being written
+    let tmp = scratch_dir(&dir, &secs.to_string()).with_extension("part");
+    std::fs::write(&tmp, jpg).and_then(|_| std::fs::rename(&tmp, &target)).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })?;
     Ok(target.to_string_lossy().into_owned())
 }
 
@@ -204,7 +233,7 @@ pub fn list_dir(dir: &str) -> Result<Vec<Entry>, String> {
             .map(|e| {
                 let p = e.path();
                 if p.is_dir() {
-                    if depth < 4 { count(&p, depth + 1) } else { 0 }
+                    if depth < 4 && !crate::stable_cache::skip_directory(&p) { count(&p, depth + 1) } else { 0 }
                 } else {
                     is_video(&p) as u32
                 }
@@ -221,6 +250,7 @@ pub fn list_dir(dir: &str) -> Result<Vec<Entry>, String> {
                 return None;
             }
             if p.is_dir() {
+                if crate::stable_cache::skip_directory(&p) { return None; }
                 let videos = count(&p, 0);
                 (videos > 0).then(|| Entry { name, path: p.to_string_lossy().into(), is_dir: true, size: 0, videos })
             } else if is_video(&p) {
@@ -244,7 +274,9 @@ pub fn reveal(file: &str) -> Result<(), String> {
         cmd.raw_arg(format!("/select,\"{}\"", file.replace('/', "\\")));
     } else if let Some(dir) = p.ancestors().skip(1).find(|d| d.is_dir()) {
         // File not on disk (e.g. a torrent not downloaded yet): open the nearest existing folder.
-        cmd.raw_arg(format!("\"{}\"", dir.display()));
+        // the same backslash form as above: Explorer opens Documents for "C:/Films" style folders
+        let dir = dir.to_string_lossy().replace('/', "\\");
+        cmd.raw_arg(format!("\"{dir}\""));
     } else {
         return Err(tr!("Dosya bulunamadı", "File not found"));
     }
@@ -308,7 +340,7 @@ pub fn subs_beside(paths: &[String]) -> Vec<u32> {
 
 /// Gives the video a new name in the same folder (the extension stays); its own subtitle files
 /// are renamed with it so they keep matching. Returns the new path.
-pub fn rename(file: &str, new_name: &str) -> Result<String, String> {
+pub fn rename_plan(file: &str, new_name: &str) -> Result<Vec<(PathBuf,PathBuf)>, String> {
     let p = Path::new(file);
     let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("");
     let mut stem = new_name.trim().to_string();
@@ -320,6 +352,13 @@ pub fn rename(file: &str, new_name: &str) -> Result<String, String> {
     if stem.is_empty() || stem.chars().any(|c| r#"\/:*?"<>|"#.contains(c) || c.is_control()) {
         return Err(tr!("Bu ad kullanılamaz (şunlar olmamalı: \\ / : * ? \" < > |)", "That name can't be used (none of these: \\ / : * ? \" < > |)"));
     }
+    // Windows keeps CON, NUL, COM1… for devices: renaming a film to one of them failed halfway with a system error
+    let device = stem.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+    if matches!(device.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (device.len() == 4 && (device.starts_with("COM") || device.starts_with("LPT")) && device.as_bytes()[3].is_ascii_digit())
+    {
+        return Err(tr!("Windows bu adı kullanmaya izin vermiyor", "Windows doesn't allow that name"));
+    }
     let old_stem = p.file_stem().and_then(|s| s.to_str()).ok_or_else(|| tr!("Dosya bulunamadı", "File not found"))?;
     let dir = p.parent().ok_or_else(|| tr!("Dosya bulunamadı", "File not found"))?;
     if !p.is_file() {
@@ -327,7 +366,7 @@ pub fn rename(file: &str, new_name: &str) -> Result<String, String> {
     }
     let to = dir.join(if ext.is_empty() { stem.clone() } else { format!("{stem}.{ext}") });
     if to == p {
-        return Ok(file.to_string());
+        return Ok(Vec::new());
     }
     // only the case changes ("alien" → "Alien"): Windows sees the same file, that's fine
     if to.exists() && to.to_string_lossy().to_lowercase() != p.to_string_lossy().to_lowercase() {
@@ -347,6 +386,19 @@ pub fn rename(file: &str, new_name: &str) -> Result<String, String> {
         }
         moves.push((sub, target));
     }
+    let nfo=p.with_extension("nfo");
+    if nfo.is_file() {
+        let target=to.with_extension("nfo");
+        if target.exists() && target.to_string_lossy().to_lowercase()!=nfo.to_string_lossy().to_lowercase(){return Err("NFO destination already exists; no files changed".into());}
+        moves.push((nfo,target));
+    }
+    Ok(moves)
+}
+
+pub fn rename(file:&str,new_name:&str)->Result<String,String>{
+    let moves=rename_plan(file,new_name)?;
+    if moves.is_empty(){return Ok(file.to_string());}
+    let to=moves[0].1.clone();
     for (index, (from, target)) in moves.iter().enumerate() {
         if let Err(error) = std::fs::rename(from, target) {
             let mut rollback_failed = Vec::new();

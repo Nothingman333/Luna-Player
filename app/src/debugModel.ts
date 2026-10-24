@@ -1,7 +1,7 @@
 import {redactDiagnostic} from "./everydayModel";
 export type DebugCategory="error"|"browser"|"player"|"ai"|"network"|"app";
 export type DebugEntry={id:number;at:number;category:DebugCategory;level:"info"|"error";name:string;duration?:number;detail:unknown};
-const privateKey=/(?:key|token|auth|password|secret|cookie|prompt|content|body|json|selection|html|subtitle|subText|notes?|query|title|messages?|text|path|filename|src)/i;
+const privateKey=/(?:card|front|back|env|arguments|config|changes|legacy|seed|reference|playback|key|token|auth|password|secret|cookie|prompt|content|body|json|selection|html|subtitle|subText|notes?|query|title|messages?|text|path|filename|src)/i;
 export function debugSanitize(raw:unknown,secrets:string[]=[],depth=0,seen=new WeakSet<object>()):unknown{
  if(depth>5)return "[depth limit]";
  if(raw instanceof Error)return {name:raw.name,error:redactDiagnostic(raw.message,secrets).slice(0,1000),stack:redactDiagnostic(raw.stack||"",secrets).slice(0,2000)};

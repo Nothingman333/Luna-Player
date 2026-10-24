@@ -1,0 +1,98 @@
+[
+  {
+    "width": 1280,
+    "version": "before",
+    "view": "compare",
+    "errors": []
+  },
+  {
+    "width": 1280,
+    "version": "before",
+    "view": "assistant",
+    "errors": []
+  },
+  {
+    "width": 1280,
+    "version": "before",
+    "view": "notebook",
+    "errors": []
+  },
+  {
+    "width": 1280,
+    "version": "before",
+    "view": "history",
+    "errors": []
+  },
+  {
+    "width": 1280,
+    "version": "after",
+    "view": "compare",
+    "errors": []
+  },
+  {
+    "width": 1280,
+    "version": "after",
+    "view": "assistant",
+    "errors": []
+  },
+  {
+    "width": 1280,
+    "version": "after",
+    "view": "notebook",
+    "errors": []
+  },
+  {
+    "width": 1280,
+    "version": "after",
+    "view": "history",
+    "errors": []
+  },
+  {
+    "width": 640,
+    "version": "before",
+    "view": "compare",
+    "errors": []
+  },
+  {
+    "width": 640,
+    "version": "before",
+    "view": "assistant",
+    "errors": []
+  },
+  {
+    "width": 640,
+    "version": "before",
+    "view": "notebook",
+    "errors": []
+  },
+  {
+    "width": 640,
+    "version": "before",
+    "view": "history",
+    "errors": []
+  },
+  {
+    "width": 640,
+    "version": "after",
+    "view": "compare",
+    "errors": []
+  },
+  {
+    "width": 640,
+    "version": "after",
+    "view": "assistant",
+    "errors": []
+  },
+  {
+    "width": 640,
+    "version": "after",
+    "view": "notebook",
+    "errors": []
+  },
+  {
+    "width": 640,
+    "version": "after",
+    "view": "history",
+    "errors": []
+  }
+]

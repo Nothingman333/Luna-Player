@@ -1,7 +1,7 @@
 {
   "name": "app",
   "private": true,
-  "version": "1.6.7",
+  "version": "1.8.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -52,9 +52,33 @@
     "test:shell-extras": "node scripts/shell-extras-regression.cjs",
     "test:creative": "node scripts/creative-regression.cjs",
     "test:library": "node scripts/library-regression.cjs",
-    "test:unified": "node scripts/unified-integration.cjs"
+    "test:unified": "node scripts/unified-integration.cjs",
+    "test:iteration-1": "node scripts/iteration-1-regression.cjs",
+    "test:taste-core": "node scripts/taste-core-test.mjs",
+    "test:assistant-improvements": "node scripts/assistant-improvements-regression.cjs",
+    "test:review-completion": "node scripts/review-completion-regression.cjs",
+    "test:taste-integration": "node scripts/taste-integration-regression.cjs",
+    "test:creative-plus": "node scripts/creative-plus-regression.cjs",
+    "test:library-workbench": "node scripts/library-workbench-regression.cjs",
+    "test:fifty-behavior": "node scripts/fifty-behavior-regression.cjs",
+    "test:audit-fixes": "node scripts/audit-fixes-regression.cjs",
+    "test:performance-workflows": "node scripts/performance-workflows-regression.cjs",
+    "test:incoming-final": "node scripts/incoming-final-regression.cjs",
+    "test:detail-polish": "node scripts/detail-polish-regression.cjs",
+    "test:incoming-tour2": "node scripts/incoming-tour2-regression.cjs",
+    "test": "node scripts/ci-tests.cjs",
+    "test:hardening": "node scripts/hardening-regression.cjs",
+    "lint": "eslint .",
+    "test:upgrade": "node scripts/upgrade-regression.cjs",
+    "test:filenames": "node scripts/filename-regression.cjs",
+    "test:integration-upgrade": "node scripts/integration-upgrade-regression.cjs",
+    "test:luna2": "node scripts/luna2-regression.cjs",
+    "test:country-ui": "node scripts/country-ui-regression.cjs",
+    "prebuild": "node scripts/generate-release-history.cjs",
+    "test:release-history": "node scripts/release-history-regression.cjs"
   },
   "dependencies": {
+    "@ctrl/video-filename-parser": "5.12.0",
     "@fontsource/atkinson-hyperlegible-next": "^5.3.0",
     "@fontsource/ibm-plex-sans": "^5.3.0",
     "@fontsource/lexend": "^5.3.0",
@@ -73,11 +97,19 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@babel/core": "^7.29.7",
+    "@eslint/js": "^10.0.1",
+    "@rolldown/plugin-babel": "^0.2.4",
     "@tauri-apps/cli": "^2",
+    "@types/babel__core": "^7.20.5",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^6.0.2",
+    "babel-plugin-react-compiler": "^1.0.0",
+    "eslint": "^10.13.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.0",
     "vite": "^8.0.16"
   },
   "overrides": {

@@ -68,7 +68,10 @@ pub fn normalize(input: &str) -> Result<String, String> {
     if s.is_empty() {
         return Err(tr!("Letterboxd kullanıcı adını ya da bağlantısını yaz", "Type a Letterboxd user name or link"));
     }
-    let lower = s.to_lowercase();
+    // ASCII-only lower-casing keeps every byte position: `to_lowercase()` turns "İ" (2 bytes) into
+    // "i̇" (3 bytes), so an index found in it pointed into the wrong place of `s` ("İzlediklerim: https://
+    // letterboxd.com/dave" came out as "https://etterboxd.com/dave", and some texts panicked)
+    let lower = s.to_ascii_lowercase();
     if lower.contains("letterboxd.com") || lower.contains("boxd.it") {
         let rest = lower.find("letterboxd.com").map(|i| &s[i..]).or_else(|| lower.find("boxd.it").map(|i| &s[i..])).unwrap_or(&s);
         let host_fixed = if rest.to_lowercase().starts_with("letterboxd.com") { format!("letterboxd.com{}", &rest["letterboxd.com".len()..]) } else { rest.to_string() };
@@ -94,7 +97,7 @@ async fn read_pages(client: &reqwest::Client, url: &str, max_pages: u32, label: 
         for attempt in 0..5u64 {
             match client.get(&u).send().await {
                 Ok(res) if res.status().is_success() => {
-                let text = match res.bytes().await { Ok(b) if b.len() <= 8 * 1024 * 1024 => String::from_utf8_lossy(&b).into_owned(), _ => String::new() };
+                let text = match crate::read_capped(res, 8 * 1024 * 1024).await { Ok(b) => String::from_utf8_lossy(&b).into_owned(), Err(_) => String::new() };
                 // a challenge page comes back as 200 without posters: treat it as a failure, except on a real last page
                 if !parse(&text).is_empty() || text.contains("class=\"pagination") || attempt >= 3 { body = Some(text); break; }
                 last = tr!("boş sayfa", "empty page");
@@ -139,8 +142,7 @@ async fn user_lists(client: &reqwest::Client, user: &str) -> Vec<(String, String
         let u = if page == 1 { format!("https://letterboxd.com/{user}/lists/") } else { format!("https://letterboxd.com/{user}/lists/page/{page}/") };
         let Ok(res) = client.get(&u).send().await else { break };
         if !res.status().is_success() { break }
-        let Ok(body) = res.bytes().await else { break };
-        if body.len() > 8 * 1024 * 1024 { break; }
+        let Ok(body) = crate::read_capped(res, 8 * 1024 * 1024).await else { break };
         let html = String::from_utf8_lossy(&body).into_owned();
         let before = out.len();
         {
@@ -361,7 +363,8 @@ pub(crate) async fn get_page(client: &reqwest::Client, url: &str) -> Result<Stri
     if !res.status().is_success() {
         return Err(res.status().as_u16().to_string());
     }
-    res.text().await.map_err(|e| e.to_string())
+    let body = crate::read_capped(res, 8 * 1024 * 1024).await?;
+    Ok(String::from_utf8_lossy(&body).into_owned())
 }
 
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36";
@@ -430,6 +433,14 @@ pub async fn reviews(tmdb: Option<u64>, tv: bool, title: &str, year: Option<&str
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn normalize_survives_letters_whose_lower_case_is_longer() {
+        use super::normalize;
+        assert_eq!(normalize("İzlediklerim: https://letterboxd.com/dave").unwrap(), "https://letterboxd.com/dave");
+        assert_eq!(normalize("İİİ HTTPS://LETTERBOXD.COM/Dave/films/?x=1").unwrap(), "https://letterboxd.com/Dave/films");
+        assert_eq!(normalize("@dave").unwrap(), "https://letterboxd.com/dave");
+        assert!(normalize("not a link at all").is_err());
+    }
     #[test]
     fn review_page() {
         let html = r#"<article class="production-viewing -viewing"><span class="inline-rating"><svg aria-label="★★★★½"></svg></span><strong class="displayname">Ann</strong>

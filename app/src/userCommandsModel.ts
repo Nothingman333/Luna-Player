@@ -5,7 +5,7 @@ export type UserCommand = { name: string; prompt: string };
 
 /** A command name as stored: without the slash, lower case, letters (Turkish ones too), digits, - and _. */
 export function commandName(raw: string): string | null {
-  const n = String(raw ?? "").trim().replace(/^\/+/, "").toLocaleLowerCase("tr");
+  const n = String(raw ?? "").normalize("NFC").trim().replace(/^\/+/, "").toLocaleLowerCase("tr");
   return /^[\p{L}\p{N}_-]{1,24}$/u.test(n) ? n : null;
 }
 
@@ -15,7 +15,7 @@ export function parseCommandDef(arg: string, reserved: string[]): UserCommand | 
   if (at < 0) return "format";
   const name = commandName(arg.slice(0, at));
   if (!name) return "name";
-  if (reserved.map((r) => r.replace(/^\//, "").toLocaleLowerCase("tr")).includes(name)) return "reserved";
+  if (reserved.map(commandName).includes(name)) return "reserved";
   const prompt = arg.slice(at + 1).trim();
   if (!prompt || prompt.length > 2000) return "prompt";
   return { name, prompt };
@@ -33,7 +33,8 @@ export function expandCommand(text: string, commands: UserCommand[], selection =
   const rest = t.slice(word.length).trim();
   let out = c.prompt;
   const hasText = /\{(metin|text)\}/i.test(out);
-  out = out.replace(/\{(metin|text)\}/gi, rest).replace(/\{(seçim|secim|selection)\}/gi, selection.trim());
+  // A single callback pass keeps pasted '$&' and literal placeholders as user data.
+  out = out.replace(/\{(metin|text|seçim|secim|selection)\}/gi, (_, key: string) => /^(metin|text)$/i.test(key) ? rest : selection.trim());
   if (!hasText && rest) out = out + "\n\n" + rest;
   return out.trim();
 }

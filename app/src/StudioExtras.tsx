@@ -1,3 +1,4 @@
+import { appStorage as localStorage } from "./appStorage";
 /**
  * Settings › General additions of the subtitle studio: what the player skips by itself (intros and
  * recaps from chapters or series marks) and a diagnostics report to copy into a bug report (no

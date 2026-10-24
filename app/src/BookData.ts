@@ -1,3 +1,4 @@
+import { appStorage as localStorage } from "./appStorage";
 import {reorderReadingPlan} from "./bookLibraryModel";
 import{invoke}from"./nativeCore";
 import{store}from"./library";

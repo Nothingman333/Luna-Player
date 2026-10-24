@@ -89,7 +89,7 @@ pub async fn check(app: &AppHandle, beta: bool) -> Result<Option<Info>, String> 
         page: rel.html_url.clone(),
         installable: installed(),
     };
-    *app.state::<Pending>().0.lock().unwrap() = Some(u);
+    *app.state::<Pending>().0.lock().unwrap_or_else(|e| e.into_inner()) = Some(u);
     Ok(Some(info))
 }
 
@@ -99,7 +99,7 @@ pub async fn install(app: AppHandle) -> Result<(), String> {
     if !installed() {
         return Err("not installed".into());
     }
-    let u = app.state::<Pending>().0.lock().unwrap().take().ok_or("no update")?;
+    let u = app.state::<Pending>().0.lock().unwrap_or_else(|e| e.into_inner()).take().ok_or("no update")?;
     let mut got = 0usize;
     let a = app.clone();
     u.download_and_install(

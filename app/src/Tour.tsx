@@ -302,10 +302,10 @@ const ALL: Slide[] = [
   {
     eyebrow: tt("Kısayollar"), title: tt("Klavyeyle her şey"), fresh: true,
     text: tt("Fareye uzanmadan: asistanı Alt+A ile her ekrandan açarsın, dosyayı Ctrl+O ile, bağlantıyı Ctrl+N ile. Yazı yazarken kısayollar araya girmez."),
-    tips: [{ k: "Alt+A", t: tt("asistan") }, { k: "Esc", t: tt("açık olanı kapatır") }],
+    tips: [{ k: "Ctrl+K", t: tt("Genel arama") }, { k: "Alt+A", t: tt("asistan") }, { k: "Esc", t: tt("açık olanı kapatır") }],
     scene: () => (
       <div className="ts ts-keysc">
-        {([["Alt+A", tt("Asistanı aç")], ["Ctrl+O", tt("Dosya aç")], ["Ctrl+N", tt("Bağlantı aç")], [tt("Boşluk"), tt("Oynat / duraklat")], ["F", tt("Tam ekran")],
+        {([["Ctrl+K", tt("Genel arama")], ["Alt+A", tt("Asistanı aç")], ["Ctrl+O", tt("Dosya aç")], ["Ctrl+N", tt("Bağlantı aç")], [tt("Boşluk"), tt("Oynat / duraklat")], ["F", tt("Tam ekran")],
           ["← →", tt("İleri / geri sar")], ["Ctrl+→", tt("Sonraki şarkı")], ["Alt+←", tt("Geri dön")], ["Esc", tt("Kapat")]] as [string, string][]).map(([k, t], n) => (
           <div key={n} className={"kr" + (n === 0 ? " star" : "")} style={{ ["--i" as any]: n }}><kbd>{k}</kbd><span>{t}</span></div>
         ))}

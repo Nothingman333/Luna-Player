@@ -6,7 +6,7 @@ export function validIsbn(raw:string):string {
  if(/^\d{9}[\dX]$/.test(value)){const sum=[...value].reduce((n,c,i)=>n+(c==="X"?10:Number(c))*(10-i),0);return sum%11===0?value:"";}
  return "";
 }
-export const cleanBookQuery=(s:string)=>s.replace(/\.(epub|pdf|cbz)$/i,"").replace(/[_]+/g," ").replace(/\b(?:OCR|PDF|EPUB|CBZ)\b/gi,"").replace(/[()[\]]/g," ").replace(/\s+/g," ").trim();
+export const cleanBookQuery=(s:string)=>s.replace(/\.(epub|pdf|cbz|mobi|azw3|fb2)$/i,"").replace(/[_]+/g," ").replace(/\b(?:OCR|PDF|EPUB|CBZ)\b/gi,"").replace(/[()[\]]/g," ").replace(/\s+/g," ").trim();
 export const bookFold=(s:string)=>s.normalize("NFKD").replace(/[\u0300-\u036f]/g,"").replace(/ı/g,"i").toLowerCase().replace(/[^\p{L}\p{N}]+/gu," ").trim();
 export function publicImage(raw:unknown):string {try{const u=new URL(String(raw||""));if(!["http:","https:"].includes(u.protocol)||u.username||u.password)return "";if(u.protocol==="http:")u.protocol="https:";return u.href;}catch{return "";}}
 export const plainBookText=(s:unknown)=>String(s||"").replace(/<[^>]*>/g," ").replace(/&(?:amp|quot|apos|nbsp|lt|gt|#\d+|#x[\da-f]+);/gi,entity=>{const named:Record<string,string>={amp:"&",quot:'"',apos:"'",nbsp:" ",lt:"<",gt:">"},key=entity.slice(1,-1).toLowerCase();if(key in named)return named[key];const n=key.startsWith("#x")?parseInt(key.slice(2),16):parseInt(key.slice(1),10);return Number.isInteger(n)&&n>=0&&n<=0x10ffff?String.fromCodePoint(n):entity;}).replace(/\s+/g," ").trim().slice(0,12000);

@@ -1,0 +1,51 @@
+//! Opt-in direct libmpv backend. All C pointers and the DLL stay on one dedicated thread.
+//! Enabled only by LUNA_LIBMPV_DLL=<absolute DLL path>; normal launches keep supervised mpv.exe.
+use std::{ffi::{c_void,c_char,CStr,CString},path::PathBuf,sync::{Arc,atomic::{AtomicBool,Ordering}}};
+use serde_json::{Value,json};
+use tauri::{AppHandle,Emitter};
+use tokio::sync::mpsc;
+#[repr(C)]#[derive(Clone,Copy)]union Data{string:*mut c_char,flag:i32,int64:i64,double:f64,list:*mut List}
+#[repr(C)]#[derive(Clone,Copy)]struct Node{u:Data,format:i32}
+#[repr(C)]struct List{num:i32,values:*mut Node,keys:*mut *mut c_char}
+type Handle=*mut c_void;
+type Event=*mut c_void;
+const EMPTY:Node=Node{u:Data{int64:0},format:0};
+struct Api{_dll:libloading::Library,ctx:Handle,destroy:unsafe extern "C" fn(Handle),option:unsafe extern "C" fn(Handle,*const c_char,*const c_char)->i32,initialize:unsafe extern "C" fn(Handle)->i32,command:unsafe extern "C" fn(Handle,*mut Node,*mut Node)->i32,get:unsafe extern "C" fn(Handle,*const c_char,i32,*mut c_void)->i32,set:unsafe extern "C" fn(Handle,*const c_char,i32,*mut c_void)->i32,observe:unsafe extern "C" fn(Handle,u64,*const c_char,i32)->i32,unobserve:unsafe extern "C" fn(Handle,u64)->i32,wait:unsafe extern "C" fn(Handle,f64)->Event,event_node:unsafe extern "C" fn(*mut Node,Event)->i32,free:unsafe extern "C" fn(*mut Node),error:unsafe extern "C" fn(i32)->*const c_char}
+impl Drop for Api{fn drop(&mut self){if !self.ctx.is_null(){unsafe{(self.destroy)(self.ctx)};self.ctx=std::ptr::null_mut();}}}
+fn c(s:&str)->Result<CString,String>{CString::new(s).map_err(|_|"NUL character in mpv argument".into())}
+impl Api{
+ fn open(path:&std::path::Path,hwnd:isize,fonts:&std::path::Path,exe:&std::path::Path)->Result<Self,String>{
+  if !path.is_absolute()||!path.is_file()||path.extension().is_none_or(|e|!e.eq_ignore_ascii_case("dll")){return Err("LUNA_LIBMPV_DLL must be an existing absolute DLL path".into());}
+  // Load dependencies beside this explicitly selected DLL or from System32, never the CWD.
+  let dll=unsafe{libloading::os::windows::Library::load_with_flags(path,0x100|0x800)}.map_err(|e|e.to_string())?;let dll:libloading::Library=dll.into();
+  macro_rules! symbol{($name:literal,$ty:ty)=>{unsafe{*dll.get::<$ty>(concat!($name,"\0").as_bytes()).map_err(|e|e.to_string())?}};}
+  let version=symbol!("mpv_client_api_version",unsafe extern "C" fn()->std::os::raw::c_ulong);if unsafe{version()}>>16!=2{return Err("Unsupported libmpv client ABI (expected major 2)".into());}
+  let create=symbol!("mpv_create",unsafe extern "C" fn()->Handle);
+  // Resolve every symbol before creating a client, including error paths.
+  let mut api=Self{ctx:std::ptr::null_mut(),destroy:symbol!("mpv_terminate_destroy",unsafe extern "C" fn(Handle)),option:symbol!("mpv_set_option_string",unsafe extern "C" fn(Handle,*const c_char,*const c_char)->i32),initialize:symbol!("mpv_initialize",unsafe extern "C" fn(Handle)->i32),command:symbol!("mpv_command_node",unsafe extern "C" fn(Handle,*mut Node,*mut Node)->i32),get:symbol!("mpv_get_property",unsafe extern "C" fn(Handle,*const c_char,i32,*mut c_void)->i32),set:symbol!("mpv_set_property",unsafe extern "C" fn(Handle,*const c_char,i32,*mut c_void)->i32),observe:symbol!("mpv_observe_property",unsafe extern "C" fn(Handle,u64,*const c_char,i32)->i32),unobserve:symbol!("mpv_unobserve_property",unsafe extern "C" fn(Handle,u64)->i32),wait:symbol!("mpv_wait_event",unsafe extern "C" fn(Handle,f64)->Event),event_node:symbol!("mpv_event_to_node",unsafe extern "C" fn(*mut Node,Event)->i32),free:symbol!("mpv_free_node_contents",unsafe extern "C" fn(*mut Node)),error:symbol!("mpv_error_string",unsafe extern "C" fn(i32)->*const c_char),_dll:dll};
+  api.ctx=unsafe{create()};if api.ctx.is_null(){return Err("libmpv could not create a client".into());}
+  let mut options=vec![("config","no".into()),("wid",hwnd.to_string()),("vo","gpu-next".into()),("gpu-api","d3d11".into()),("hwdec","auto-safe".into()),("idle","yes".into()),("force-window","yes".into()),("keep-open","yes".into()),("osc","no".into()),("osd-level","0".into()),("input-default-bindings","no".into()),("input-vo-keyboard","no".into()),("cursor-autohide","no".into()),("prefetch-playlist","yes".into()),("sub-auto","fuzzy".into()),("slang","tr,tur,en,eng".into()),("background-color","#000000".into()),("target-colorspace-hint","yes".into()),("tone-mapping","auto".into()),("hdr-compute-peak","yes".into()),("sub-fonts-dir",fonts.to_string_lossy().into_owned())];
+  options.push(("script-opts",format!("ytdl_hook-ytdl_path={}",crate::mpv::ytdlp_exe(exe).display())));
+  for(name,value)in options{let name=c(name)?;let value=c(&value)?;api.ok(unsafe{(api.option)(api.ctx,name.as_ptr(),value.as_ptr())})?;}api.ok(unsafe{(api.initialize)(api.ctx)})?;Ok(api)
+ }
+ fn ok(&self,code:i32)->Result<(),String>{if code>=0{Ok(())}else{let ptr=unsafe{(self.error)(code)};Err(if ptr.is_null(){format!("libmpv error {code}")}else{unsafe{CStr::from_ptr(ptr)}.to_string_lossy().into_owned()})}}
+ fn input(value:&Value,strings:&mut Vec<CString>)->Result<Node,String>{Ok(match value{Value::Null=>EMPTY,Value::Bool(b)=>Node{u:Data{flag:i32::from(*b)},format:3},Value::Number(n)=>if let Some(i)=n.as_i64(){Node{u:Data{int64:i},format:4}}else{Node{u:Data{double:n.as_f64().ok_or("Invalid number")?},format:5}},Value::String(s)=>{strings.push(c(s)?);Node{u:Data{string:strings.last().ok_or("Missing string")?.as_ptr()as*mut c_char},format:1}},_=>return Err("Unsupported structured mpv argument".into())})}
+ fn request(&self,args:Value)->Result<Value,String>{let args=args.as_array().ok_or("mpv arguments must be an array")?;let name=args.first().and_then(Value::as_str).ok_or("Missing mpv command")?;let mut output=EMPTY;let mut strings=Vec::new();
+  let code=match name{
+   "get_property"=>{let key=c(args.get(1).and_then(Value::as_str).ok_or("Missing property")?)?;unsafe{(self.get)(self.ctx,key.as_ptr(),6,&mut output as*mut Node as*mut c_void)}},
+   "set_property"=>{let key=c(args.get(1).and_then(Value::as_str).ok_or("Missing property")?)?;let mut node=Self::input(args.get(2).ok_or("Missing value")?,&mut strings)?;unsafe{(self.set)(self.ctx,key.as_ptr(),6,&mut node as*mut Node as*mut c_void)}},
+   "observe_property"=>{let key=c(args.get(2).and_then(Value::as_str).ok_or("Missing property")?)?;unsafe{(self.observe)(self.ctx,args.get(1).and_then(Value::as_u64).ok_or("Missing observer id")?,key.as_ptr(),6)}},
+   "unobserve_property"=>unsafe{(self.unobserve)(self.ctx,args.get(1).and_then(Value::as_u64).ok_or("Missing observer id")?)},
+   _=>{let mut nodes=args.iter().map(|v|Self::input(v,&mut strings)).collect::<Result<Vec<_>,_>>()?;let mut list=List{num:nodes.len().try_into().map_err(|_|"Too many arguments")?,values:nodes.as_mut_ptr(),keys:std::ptr::null_mut()};let mut input=Node{u:Data{list:&mut list},format:7};unsafe{(self.command)(self.ctx,&mut input,&mut output)}}
+  };let result=self.ok(code).and_then(|_|unsafe{decode(&output,0)});unsafe{(self.free)(&mut output)};result
+ }
+ fn event(&self)->Result<Value,String>{let event=unsafe{(self.wait)(self.ctx,0.01)};if event.is_null(){return Ok(Value::Null);}let mut node=EMPTY;let code=unsafe{(self.event_node)(&mut node,event)};let result=self.ok(code).and_then(|_|unsafe{decode(&node,0)});unsafe{(self.free)(&mut node)};result}
+}
+// SAFETY: only called while libmpv owns the complete node tree; values are copied before it is freed.
+unsafe fn decode(node:&Node,depth:usize)->Result<Value,String>{if depth>32{return Err("libmpv node nesting limit".into());}Ok(match node.format{0=>Value::Null,1=>{let p=unsafe{node.u.string};if p.is_null(){Value::Null}else{json!(unsafe{CStr::from_ptr(p)}.to_string_lossy())}},3=>json!(unsafe{node.u.flag}!=0),4=>json!(unsafe{node.u.int64}),5=>json!(unsafe{node.u.double}),7|8=>{let p=unsafe{node.u.list};if p.is_null(){return Ok(Value::Null);}let list=unsafe{&*p};if list.num<0||list.num>100000||list.num>0&&list.values.is_null(){return Err("Invalid libmpv list".into());}let values=if list.num==0{&[][..]}else{unsafe{std::slice::from_raw_parts(list.values,list.num as usize)}};if node.format==7{Value::Array(values.iter().map(|v|unsafe{decode(v,depth+1)}).collect::<Result<_,_>>()?)}else{if list.num>0&&list.keys.is_null(){return Err("Invalid libmpv map".into());}let mut out=serde_json::Map::new();for(i,v)in values.iter().enumerate(){let key=unsafe{*list.keys.add(i)};if key.is_null(){return Err("Invalid libmpv map key".into());}out.insert(unsafe{CStr::from_ptr(key)}.to_string_lossy().into_owned(),unsafe{decode(v,depth+1)}?);}Value::Object(out)}},_=>Value::Null})}
+
+pub(super) fn start(app:AppHandle,path:PathBuf,hwnd:isize,fonts:PathBuf,exe:PathBuf,mut rx:mpsc::UnboundedReceiver<super::mpv::Request>,stopped:Arc<AtomicBool>){
+ std::thread::spawn(move||{let result=Api::open(&path,hwnd,&fonts,&exe);let api=match result{Ok(api)=>api,Err(e)=>{let _=app.emit("mpv-error",format!("Experimental libmpv: {e}. Remove LUNA_LIBMPV_DLL to use mpv.exe."));return;}};let _=app.emit("mpv-ready",());let mut last_time=std::time::Instant::now();while !stopped.load(Ordering::SeqCst){crate::mpv::disable_child(hwnd);for _ in 0..32{match rx.try_recv(){Ok(request)=>{if !request.reply.is_closed(){let _=request.reply.send(api.request(request.args));}},Err(mpsc::error::TryRecvError::Empty)=>break,Err(mpsc::error::TryRecvError::Disconnected)=>return,}}
+   match api.event(){Ok(value)=>{if value["event"]=="none"||value.is_null(){continue;}if value["event"]=="shutdown"{let _=app.emit("mpv-error","Experimental libmpv stopped; restart Luna.");break;}if value["event"]=="property-change"{match value["name"].as_str().unwrap_or(""){"sub-text"=>crate::forward_sub_text(&app,value["data"].as_str().unwrap_or("")),"sub-delay"=>{crate::pgs::set_delay(value["data"].as_f64().unwrap_or(0.0));crate::forward_pgs(&app);},"time-pos"=>{crate::pgs::set_time(value["data"].as_f64().unwrap_or(0.0));crate::forward_pgs(&app);if last_time.elapsed()<std::time::Duration::from_millis(200){continue;}last_time=std::time::Instant::now();},_=>()}}if value["event"]=="start-file"||value["event"]=="seek"{last_time-=std::time::Duration::from_secs(1);}let _=app.emit("mpv",value);},Err(e)=>{let _=app.emit("mpv-error",e);break;}}
+ } });
+}

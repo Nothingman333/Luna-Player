@@ -1,0 +1,20 @@
+import {useEffect,useState} from "react";
+import {gpuCapabilities,rememberHardware,systemProfile} from "./hardwareProfile";
+import type {SystemProfile} from "./hardwareProfile";
+import {lang} from "./i18n";
+const text=(tr:string,en:string)=>lang()==="tr"?tr:en;
+export function HardwareCapabilities(){
+ const [profile,setProfile]=useState<SystemProfile|null>(null),[error,setError]=useState(""),[busy,setBusy]=useState(true);
+ const scan=(refresh=false)=>{setBusy(true);setError("");void systemProfile(refresh).then(p=>{setProfile(p);rememberHardware(p);}).catch(()=>setError(text("Donanım kontrolü tamamlanamadı. CPU ve kapalı GPU efektleri güvenli varsayılanlardır.","Hardware check could not finish. CPU and disabled GPU effects are the conservative defaults."))).finally(()=>setBusy(false));};
+ useEffect(()=>{scan();},[]);
+ const caps=gpuCapabilities(profile?.gpus??null);
+ const rows=[
+ ["Whisper · CPU",text("Intel / AMD / NVIDIA sistemlerde CPU motoru kullanılabilir; model ve uyumlu whisper.cpp motoru gerekir. CUDA zorunlu değil.","CPU transcription works on Intel / AMD / NVIDIA systems with a compatible whisper.cpp engine and model. CUDA is optional.")],
+ ["Whisper · CUDA",caps.nvidia?text("NVIDIA algılandı. CUDA motoru ve uyumlu sürücü gerekir; kurulum tek başına çalışma garantisi değildir.","NVIDIA detected. Requires the CUDA engine and a compatible driver; detection alone does not certify support."):text("NVIDIA algılanmadı. CPU sürümünü kullan; Intel/AMD GPU CUDA çalıştırmaz.","No NVIDIA GPU detected. Use the CPU engine; Intel/AMD GPUs cannot run CUDA.")],
+ ["Anime4K / mpv",text("Luna içinden shader indirilebilir. Farklı üreticilerin uyumlu GPU/sürücülerinde çalışır; performans çözünürlüğe bağlıdır.","Shaders can be downloaded inside Luna. Requires a compatible GPU/driver; performance depends on resolution.")],
+ ["NVIDIA / Intel VSR",text("İlgili üreticinin desteklediği kart, sürücü ve D3D11 gerekir. Marka algılama destek doğrulaması değildir. AMD için bu VSR modları uygun değil.","Requires a supported GPU from the selected vendor, driver and D3D11. Vendor detection is not a support test. These VSR modes do not apply to AMD.")],
+ ["Lossless Scaling",profile?.lossless?text("Kurulu algılandı. Ayrı Steam uygulaması; gerçek kare üretimi seçenekleri burada bulunur.","Installation detected. Separate Steam app; its frame generation options are available here."):text("Ayrı ücretli Steam uygulaması gerekir; Luna içi Anime4K için gerekli değildir.","Requires the separate paid Steam app; it is not required for Luna's Anime4K.")],
+ [text("OCR ve dış bağlantılar","OCR and external integrations"),text("PGS OCR: Windows OCR dil paketi. Anki: yerel AnkiConnect. SongRec/Demucs: ayrı CLI/model. Çevrim içi AI ve kataloglar: servis erişimi/anahtar. Bunlar GPU tespitiyle hazır sayılmaz.","PGS OCR needs a Windows OCR language pack. Anki needs local AnkiConnect. SongRec/Demucs need separate CLIs/models. Online AI/catalogs need service access/keys. GPU detection does not install these dependencies.")]
+ ];
+ return <section className="set-card"><h3>{text("Bu bilgisayarda kullanılabilenler","Features on this computer")}</h3>{busy&&<p role="status"><span className="spinner"/> {text("Donanım taranıyor…","Scanning hardware…")}</p>}{profile&&<p className="set-hint">{profile.gpus.join(" · ")||text("GPU bilgisi alınamadı","GPU information unavailable")}{profile.memoryGb?" · "+profile.memoryGb+" GB RAM":""}</p>}{error&&<p role="status">{error}</p>}<div className="capability-list">{rows.map(([title,description])=><div key={title}><b>{title}</b><small>{description}</small></div>)}</div><p className="set-hint">{text("İsteğe bağlı GPU efektleri kendiliğinden açılmaz. Kaydettiğin seçimler korunur; RAM bilgisine göre base/small modeli ve uygun motor önerilir.","Optional GPU effects stay off by default. Saved choices are preserved; RAM guides the base/small model and engine suggestions.")}</p><button className="chip" disabled={busy} onClick={()=>scan(true)}>{text("Yeniden tara","Scan again")}</button></section>;
+}

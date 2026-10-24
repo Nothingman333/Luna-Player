@@ -105,12 +105,14 @@ struct Job {
 }
 impl Job {
     fn start(app: &AppHandle, id: u64) -> Result<Job, String> {
-        let mut jobs = JOBS.lock().unwrap();
+        let mut jobs = JOBS.lock().unwrap_or_else(|e| e.into_inner());
         if jobs.contains_key(&id) {
             return Err(tr!("Bu iş zaten çalışıyor", "This task is already running"));
         }
         let flag = Arc::new(AtomicBool::new(false));
         jobs.insert(id, flag.clone());
+        drop(jobs);
+        if crate::live_captions::job_cancelled(id){flag.store(true,Ordering::SeqCst);}
         Ok(Job { id, flag, app: app.clone() })
     }
     fn cancelled(&self) -> bool {
@@ -123,7 +125,7 @@ impl Job {
 }
 impl Drop for Job {
     fn drop(&mut self) {
-        JOBS.lock().unwrap().remove(&self.id);
+        JOBS.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.id);
     }
 }
 
@@ -134,7 +136,7 @@ fn cancelled_msg() -> String {
 /// Stops a running studio task (download, audio extraction, transcription, sync).
 #[tauri::command]
 pub fn studio_cancel(job: u64) {
-    if let Some(f) = JOBS.lock().unwrap().get(&job) {
+    if let Some(f) = JOBS.lock().unwrap_or_else(|e| e.into_inner()).get(&job) {
         f.store(true, Ordering::Relaxed);
     }
 }
@@ -148,16 +150,7 @@ fn cache_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 /// A stable name for cached results of one file (path, size and modification time).
 fn file_key(path: &str) -> String {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    path.to_lowercase().hash(&mut h);
-    if let Ok(m) = std::fs::metadata(path) {
-        m.len().hash(&mut h);
-        if let Ok(t) = m.modified() {
-            t.hash(&mut h);
-        }
-    }
-    format!("{:016x}", h.finish())
+    crate::stable_cache::file_key("studio", path, b"")
 }
 
 /// Writes `bytes` to `dest` through a temporary file in the same folder, so a crash never leaves
@@ -971,4 +964,38 @@ pub async fn make_clip(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Piecewise alignment against a subtitle already synchronized to this film.
+#[tauri::command]
+pub async fn studio_align_reference(app: AppHandle, job: u64, reference: Vec<crate::subtitle_align::Span>, subtitle: Vec<crate::subtitle_align::Span>, penalty: f64) -> Result<crate::subtitle_align::Alignment, String> {
+    let j = Job::start(&app, job)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        if j.cancelled() { return Err(cancelled_msg()); }
+        j.emit("align", None, "");
+        let result = crate::subtitle_align::align_reference(reference, subtitle, penalty);
+        if j.cancelled() { return Err(cancelled_msg()); }
+        result
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn studio_ocr(app: AppHandle, job: u64, video: String, track: u64, language: String) -> Result<String,String> {
+    if video.contains("://")||!Path::new(&video).is_file(){return Err("PGS OCR requires a local MKV file".into());}
+    let j=Job::start(&app,job)?;let cache=app.path().app_cache_dir().map_err(|e|e.to_string())?.join("pgs");
+    let input=video.clone();let code=language.clone();
+    let (text,j)=tauri::async_runtime::spawn_blocking(move||{
+        let decoded={let _guard=crate::pgs::LOAD_WORKER.lock().unwrap_or_else(|e|e.into_inner());crate::pgs::load(&input,track,&cache,&|pct|j.emit("decode",Some(pct as f64),""),&||j.cancelled())?};
+        let reader=crate::ocr::Reader::new(&code)?;let mut found=HashMap::<String,String>::new();let mut srt=String::new();let mut count=0;
+        fn timestamp(seconds:f64)->String{let ms=(seconds.max(0.0)*1000.0).round() as u64;format!("{:02}:{:02}:{:02},{:03}",ms/3600000,ms/60000%60,ms/1000%60,ms%1000)}
+        for (i,cue) in decoded.cues.iter().enumerate(){
+            if j.cancelled(){return Err(cancelled_msg());}let mut pics=cue.pics.iter().collect::<Vec<_>>();pics.sort_by(|a,b|a.y.total_cmp(&b.y).then_with(||a.x.total_cmp(&b.x)));
+            let mut lines=Vec::new();for pic in pics{if j.cancelled(){return Err(cancelled_msg());}let text=if let Some(text)=found.get(&pic.file){text.clone()}else{let text=reader.recognize(Path::new(&pic.file))?;found.insert(pic.file.clone(),text.clone());text};if !text.trim().is_empty(){lines.push(text.trim().to_string());}}
+            if !lines.is_empty()&&cue.end>cue.start{count+=1;srt.push_str(&format!("{}\n{} --> {}\n{}\n\n",count,timestamp(cue.start),timestamp(cue.end),lines.join("\n")));}
+            j.emit("ocr",Some((i+1) as f64/decoded.cues.len().max(1) as f64*100.0),"");
+        }
+        if j.cancelled(){return Err(cancelled_msg());}if count==0{return Err("No readable subtitle text was found".into());}Ok((srt,j))
+    }).await.map_err(|e|e.to_string())??;
+    if j.cancelled(){return Err(cancelled_msg());}
+    subtitle_save(app,video,format!("{language}.ocr"),text).await
 }

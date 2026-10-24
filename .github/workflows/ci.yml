@@ -20,8 +20,8 @@ jobs:
     name: Interface (tsc, build, texts)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
           cache: npm
@@ -32,63 +32,28 @@ jobs:
       - name: Type check and build
         working-directory: app
         run: npm run build
+      - name: Lint
+        working-directory: app
+        run: npm run lint
       - name: Every text has English
         run: node app/scripts/i18n-check.cjs
-      - name: Storage, playback and catalog regressions
+      - name: Application regressions (single entry point)
         working-directory: app
-        run: npm run test:regression
-      - name: Film workspace and additional playback regressions
-        working-directory: app
-        run: npm run test:next
-      - name: Browser, translation and film behaviour checks
-        working-directory: app
-        run: |
-          npm run test:browser
-          npm run test:translation
-          npm run test:film-browser
-          npm run test:extras
-          npm run test:books-profiles
-          npm run test:book-music
-          npm run test:delivery
-          npm run test:assistant-presentation
-          npm run test:workspace
-          npm run test:deep-refinement
-          npm run test:comfort
-          npm run test:reading-experience
-          npm run test:music-workspace
-          npm run test:book-library-view
-          npm run test:quality
-          npm run test:assistant-safety
-          npm run test:claude-integration
-          npm run test:browser-native
-          npm run test:web-notebook
-          npm run test:web-plus
-          npm run test:browser-suggest
-          npm run test:browser-reader
-          npm run test:browser-magic
-          npm run test:everyday
-          npm run test:assistant-actions
-          npm run test:quality-30
-          npm run test:quality-50
-          npm run test:debug
-          npm run test:extras-plus
-          npm run test:subtitle-studio
-          npm run test:shell-extras
-          npm run test:creative
-          npm run test:library
-          npm run test:round-50
-          npm run test:unified
+        run: npm test
 
   rust:
     name: Rust (build, tests)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: app/src-tauri
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
           cache: npm
@@ -108,3 +73,21 @@ jobs:
       - name: Unit tests
         working-directory: app/src-tauri
         run: cargo test --lib
+      - name: Clippy
+        working-directory: app/src-tauri
+        run: cargo clippy --locked --lib --tests
+
+  audit:
+    name: Rust dependency advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0
+        with:
+          toolchain: stable
+          components: clippy
+      - name: Install advisory checker
+        run: cargo install cargo-audit --locked
+      - name: Audit locked dependencies
+        working-directory: app/src-tauri
+        run: cargo audit

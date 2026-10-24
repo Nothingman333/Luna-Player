@@ -3,7 +3,7 @@
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict'), ts = require('typescript');
 const root = path.resolve(__dirname, '..');
 const tsOpts = { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React } };
-const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
+const read = (f) => require('./production-source.cjs').read(path.join(root, f));
 function load(file, mods = {}) {
   const m = { exports: {} };
   const js = ts.transpileModule(read(file), tsOpts).outputText;

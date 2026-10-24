@@ -109,3 +109,20 @@ export function emptyAnswerReason(meta: AnswerMeta | undefined, tr: boolean): st
   if (meta?.reasoningOnly) return tr ? "Model yalnız düşünme çıktısı döndürdü, yanıt metni yok. Başka bir model seç ya da çıktı sınırını artır." : "The model returned only reasoning output and no answer text. Pick another model or raise its output limit.";
   return undefined;
 }
+
+/** The JSON object in a model's text answer: a ```json fence is preferred, otherwise the outermost {…}.
+ *  Throws a clear error (not "Unexpected end of JSON input") when there is none or it does not parse. */
+export function extractJsonObject(text: unknown): any {
+  const raw = String(text ?? "").replace(/^\uFEFF/, "");
+  const fenced = raw.match(/```(?:json)?\s*\r?\n([\s\S]*?)\r?\n?```/i)?.[1];
+  for (const candidate of [fenced, raw]) {
+    if (!candidate) continue;
+    const start = candidate.indexOf("{"), end = candidate.lastIndexOf("}");
+    if (start < 0 || end <= start) continue;
+    try {
+      const value = JSON.parse(candidate.slice(start, end + 1));
+      if (value && typeof value === "object" && !Array.isArray(value)) return value;
+    } catch { /* try the next candidate */ }
+  }
+  throw new Error(/[{}]/.test(raw) ? "The AI answer's JSON could not be read" : "The AI answer had no JSON");
+}

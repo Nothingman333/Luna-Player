@@ -1,5 +1,5 @@
 import { SEARCH_BANGS, bangHome } from "./browserSearch";
-import { browserAddress } from "./browserModel";
+import { browserAddress, wellFormed } from "./browserModel";
 
 /**
  * Luna Web search: which engine answers plain words, and the "!" shortcuts that jump straight to a
@@ -54,16 +54,17 @@ export function parseBang(input: string): { bang: Bang; query: string } | null {
   const text = input.trim();
   const lead = /^!([\p{L}\p{N}]+)(?:\s+([\s\S]*))?$/u.exec(text), tail = /^([\s\S]*?)\s+!([\p{L}\p{N}]+)$/u.exec(text);
   const [key, query] = lead ? [lead[1], lead[2] ?? ""] : tail ? [tail[2], tail[1]] : ["", ""];
-  const wanted = key.toLocaleLowerCase("en-US"), canonical = SEARCH_BANGS.find(b => (b.aliases ?? []).includes(wanted))?.key ?? wanted;
+  const wanted = key.toLocaleLowerCase("en-US").replace(/\u0307/g, "").replace(/ı/g, "i"), canonical = SEARCH_BANGS.find(b => (b.aliases ?? []).includes(wanted))?.key ?? wanted;
   const bang = key ? BANGS.find(b => b.key === canonical) : undefined;
   return bang ? { bang, query: query.trim() } : null;
 }
 
 /** What the address bar opens for this text: a bang target, an address, or a search with the chosen engine. */
 export function resolveWebInput(input: string, engine: SearchEngine, tr: boolean): string {
-  const hit = parseBang(input);
+  const clean = wellFormed(input);
+  const hit = parseBang(clean);
   if (hit) return browserAddress(hit.query ? hit.bang.search(hit.query, tr) : hit.bang.home(tr));
-  return browserAddress(input, engine.search);
+  return browserAddress(clean, engine.search);
 }
 
 /** The words of a results page this engine (or a bang site) made, to show instead of a long URL. */
@@ -71,7 +72,8 @@ export function searchedWords(url: string): string | null {
   try {
     const u = new URL(url), host = u.hostname.replace(/^www\./, "");
     const key = host === "yandex.com" ? "text" : host === "youtube.com" ? "search_query" : host === "themoviedb.org" ? "query" : /(^|\.)wikipedia\.org$/.test(host) ? "search" : "q";
-    const isResults = /(^|\.)(google\.[a-z.]+|bing\.com|duckduckgo\.com|search\.brave\.com|startpage\.com|ecosia\.org|yandex\.com|kagi\.com)$/.test(host)
+    const isResults = (/(^|\.)google\.[a-z.]+$/.test(host) && u.pathname === "/search")
+      || /(^|\.)(bing\.com|duckduckgo\.com|search\.brave\.com|startpage\.com|ecosia\.org|yandex\.com|kagi\.com)$/.test(host)
       || (host === "youtube.com" && u.pathname === "/results") || (host === "themoviedb.org" && u.pathname.startsWith("/search"))
       || (/(^|\.)wikipedia\.org$/.test(host) && u.pathname === "/w/index.php");
     const words = isResults ? u.searchParams.get(key) : null;

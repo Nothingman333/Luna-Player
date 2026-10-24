@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-const BOOK_EXT: &[&str] = &["epub", "pdf", "cbz"];
+const BOOK_EXT: &[&str] = &["epub", "pdf", "cbz", "mobi", "azw3", "fb2"];
 const IMG_EXT: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "avif"];
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -37,7 +37,7 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>, depth: u32) {
     for e in entries.flatten() {
         let p = e.path();
         if p.is_dir() {
-            if depth < 8 {
+            if depth < 8 && !crate::stable_cache::skip_directory(&p) {
                 walk(&p, out, depth + 1);
             }
         } else if BOOK_EXT.contains(&ext(&p).as_str()) {
@@ -47,10 +47,7 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>, depth: u32) {
 }
 
 fn hash(s: &str) -> String {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    s.hash(&mut h);
-    format!("{:016x}", h.finish())
+    crate::stable_cache::key(&[b"books", s.as_bytes()])
 }
 
 /// XML text: the named entities and numeric ones (`&#233;`, `&#xE9;`).
@@ -60,7 +57,11 @@ fn unescape(s: &str) -> String {
     while let Some(i) = rest.find('&') {
         out.push_str(&rest[..i]);
         let tail = &rest[i..];
-        let semi = tail[..tail.len().min(12)].find(';');
+        // look at most 12 bytes ahead, cut on a character boundary (a Turkish letter right after "&"
+        // used to split a multi-byte character here and panic, failing the whole book scan)
+        let mut lim = tail.len().min(12);
+        while !tail.is_char_boundary(lim) { lim -= 1; }
+        let semi = tail[..lim].find(';');
         let ch = semi.and_then(|j| {
             let name = &tail[1..j];
             match name {
@@ -121,7 +122,9 @@ fn text_of(xml: &str, name: &str) -> Option<String> {
         let i = at + xml[at..].find('<')?;
         let tag = &xml[i + 1..];
         let tname = tag.split(|c: char| c.is_whitespace() || c == '>' || c == '/').next().unwrap_or("");
-        if tname.rsplit(':').next() == Some(name) && !tname.starts_with('/') {
+        // An empty element has no text; continue to a later nonempty title/creator.
+        let empty = tag.find('>').is_some_and(|g| tag[..g].trim_end().ends_with('/'));
+        if tname.rsplit(':').next() == Some(name) && !tname.starts_with('/') && !empty {
             break i;
         }
         at = i + 1;
@@ -253,7 +256,7 @@ fn epub_meta(p: &Path) -> Option<Meta> {
 
 /// A zip that is really a book: an EPUB with its package, or a comic with at least one page.
 fn zip_has_book(bytes: &[u8], kind: &str) -> bool {
-    if kind == "pdf" {
+    if matches!(kind,"pdf"|"mobi"|"azw3"|"fb2") {
         return true;
     }
     let Ok(mut z) = zip::ZipArchive::new(std::io::Cursor::new(bytes)) else { return false };
@@ -416,6 +419,10 @@ fn sniff(bytes: &[u8], content_type: &str, hint: &str) -> Result<&'static str, S
     let head = &bytes[..bytes.len().min(200)];
     let found = if bytes.starts_with(b"%PDF") {
         "pdf"
+    } else if head.get(60..68)==Some(b"BOOKMOBI") {
+        if hint=="azw3" {"azw3"} else {"mobi"}
+    } else if String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]).contains("<FictionBook") {
+        "fb2"
     } else if bytes.starts_with(b"PK") {
         if head.windows(20).any(|w| w == b"application/epub+zip") || hint == "epub" || content_type.contains("epub") { "epub" } else { "cbz" }
     } else {
@@ -523,8 +530,22 @@ mod tests {
         }
     }
     #[test]
+    fn entity_text_never_cuts_a_multibyte_character() {
+        assert_eq!(unescape("&amp;日本語の小説"), "&日本語の小説");
+        assert_eq!(unescape("AT&T Telekom İstanbul"), "AT&T Telekom İstanbul");
+        assert_eq!(unescape("三体 &amp; 黑暗森林 &#x2605;"), "三体 & 黑暗森林 ★");
+    }
+    #[test]
+    fn an_empty_title_element_is_not_a_title() {
+        assert_eq!(text_of(r#"<metadata><dc:title/><dc:creator>Bob</dc:creator></metadata>"#, "title"), None);
+        assert_eq!(text_of(r#"<metadata><dc:title /><dc:title>Real</dc:title></metadata>"#, "title").as_deref(), Some("Real"));
+    }
+    #[test]
     fn reads_xml_text() {
         assert_eq!(unescape("Caf&#233; &amp; &#xE9;t&eacute;"), "Café & ét&eacute;");
+        // a multi-byte letter across the 12-byte look-ahead must not panic
+        assert_eq!(unescape("A&çççççç"), "A&çççççç");
+        assert_eq!(unescape("Suç&ççç&amp;"), "Suç&ççç&");
         let opf = r#"<package xmlns:d="http://purl.org/dc/elements/1.1/"><metadata><d:title>A &#38; B</d:title><d:creator>Me</d:creator></metadata></package>"#;
         assert_eq!(text_of(opf, "title").as_deref(), Some("A & B"));
         assert_eq!(text_of(opf, "creator").as_deref(), Some("Me"));

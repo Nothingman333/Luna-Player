@@ -1,3 +1,102 @@
+## 1.8.2C — 2026-10-24
+
+- F3 geliştirici girişi, yerel şifre kurulumu ve 30 dakikalık kilitli oturum eklendi.
+- Alt+D not ve ekran görüntüsü paneli, Luna/tüm ekran çekimi, çizim/alan işaretleme ve okunabilir rapor dosyaları eklendi.
+- Dış kaynaklı yenilik maddeleri kaynak etiketiyle kaynaklarını sonunda gösterir; eski bilinmeyen kayıtlar tahminle etiketlenmez.
+
+## 1.8.1C — 2026-10-24
+
+- Kitap defterine okuyucuyla ortak sayfa/konum notları, not düzenleme ve kayıtlı yere dönüş eklendi.
+- Film ayrıntısında Altyazı ekle üç nokta menüsüne taşındı.
+
+## 1.8.0C — 2026-10-24
+
+- Kitap ve film defteri düğmeleri ana eylem satırına yuvarlak ikon olarak alındı; diğer defter girişleri kaldırıldı.
+
+## 1.7.9C — 2026-10-24
+
+- Kitaplık filtreleri tek panelde toplandı; sıralama açılır seçim oldu, mükerrer raf düzenleme kaldırıldı.
+- Zevk profili kayıtları aranabilir, sanatçıyı ayrı satırda gösteren listeye dönüştü.
+
+## 1.7.8C — 2026-10-24 — İzleme seçenekleri ve yıldızlar
+
+- Kalabalık izleme seçeneklerinde üst üste duran daireler aynı satırda sağa kayarak açılır ve geri toplanır. Ayrı menü, yinelenen seçenekler ve kaydırma okları kaldırıldı.
+
+- Öneri ve Keşfet ayrıntılarına seçili ülkenin Nerede izlenir bilgisi eklendi. Letterboxd puanları boş ve yarım yıldızları destekleyen sabit beş yıldızla gösterilir.
+
+- Kitabın altı hazır asistan sorusu kapak/raf/defter düğmelerinin yanında doğrudan görünür; ayrı soru penceresi kaldırıldı.
+
+## 1.7.7C — 2026-10-24 — Defterler, tercihler ve profil kayıtları
+
+- Film/kitap defteri ve internetsiz yorum taraması geniş açılır pencerelere taşındı. Kitap ayrıntısına Asistana sor eklendi.
+- Analizden önce zevk tercihleri açılır; Analize başla ile işlem başlar. Alttaki ayrı tercih alanları kaldırıldı.
+- Kitap filtreleri Tümü ile başlar; seçili filtreye tekrar basınca Tümü olur. Boş beğeni alanlarındaki emoji yönergeleri sadeleştirildi.
+- Kitap ve müzik profil sayılarından ilgili kayıtlara erişilir. Kitap ayrıntısında müzik çubuğu için alt boşluk bırakıldı.
+- Sağlayıcılar sabit yükseklikte yatay açılır; sığmayan seçenekler oklarla gezilir. TMDB etiketi sol alta taşındı.
+
+## 1.7.6C — Analiz, benzerler ve film ayrıntısı
+
+- Luna Analiz küçültülebilir; film defterinde simgeli beğeni düğmeleri tekrar basılınca seçimi kaldırır.
+- Benzerler ilk görünümde en çok beş eser; TMDB önerileriyle tamamlama ve daha fazla arama eklendi.
+- Kaynak bilgisi TMDB ipucunda; dosya/altyazı bilgisi menüde; ayrıntıda kalan süre gösterilir.
+- TMDB afiş etiketi sağ üstte ve diğer rozetlere alan bırakarak gösterilir; sağlayıcı açılma animasyonu belirginleştirildi.
+
+## 1.7.5C — Analiz menüsü ve film ayrıntısı yerleşimi
+
+- Analiz seçenekleri iki eşit menü satırında; ayarlar ayrı görünümde açılır.
+- Sağlayıcı seçenekleri satır içinde yana açılır, alt metnin üstüne binmez.
+- Kaynak bilgisi TMDB bilgilerinin altına; Bilgileri düzenle üç nokta menüsüne taşındı.
+
+## 1.7.4C — Analiz seçenekleri ve birikimli yenilikler
+
+- Analiz odağı metni açıklığa kavuşturuldu; üç nokta menüsünde analiz ayarları ve internetsiz tarama toplandı.
+- Film sayfasındaki iki mükerrer kısayol kaldırıldı. Zevk tercihleri varsayılan kapalı; önem 5 üzerinden gösterilir.
+- Yenilik penceresi son görülen sürümden güncel sürüme kadar bütün kayıtlı değişiklikleri listeler.
+
+## 1.7.3C — Birleşik film defteri ve kompakt sağlayıcılar
+
+- İzledikten sonra ve sahne/kelime defteri mevcut tasarımda sekmelerle birleştirildi; kayıtlar ve oynatıcı defteri korunur.
+- Oyuncular Luna Analiz’in hemen üstüne alındı. Kalabalık sağlayıcı grupları üst üste dairesel logolarla açılır; bütün seçenekler erişilebilir.
+- Görüntü/Ses başlığındaki dikdörtgen zemin farkı düzeltildi. Yerel tarama ve genel sayfa tasarımı korunur.
+- Yerel, yayımlanmamış sürüm. Ayrıntı: docs/LUNA-1.7.3C-DEFTER.md. Push Claude’da; kurulum paketi veya temizlik yapılmadı.
+
+## 1.7.2C — Oynatıcı, altyazı stüdyosu ve izleme ülkesi
+
+- Çarkta Görüntü/Ses sekmeleri; turuncu stüdyo düğmesi ve motor/model seçicili kompakt altyazı stüdyosu.
+- Alt mükerrer film defteri düğmesi kaldırıldı; üst düğmenin boş ipucu düzeltildi. Hatırlanan tercihler ve film serileri üç nokta menüsünden açılır.
+- AI token sayacı Hesaplar ve anahtarlar başına taşındı. Genel ayarlarda dilin yanında bağımsız izleme ülkesi ve tanıtım sonunda ülke sorusu eklendi.
+- JustWatch sonuçları ve önbelleği yalnız seçilen ülkeye aittir; farklı ülkeye geri düşmez. F11 bildirimi küçültülüp üst gezinme çubuğundan uzaklaştırıldı.
+- Yerel, yayımlanmamış sürüm. Kontroller ve sınırlar: docs/LUNA-1.7.2C-UI.md. Commit/push/release/kurulum paketi yok; push Claude’da.
+
+## 1.7.1C — Luna 2 PDF arayüz ve kullanım düzeltmeleri
+
+Kullanıcının onluk devir kuralıyla önceki yerel 1.6.11C numarası 1.7.1C olarak düzeltildi; özellikler aynı.
+
+UP/ses/altyazı düzeni, donanım/RAM rehberi, yerel AI token sayacı, elle altyazı arama, kompakt stüdyo, menü/yorum/afiş konumu, dizi bölüm sayıları ve sürüm yenilik penceresi. Ayrıntı ve sınırlar: docs/LUNA-1.6.11C-PDF.md.
+
+## 1.6.10C — 2026-10-23 (local, unreleased)
+- Merge the cumulative beta source package over local 1.6.9C without reverting SQLite, Foliate, playback clock, native safety or lazy views.
+- Add saved library filters/comparison, browser tab groups and notebook improvements, assistant/taste/text fixes and native book/frame fixes.
+- Integrate 54 regression commands into npm test; preserve existing dependencies, identity and updater configuration.
+- See docs/LUNA-1.6.10C-PAKET-BIRLESIMI.md for taken/skipped changes and actual verification. No commit, push, installer or release.
+
+## 1.6.9C — 2026-10-23 (local, unreleased)
+- Add SQLite persistence and subtitle FTS, SMTC, native gapless preparation and reusable metadata probe.
+- Add Foliate reader formats, reference alass/FPS alignment, Windows PGS OCR and AnkiConnect cards.
+- Add adblock, NFO matching, smart lists, rename preview/journal, hybrid filename parsing and Chromaprint skip candidates.
+- Add opt-in Syncplay, media server sources, stdio MCP, local live captions, recognition and vocal tool adapters.
+- Separate Music/Books/Mine/Taste views from runtime state, defer UI chunks, isolate the playback clock, add compiler/lint and regression coverage.
+- Add opt-in direct libmpv backend and local distribution/signing drafts. No DLL, SongRec/Demucs binary, installer, signing approval or release is bundled/claimed.
+- Details, feature limits and verification: `docs/LUNA-1.6.9C-UPGRADE.md`. GitHub publication remains with Claude.
+
+## 1.6.8C — 2026-10-23 (local, unreleased)
+- Validate mpv commands/options/filter graphs and enable CSP. Preserve existing playback controls and sound filters.
+- Apply film resume and track preferences as file options; acknowledge native IPC commands instead of restore timers.
+- Bound mpv restarts, restore playback state, throttle UI timestamps without dropping PGS timestamps, and use stable cache keys.
+- Recover poisoned locks, avoid unchanged state writes, skip protected scan folders, and declare file associations.
+- Add optional NVIDIA/Intel VSR, six lazy panels, woff2-only fonts, a regression entry point and CI checks.
+- See `docs/LUNA-1.6.8C-HARDENING.md` for verification and unfinished roadmap items. No installer or release created.
+
 ## Unreleased — Luna Web plus (new features and fixes, not yet released)
 - **Search:** pick Google, DuckDuckGo, Bing, Brave Search, Startpage or Ecosia (start page, remembered). Shortcuts in the address bar open a site's own search: `!yt`, `!w`, `!lb`, `!tmdb`, `!imdb`, `!gr`, `!1000k`, `!eksi`, `!r`, `!gh`, `!maps`, `!tr`, `!g`, `!ddg` (`!yt dune trailer`, or `dune trailer !yt`; a bare `!lb` opens the site; Wikipedia and Translate follow the interface language).
 - **Address bar:** suggestions as you type (a tab that is already open switches instead of opening twice, then favourites, history, past searches); arrows, Enter and Esc; Shift+Delete removes a history row; the text is selected on focus; when you are not editing, the host is emphasised and a results page shows the words searched; a warning icon marks plain http pages (not localhost).

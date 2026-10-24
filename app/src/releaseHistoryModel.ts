@@ -1,0 +1,2 @@
+export function versionNumber(raw:string){const m=/^(?:v)?(\d+)\.(\d+)\.(\d+)(?:[A-Z]+)?$/.exec(raw);return m?Number(m[1])*100+Number(m[2])*10+Number(m[3]):null;}
+export function unseenReleases<T extends {version:string}>(records:T[],seen:string|null,current:string):T[]{const end=versionNumber(current),start=seen?versionNumber(seen):null;if(end===null)return [];return records.filter(row=>{const n=versionNumber(row.version);return n!==null&&n<=end&&(start===null?n===end:n>start);}).sort((a,b)=>versionNumber(b.version)!-versionNumber(a.version)!);}

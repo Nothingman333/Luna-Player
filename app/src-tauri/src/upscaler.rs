@@ -177,11 +177,16 @@ fn get(block: &str, key: &str) -> Option<String> {
 
 fn set(block: &str, key: &str, val: &str) -> String {
     let esc = val.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-    if let (Some(a), Some(_)) = (block.find(&format!("<{key}>")), block.find(&format!("</{key}>"))) {
-        let start = a + key.len() + 2;
-        let end = block[start..].find(&format!("</{key}>")).unwrap() + start;
-        format!("{}{}{}", &block[..start], esc, &block[end..])
-    } else if let Some(a) = block.find(&format!("<{key} />")) {
+    let (open, close) = (format!("<{key}>"), format!("</{key}>"));
+    // the closing tag must come AFTER the opening one: a stray "</key>" earlier in the file used to make
+    // the unwrap here panic, and a panic ends the whole program (panic = "abort")
+    if let Some(a) = block.find(&open) {
+        let start = a + open.len();
+        if let Some(rel) = block[start..].find(&close) {
+            return format!("{}{}{}", &block[..start], esc, &block[start + rel..]);
+        }
+    }
+    if let Some(a) = block.find(&format!("<{key} />")) {
         format!("{}<{key}>{esc}</{key}>{}", &block[..a], &block[a + key.len() + 4..])
     } else {
         let end = block.rfind("</Profile>").unwrap_or(block.len());
@@ -466,6 +471,14 @@ pub mod win {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn set_survives_a_closing_tag_before_the_opening_one() {
+        // used to panic (unwrap on a missing closing tag after the opening one)
+        let out = set("</Mode> junk <Mode>", "Mode", "2");
+        assert!(out.contains("<Mode>2</Mode>"), "{out}");
+        assert_eq!(set("<A>1</A>", "A", "x&y"), "<A>x&amp;y</A>");
+    }
 
     #[test]
     fn profile_editing() {

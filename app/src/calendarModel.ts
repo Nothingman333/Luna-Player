@@ -2,12 +2,18 @@
 export type NextEp = { season: number; episode: number; name: string; date: string };
 export type Upcoming = NextEp & { key: string; title: string; poster: string | null; days: number };
 
+/** "2026-13-45" has the right shape but is no day: Date would roll it into the next year. */
+const realDate = (s: string) => {
+  const [y, m, d] = s.split("-").map(Number), t = new Date(Date.UTC(y, m - 1, d));
+  return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d;
+};
+
 /** TMDB's /tv/{id} answer → its next episode, or null (ended shows, no date yet, malformed). */
 export function parseNext(tv: unknown): NextEp | null {
   const n = (tv as { next_episode_to_air?: Record<string, unknown> | null })?.next_episode_to_air;
   if (!n || typeof n !== "object") return null;
   const date = String(n.air_date ?? ""), season = Number(n.season_number), episode = Number(n.episode_number);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isInteger(season) || !Number.isInteger(episode) || episode < 1) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !realDate(date) || !Number.isInteger(season) || !Number.isInteger(episode) || episode < 1) return null;
   return { season, episode, name: String(n.name ?? "").slice(0, 200), date };
 }
 

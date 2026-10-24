@@ -326,6 +326,7 @@ pub async fn browser_create(app: AppHandle, caller: Webview, id: u32, url: Strin
         // Optional signals: an older WebView2 runtime without them still browses normally.
         let _ = watch(&view, app.clone(), id);
         crate::browser_downloads::watch(&view, app.clone(), id)?;
+        let _ = crate::adblocking::watch(&view);
         view.hide().map_err(|e| e.to_string())?;
         started.store(true, Ordering::SeqCst);
         view.navigate(url).map_err(|e| e.to_string())

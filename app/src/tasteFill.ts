@@ -37,6 +37,9 @@ function pending(kind: Kind): Work[] {
 export const tasteGenres = (kind: Kind) => store.json<Record<string, string[]>>("tasteGenres:" + kind, {});
 
 let busy = false;
+let active:{kind:Kind;count:number}|null=null;
+export const tasteFillState=()=>active;
+const notifyFill=()=>window.dispatchEvent(new Event("luna-taste-measuring"));
 /** Scores the works that have none yet: at most two messages of twenty per run, at most every ten minutes. */
 export async function fillTaste(kind: Kind, force = false): Promise<number> {
   const stamp = "tasteFillAt:" + kind;
@@ -44,7 +47,7 @@ export async function fillTaste(kind: Kind, force = false): Promise<number> {
   if (!force && Date.now() - Number(store.get(stamp) ?? 0) < 10 * 60 * 1000) return 0;
   const todo = pending(kind).slice(0, 40);
   if (!todo.length) return 0;
-  busy = true;
+  busy = true;active={kind,count:todo.length};notifyFill();
   store.set(stamp, String(Date.now()));
   let done = 0;
   try {
@@ -68,7 +71,7 @@ export async function fillTaste(kind: Kind, force = false): Promise<number> {
       store.set("tasteGenres:" + kind, JSON.stringify(g));
     }
   } finally {
-    busy = false;
+    busy = false;active=null;notifyFill();
     if (done) window.dispatchEvent(new CustomEvent("film-decision-changed", { detail: { key: "fill:" + kind, origin: "fill" } }));
   }
   return done;

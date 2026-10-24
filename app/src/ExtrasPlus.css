@@ -89,9 +89,11 @@
 .lx-t { flex: none; min-width: 52px; color: var(--accent-soft); font-variant-numeric: tabular-nums; font-size: 13px; }
 .lx-pod-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
 .lx-pod-head h4 { margin: 0; }
+.lx-pod-retry,.lx-pod-pages { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0; font-size: 12px; color: var(--muted); }
+.lx-pod :is(button,input):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .lx-pod-q { flex: 1; min-width: 140px; height: 32px; padding: 0 12px; border-radius: 16px; border: 1px solid #3a3a42; background: transparent; color: var(--text); font-size: 13px; }
 .lx-pod-q:focus { outline: none; border-color: var(--accent); }
-.lx-cues { max-height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding-right: 4px; overscroll-behavior: contain; mask-image: linear-gradient(to bottom, transparent, #000 14px, #000 calc(100% - 14px), transparent); }
+.lx-cues { position: relative; max-height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding-right: 4px; overscroll-behavior: contain; mask-image: linear-gradient(to bottom, transparent, #000 14px, #000 calc(100% - 14px), transparent); }
 .lx-cues p { margin: 6px 10px; line-height: 1.6; color: #d0d0d6; }
 .lx-cue mark { background: rgba(var(--acc-rgb, 232, 112, 26), 0.35); color: var(--text); border-radius: 3px; padding: 0 1px; }
 
@@ -144,9 +146,9 @@ kbd.lx-k { display: inline-block; min-width: 20px; padding: 1px 6px; margin-righ
 .lx-set-ok { color: #6fd09a; font-size: 13px; }
 .lx-set-bad { color: #ff8a80; font-size: 13px; }
 .lx-cmds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.lx-cmds li { display: flex; align-items: baseline; gap: 10px; padding: 8px 12px; border-radius: 10px; background: rgba(255,255,255,0.04); }
+.lx-cmds li { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 8px 12px; border-radius: 10px; background: rgba(255,255,255,0.04); }
 .lx-cmds b { flex: none; color: var(--accent-soft); }
-.lx-cmds span { flex: 1; color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lx-cmds span { flex: 1; min-width: 100px; color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lx-set textarea { min-height: 70px; resize: vertical; }
 .lx-state { font-size: 12px; padding: 2px 8px; border-radius: 10px; color: var(--muted); background: rgba(255,255,255,0.06); font-weight: 500; }
 .lx-state.ok { color: #6fd09a; background: rgba(111,208,154,0.12); }

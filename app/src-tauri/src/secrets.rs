@@ -46,8 +46,13 @@ pub fn get(name: &str) -> Option<String> {
     }
     let v = unsafe {
         let r = &*c;
-        let bytes = std::slice::from_raw_parts(r.CredentialBlob, r.CredentialBlobSize as usize);
-        String::from_utf8(bytes.to_vec()).ok()
+        // a null or empty blob would make a slice from a null pointer (undefined behaviour)
+        if r.CredentialBlob.is_null() || r.CredentialBlobSize == 0 {
+            None
+        } else {
+            let bytes = std::slice::from_raw_parts(r.CredentialBlob, r.CredentialBlobSize as usize);
+            String::from_utf8(bytes.to_vec()).ok()
+        }
     };
     unsafe { CredFree(c as *mut c_void) };
     v

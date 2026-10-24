@@ -1,4 +1,8 @@
+mod dev_tools;
 mod cache_tools;
+mod database;
+mod subtitle_index;
+mod mcp_client;
 /// Messages in the UI language: `tr!("Türkçe {}", "English {}", arg)` (English unless the UI is Turkish).
 #[macro_export]
 macro_rules! tr {
@@ -17,25 +21,40 @@ fn set_lang(lang: String) {
 }
 
 mod browser;
+mod adblocking;
 mod browser_extensions;
 mod browser_downloads;
 mod extension_package;
 mod extension_signature;
 mod clipboard;
 mod files;
+mod nfo;
+mod ocr;
+mod anki;
+mod syncplay;
+mod media_sources;
+mod live_captions;
+mod audio_analysis;
+mod audio_fingerprint;
 mod preview;
+mod media_probe;
 mod fonts;
 mod indexers;
 mod letterboxd;
 mod kitap;
 mod books;
 mod mpv;
+mod libmpv_backend;
+mod mpv_policy;
+mod stable_cache;
 mod music;
 mod pgs;
 mod screen;
 mod secrets;
 mod shell;
 mod shell_core;
+mod media_controls;
+mod subtitle_align;
 mod studio;
 mod studio_core;
 mod subs;
@@ -46,7 +65,7 @@ mod wikisource;
 mod upscaler;
 mod yt;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter, Manager, RunEvent};
@@ -62,10 +81,12 @@ fn mpv_exe(app: &AppHandle) -> PathBuf {
 struct SysCheck {
     /// The bundled mpv is there and starts.
     mpv: bool,
-    /// Vulkan loader from the graphics driver (mpv needs it to start).
+    /// Optional Vulkan loader diagnostic; normal playback can use D3D11.
     vulkan: bool,
     /// Graphics cards, to point at the right driver download.
     gpus: Vec<String>,
+    #[serde(rename = "memoryGb")]
+    memory_gb: Option<u64>,
     /// Lossless Scaling (optional, for the upscaler).
     lossless: bool,
     webview: Option<String>,
@@ -84,12 +105,14 @@ async fn system_check(app: AppHandle) -> Result<SysCheck, String> {
             && std::process::Command::new(if com.exists() { &com } else { &exe })
                 .arg("--version").creation_flags(NO_WINDOW).output()
                 .map(|o| o.status.success()).unwrap_or(false);
-        let gpus = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", "(Get-CimInstance Win32_VideoController).Name"])
-            .creation_flags(NO_WINDOW).output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
-            .unwrap_or_default();
-        Ok(SysCheck { mpv, vulkan, gpus, lossless: upscaler::exe_path().is_some(), webview: tauri::webview_version().ok() })
+        let hardware = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; @{gpus=@((Get-CimInstance Win32_VideoController).Name);memoryGb=[uint64][math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1GB)} | ConvertTo-Json -Compress"])
+            .creation_flags(NO_WINDOW).output().ok()
+            .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok());
+        let gpus = hardware.as_ref().and_then(|v| v["gpus"].as_array())
+            .map(|rows| rows.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
+        let memory_gb = hardware.as_ref().and_then(|v| v["memoryGb"].as_u64());
+        Ok(SysCheck { mpv, vulkan, gpus, memory_gb, lossless: upscaler::exe_path().is_some(), webview: tauri::webview_version().ok() })
     })
     .await
 }
@@ -100,11 +123,35 @@ async fn blocking<T: Send + 'static>(
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())?
 }
 
+static MPV_TRANSACTION: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Preparing the next local song and all UI engine commands share one transaction gate.
+/// A film load therefore either replaces the prepared queue, or precedes a rejected stale request.
 #[tauri::command]
-fn mpv_command(args: Value) {
-    if let Some(m) = MPV.get() {
-        m.command(args);
-    }
+async fn music_queue_prepare(current: String, next: Option<String>, next_agent: Option<String>) -> Result<Option<i64>, String> {
+    let _guard = MPV_TRANSACTION.lock().await;
+    let engine = MPV.get().ok_or("Video engine is not initialized")?;
+    let path = engine.command(json!(["get_property", "path"])).await?;
+    if path.as_str() != Some(current.as_str()) { return Ok(None); }
+    engine.command(json!(["playlist-clear"])).await?;
+    let Some(next) = next else { return Ok(None); };
+    let remote=tauri::Url::parse(&next).ok().is_some_and(|u|matches!(u.scheme(),"http"|"https")&&u.username().is_empty()&&u.password().is_none());
+    if !remote && !std::path::Path::new(&next).is_file() { return Err("Next track is unavailable".into()); }
+    let mut options="vid=no,speed=1,loop-file=no".to_string();
+    if let Some(agent)=next_agent {if agent.len()>8192||agent.contains(['\0','\n','\r']){return Err("Invalid stream user agent".into());}options.push_str(&format!(",user-agent=%{}%{}",agent.len(),agent));}
+    engine.command(json!(["set_property", "gapless-audio", "weak"])).await?;
+    engine.command(json!(["loadfile", next, "append", -1, options])).await?;
+    let playlist = engine.command(json!(["get_property", "playlist"])).await?;
+    Ok(playlist.as_array().and_then(|rows| rows.iter().find(|row| row["current"] != true).and_then(|row| row["id"].as_i64())))
+}
+
+#[tauri::command]
+async fn mpv_command(args: Value) -> Result<Value, String> {
+    mpv_policy::validate(&args)?;
+    let _guard = MPV_TRANSACTION.lock().await;
+    let result=MPV.get().ok_or("Video engine is not initialized")?.command(args.clone()).await;
+    if result.is_ok(){syncplay::local_command(&args);if args[0]=="seek"||args[0]=="revert-seek"||args[1]=="chapter"{live_captions::seek();}}
+    result
 }
 
 /// File passed on the command line ("Open with…" / double click).
@@ -167,7 +214,7 @@ fn walk(dir: &std::path::Path, out: &mut Vec<String>, depth: u32) {
     for e in entries.flatten() {
         let p = e.path();
         if p.is_dir() {
-            if depth < 6 {
+            if depth < 6 && !stable_cache::skip_directory(&p) {
                 walk(&p, out, depth + 1);
             }
         } else if files::is_video(&p) && !is_sample(&p) {
@@ -422,19 +469,32 @@ async fn torrent_list() -> Vec<Value> {
 /// Sends a generateContent request to the Gemini API (from Rust, so no browser CORS issues).
 #[tauri::command]
 async fn gemini(key: String, model: String, body: Value) -> Result<Value, String> {
+    // a model id is one path segment ("gemini-2.5-flash"): anything else would change the address
+    if model.is_empty() || !model.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_')) {
+        return Err(tr!("Geçersiz model adı", "Invalid model name"));
+    }
     let url = format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent");
-    let res = reqwest::Client::new()
+    // the same limit as the other providers: a stalled connection used to keep the assistant waiting forever
+    let res = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(180))
+        .build()
+        .map_err(|e| e.to_string())?
         .post(url)
         .header("x-goog-api-key", key)
         .json(&body)
         .send()
         .await
-        .map_err(|e| tr!("Gemini'ye bağlanılamadı: {}", "Couldn't reach Gemini: {}", e))?;
+        .map_err(|e| tr!("Gemini'ye bağlanılamadı: {}", "Couldn't reach Gemini: {}", err_chain(&e)))?;
     let status = res.status();
-    let v: Value = res.json().await.map_err(|e| e.to_string())?;
+    let text = String::from_utf8_lossy(&read_capped(res,16*1024*1024).await?).into_owned();
+    // a proxy or gateway error page is not JSON: keep its status instead of a JSON parse error
+    let v: Value = serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({ "message": text.chars().take(300).collect::<String>() }));
     if !status.is_success() {
-        let msg = v["error"]["message"].as_str().map(str::to_string).unwrap_or_else(|| tr!("bilinmeyen hata", "unknown error"));
+        let msg = v["error"]["message"].as_str().or_else(|| v["message"].as_str()).map(str::to_string).unwrap_or_else(|| tr!("bilinmeyen hata", "unknown error"));
         return Err(tr!("Gemini hatası ({}): {}", "Gemini error ({}): {}", status, msg));
+    }
+    if !v.is_object() || v.get("message").is_some() && v.get("candidates").is_none() && v.as_object().is_some_and(|o| o.len() == 1) {
+        return Err(tr!("Gemini'nin yanıtı okunamadı", "Couldn't read Gemini's answer"));
     }
     Ok(v)
 }
@@ -466,6 +526,22 @@ fn err_chain(e: &dyn std::error::Error) -> String {
         s = x.source();
     }
     out
+}
+
+/// The body of `res`, read piece by piece and refused once it passes `cap` bytes: `bytes()` alone holds a
+/// server's whole answer in memory first when it sends no Content-Length (chunked), however large.
+pub(crate) async fn read_capped(mut res: reqwest::Response, cap: usize) -> Result<Vec<u8>, String> {
+    if res.content_length().is_some_and(|n| n > cap as u64) {
+        return Err(tr!("Yanıt çok büyük", "The answer is too big"));
+    }
+    let mut out = Vec::new();
+    while let Some(chunk) = res.chunk().await.map_err(|e| err_chain(&e))? {
+        if out.len() + chunk.len() > cap {
+            return Err(tr!("Yanıt çok büyük", "The answer is too big"));
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
 }
 
 #[tauri::command]
@@ -504,8 +580,10 @@ async fn llm_models(kind: String, url: String, key: String) -> Result<Vec<String
 async fn gemini_models(key: String) -> Result<Vec<(String, String)>, String> {
     let mut out = vec![];
     let mut page: Option<String> = None;
-    loop {
-        let mut req = reqwest::Client::new()
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(20)).build().map_err(|e| e.to_string())?;
+    // a misbehaving server repeating its page token must not loop forever
+    for _ in 0..20 {
+        let mut req = client
             .get("https://generativelanguage.googleapis.com/v1beta/models")
             .header("x-goog-api-key", &key)
             .query(&[("pageSize", "1000")]);
@@ -524,7 +602,7 @@ async fn gemini_models(key: String) -> Result<Vec<(String, String)>, String> {
             }
         }
         match v["nextPageToken"].as_str() {
-            Some(t) if !t.is_empty() => page = Some(t.to_string()),
+            Some(t) if !t.is_empty() && page.as_deref() != Some(t) => page = Some(t.to_string()),
             _ => break,
         }
     }
@@ -650,7 +728,7 @@ async fn subs_window(app: AppHandle, show: bool) -> Result<(), String> {
             });
         }
         // The line on screen right now (mpv only reports changes).
-        let last = LAST_SUB.lock().unwrap().clone();
+        let last = LAST_SUB.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let _ = app.emit_to("subs", "luna-subs-text", last);
         pgs::reset_shown();
         if !SUBS_ON.swap(true, Ordering::SeqCst) {
@@ -714,6 +792,7 @@ async fn state_save(app: AppHandle, json: String) -> Result<(), String> {
         }
         *written = ticket;
         std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+        if std::fs::read_to_string(&path).is_ok_and(|current| current == json) { return Ok(()); }
         // Keep the previous good copy, then replace atomically.
         if path.exists() {
             let _ = std::fs::copy(&path, path.with_extension("json.bak"));
@@ -751,7 +830,7 @@ static SUBS_STYLE: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None)
 /// Font, size, colours… for the subtitle window (Luna's subtitle settings).
 #[tauri::command]
 fn subs_style(app: AppHandle, style: Value) {
-    *SUBS_STYLE.lock().unwrap() = Some(style.clone());
+    *SUBS_STYLE.lock().unwrap_or_else(|e| e.into_inner()) = Some(style.clone());
     let _ = app.emit_to("subs", "luna-subs-style", style);
 }
 
@@ -779,7 +858,7 @@ fn pgs_prepare(app: AppHandle, file: String, track: u64) {
     let cache = app.path().app_cache_dir().unwrap_or_default().join("pgs");
     std::thread::spawn(move || {
         // Only one decoder owns the packet budget/cache writer. Superseded workers exit when dequeued.
-        let _worker=pgs::LOAD_WORKER.lock().unwrap();
+        let _worker=pgs::LOAD_WORKER.lock().unwrap_or_else(|e| e.into_inner());
         if !pgs::current(generation){return;}
         let a2=app.clone();
         let progress=move|p:f32|pgs::with_current(generation,||{let _=a2.emit("pgs-progress",p);});
@@ -801,7 +880,7 @@ fn pgs_clear(app: AppHandle) {
 static LAST_SUB: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
 pub(crate) fn forward_sub_text(app: &AppHandle, text: &str) {
-    *LAST_SUB.lock().unwrap() = text.to_string();
+    *LAST_SUB.lock().unwrap_or_else(|e| e.into_inner()) = text.to_string();
     if SUBS_ON.load(std::sync::atomic::Ordering::SeqCst) {
         let _ = app.emit_to("subs", "luna-subs-text", text.to_string());
     }
@@ -882,14 +961,8 @@ async fn get_text(url: String, bearer: Option<String>) -> Result<(String, String
     if !res.status().is_success() {
         return Err(tr!("Sunucu hata verdi ({})", "The server returned an error ({})", res.status()));
     }
-    if res.content_length().is_some_and(|n| n > 20 * 1024 * 1024) {
-        return Err(tr!("Yanıt çok büyük", "The answer is too big"));
-    }
     let at = res.url().to_string();
-    let bytes = res.bytes().await.map_err(|e| e.to_string())?;
-    if bytes.len() > 20 * 1024 * 1024 {
-        return Err(tr!("Yanıt çok büyük", "The answer is too big"));
-    }
+    let bytes = read_capped(res, 20 * 1024 * 1024).await?;
     Ok((at, String::from_utf8_lossy(&bytes).into_owned()))
 }
 
@@ -1071,8 +1144,9 @@ async fn addon_get(url: String) -> Result<Value, String> {
     if !res.status().is_success() {
         return Err(tr!("Eklenti hata verdi ({})", "The addon returned an error ({})", res.status()));
     }
-    res.json::<Value>()
-        .await
+    // a catalog is a few hundred KB; an answer that keeps streaming is refused instead of filling memory
+    let bytes = read_capped(res, 16 * 1024 * 1024).await?;
+    serde_json::from_slice::<Value>(&bytes)
         .map_err(|e| tr!("Eklentinin yanıtı okunamadı: {}", "Couldn't read the addon's answer: {}", e))
 }
 
@@ -1083,7 +1157,7 @@ fn is_private_url(u: &str) -> bool {
         Ok(x) => x.host_str().unwrap_or("").to_string(),
         Err(_) => return true,
     };
-    let h = host.trim_start_matches('[').trim_end_matches(']').to_lowercase();
+    let h = host.trim_start_matches('[').trim_end_matches(']').trim_end_matches('.').to_lowercase();
     if h == "localhost" || h.ends_with(".localhost") || h == "0.0.0.0" {
         return true;
     }
@@ -1128,7 +1202,8 @@ async fn fetch_page_text(url: String) -> Result<String, String> {
         .map_err(|e| e.to_string())?;
     let mut pages = vec![url.clone()];
     if url.contains("letterboxd.com") && !url.contains("/page/") {
-        let base = url.trim_end_matches('/').to_string();
+        // the page number goes into the path: a query or fragment ("?ref=…", "#reviews") used to end up before it
+        let base = url.split(['?', '#']).next().unwrap_or(&url).trim_end_matches('/').to_string();
         for n in 2..=5 {
             pages.push(format!("{base}/page/{n}/"));
         }
@@ -1142,11 +1217,11 @@ async fn fetch_page_text(url: String) -> Result<String, String> {
             }
             break;
         }
-        let body = res.bytes().await.map_err(|e| e.to_string())?;
-        if body.len() > 4 * 1024 * 1024 {
-            if i == 0 { return Err(tr!("Sayfa çok büyük", "The page is too big")); }
-            break;
-        }
+        let body = match read_capped(res, 4 * 1024 * 1024).await {
+            Ok(b) => b,
+            Err(e) if i == 0 => return Err(e),
+            Err(_) => break,
+        };
         let html = String::from_utf8_lossy(&body).into_owned();
         let text = {
             let doc = Html::parse_document(&html);
@@ -1219,7 +1294,7 @@ fn upscaler_note(app: AppHandle, m: String) {
 
 #[tauri::command]
 fn subs_current_style() -> Option<Value> {
-    SUBS_STYLE.lock().unwrap().clone()
+    SUBS_STYLE.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 #[tauri::command]
@@ -1281,7 +1356,25 @@ fn clipboard_offer(on: bool) {
 /// The backup file (Settings › Backup): Luna's records as one JSON file where the user chose.
 #[tauri::command]
 async fn backup_write(path: String, json: String) -> Result<(), String> {
-    blocking(move || std::fs::write(&path, json).map_err(|e| tr!("Yedek kaydedilemedi: {}", "Couldn't save the backup: {}", e))).await
+    blocking(move || {
+        // through a temporary file: a full disk or a crash halfway used to leave the user's previous
+        // backup at that path cut off and unreadable
+        let target = std::path::PathBuf::from(&path);
+        let name = target.file_name().map(|n| n.to_string_lossy().into_owned()).ok_or_else(|| tr!("Kayıt yeri geçersiz", "Invalid destination"))?;
+        let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?.as_nanos();
+        let tmp = target.with_file_name(format!(".{name}.{}-{nonce}.luna-tmp",std::process::id()));
+        use std::io::Write;
+        (|| -> std::io::Result<()> {
+            let mut file=std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+            file.write_all(json.as_bytes())?;file.sync_all()?;drop(file);
+            std::fs::rename(&tmp,&target)
+        })()
+            .map_err(|e| {
+                let _ = std::fs::remove_file(&tmp);
+                tr!("Yedek kaydedilemedi: {}", "Couldn't save the backup: {}", e)
+            })
+    })
+    .await
 }
 
 /// A playlist file (.m3u / .m3u8) on disk, as text.
@@ -1305,7 +1398,9 @@ async fn backup_read(path: String) -> Result<String, String> {
         if size > 300_000_000 {
             return Err(tr!("Bu dosya bir Luna yedeği olamayacak kadar büyük", "This file is too big to be a Luna backup"));
         }
-        std::fs::read_to_string(&path).map_err(|_| tr!("Yedek dosyası okunamadı", "Couldn't read the backup file"))
+        let text = std::fs::read_to_string(&path).map_err(|_| tr!("Yedek dosyası okunamadı", "Couldn't read the backup file"))?;
+        // a backup opened and saved in Notepad gains a byte order mark, which JSON.parse rejects
+        Ok(text.strip_prefix('\u{feff}').map(str::to_string).unwrap_or(text))
     })
     .await
 }
@@ -1314,6 +1409,9 @@ async fn backup_read(path: String) -> Result<String, String> {
 async fn subs_beside(paths: Vec<String>) -> Result<Vec<u32>, String> {
     blocking(move || Ok(files::subs_beside(&paths))).await
 }
+
+#[tauri::command]
+async fn rename_video_plan(path:String,name:String)->Result<Vec<(String,String)>,String>{blocking(move||Ok(files::rename_plan(&path,&name)?.into_iter().map(|(a,b)|(a.to_string_lossy().into_owned(),b.to_string_lossy().into_owned())).collect())).await}
 
 #[tauri::command]
 async fn rename_video(path: String, name: String) -> Result<String, String> {
@@ -1379,6 +1477,7 @@ pub fn run() {
         .manage(browser::BrowserState::default())
         .manage(browser_downloads::Downloads::default())
         .manage(browser_extensions::Extensions::default())
+        .manage(media_controls::Controls::default())
         .setup(|app| {
             let win = app.get_webview_window("main").expect("main window");
             let hwnd = win.hwnd()?.0 as isize;
@@ -1394,6 +1493,7 @@ pub fn run() {
                 torrent::resume(local.join("torrent-session"), dl);
             }
             clipboard::watch(app.handle().clone());
+            adblocking::start(app.handle().clone());
             // started by Windows with --minimized: the tray icon shows and the window stays hidden until clicked
             let minimized = std::env::args().skip(1).any(|a| a == "--minimized");
             if let Err(e) = shell::setup_tray(app.handle(), minimized) {
@@ -1411,8 +1511,14 @@ pub fn run() {
                 return true;
             }
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+            dev_tools::dev_auth_status,
+            dev_tools::dev_unlock,
+            dev_tools::dev_lock,
+            dev_tools::dev_capture,
+            dev_tools::dev_save_report,
             cache_tools::cache_tools,
             browser::browser_create,
+            adblocking::browser_adblock,
             browser::debug_log,
             browser::diagnostic_snapshot,
             browser::debug_open_log,
@@ -1429,6 +1535,7 @@ pub fn run() {
             set_lang,
             system_check,
             mpv_command,
+            music_queue_prepare,
             startup_file,
             find_subtitles,
             search_subtitles,
@@ -1463,6 +1570,13 @@ pub fn run() {
             gemini,
             state_save,
             state_load,
+            database::database_open,
+            database::database_apply,
+            database::database_replace,
+            database::database_search,
+            mcp_client::mcp_connect,
+            mcp_client::mcp_call,
+            mcp_client::mcp_disconnect,
             upscaler_status,
             upscaler_save,
             upscaler_scale,
@@ -1504,6 +1618,8 @@ pub fn run() {
             llm_post,
             llm_models,
             rename_video,
+            rename_video_plan,
+            nfo::nfo_match,
             fit_window,
             backup_write,
             backup_read,
@@ -1511,6 +1627,31 @@ pub fn run() {
             clipboard_offer,
             studio::studio_cancel,
             studio::studio_sync,
+            studio::studio_ocr,
+            ocr::ocr_languages,
+            anki::anki_decks,
+            anki::anki_add,
+            syncplay::syncplay_connect,
+            syncplay::syncplay_disconnect,
+            syncplay::syncplay_chat,
+            syncplay::syncplay_status,
+            media_sources::source_browse,
+            media_sources::source_stream,
+            media_sources::source_tracks,
+            subtitle_index::database_lines_get,
+            subtitle_index::database_lines_put,
+            subtitle_index::database_lines_search,
+            audio_analysis::audio_match,
+            audio_analysis::audio_identify,
+            audio_analysis::audio_songrec,
+            audio_analysis::audio_demucs,
+            audio_analysis::audio_analysis_cancel,
+            live_captions::live_caption_start,
+            live_captions::live_caption_stop,
+            live_captions::live_caption_status,
+            studio::studio_align_reference,
+            media_controls::media_controls_enable,
+            media_controls::media_controls_update,
             studio::whisper_status,
             studio::whisper_get_model,
             studio::whisper_get_engine,
@@ -1547,6 +1688,12 @@ pub fn run() {
                 m.kill();
             }
             preview::shutdown();
+            media_probe::shutdown();
+            mcp_client::shutdown();
+            syncplay::shutdown();
+            media_sources::shutdown();
+            live_captions::shutdown();
+            audio_analysis::shutdown();
         }
     });
 }
@@ -1586,5 +1733,19 @@ mod send_tests {
         assert!(!send_target_ok("file:///C:/x"));
         assert!(!send_target_ok("ftp://example.org/x"));
         assert!(!send_target_ok("not a url"));
+    }
+}
+
+#[cfg(test)]
+mod incoming_private_url_tests {
+    use super::*;
+    #[test]
+    fn trailing_dot_does_not_bypass_private_host_guard() {
+        for url in ["http://localhost./", "http://LOCALHOST./a", "http://app.localhost./", "http://127.0.0.1/", "http://[::1]/", "http://[::ffff:127.0.0.1]/", "http://192.168.1.5/"] {
+            assert!(is_private_url(url), "{url}");
+        }
+        for url in ["https://example.com./", "https://letterboxd.com/user/", "https://localhost.example.com/"] {
+            assert!(!is_private_url(url), "{url}");
+        }
     }
 }

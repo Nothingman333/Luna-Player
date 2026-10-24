@@ -1,3 +1,5 @@
+import {playbackTime,publishPlaybackTime} from "./playbackClock";
+import { appStorage as localStorage } from "./appStorage";
 import { tt } from "./i18n";
 import { invoke } from "./nativeCore";
 import { listen } from "@tauri-apps/api/event";
@@ -105,12 +107,14 @@ export function useMpv(onEvent?: (name: string, ev: any) => void) {
   useEffect(() => {
     const un = listen<any>("mpv", ({ payload }) => {
       if (payload.event === "property-change") {
+        if(payload.name==="time-pos"){publishPlaybackTime(payload.data);return;}
         const key = keyOf[payload.name];
         if (!key) return;
         const fallback = initial[key];
-        setState((s) => ({ ...s, [key]: payload.data ?? fallback }));
+        setState((s) => { const value = payload.data ?? fallback; return Object.is(s[key], value) ? s : { ...s, [key]: value }; });
       } else {
         cb.current?.(payload.event, payload);
+        if(payload.event==="start-file")publishPlaybackTime(0);
       }
     });
     // Observe only once we listen, so the initial values aren't missed.
@@ -131,7 +135,7 @@ export function useMpv(onEvent?: (name: string, ev: any) => void) {
     };
   }, []);
 
-  return state;
+  return {...state,get time(){return playbackTime();}};
 }
 
 // Subtitle looks. Netflix Sans is proprietary and can't be shipped; Inter (bundled, open

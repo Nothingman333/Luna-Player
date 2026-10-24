@@ -1,0 +1,31 @@
+[
+  {
+    "name": "Every built-in browser engine is also selectable in Settings",
+    "pass": false,
+    "error": "Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    'bing',\n    'brave',\n    'duckduckgo',\n-   'ecosia',\n    'google',\n    'kagi',\n    'startpage',\n-   'yandex'\n  ]\n"
+  },
+  {
+    "name": "Browser choice immediately updates the shared address resolver",
+    "pass": false,
+    "error": "Expected values to be strictly equal:\n+ actual - expected\n\n+ 'www.google.com'\n- 'www.ecosia.org'\n       ^\n"
+  },
+  {
+    "name": "Early local morning uses the local release day instead of the previous UTC day",
+    "pass": false,
+    "error": "The expression evaluated to a falsy value:\n\n  assert(taste.includes('const today = dayKey(Date.now())'))\n"
+  },
+  {
+    "name": "Null and malformed diary rows cannot crash the visible diary list",
+    "pass": false,
+    "error": "Cannot read properties of null (reading 'at')"
+  },
+  {
+    "name": "Removing a valid diary entry preserves unrelated damaged rows",
+    "pass": false,
+    "error": "Cannot read properties of null (reading 'title')"
+  },
+  {
+    "name": "Custom search templates and DuckDuckGo aliases remain usable",
+    "pass": true
+  }
+]

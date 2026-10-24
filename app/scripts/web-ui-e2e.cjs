@@ -97,7 +97,7 @@ const SEED = {
 test('Start page: greeting, engine picker, shortcut hints, top sites, session banner, reading queue', async () => {
   await fresh(SEED, { width: 1280, height: 1000 }); await shot('web-start');
   assert(await page.locator('.browser-start-greeting').isVisible());
-  assert.equal(await page.locator('.browser-engine-pick select option').count(), 7);
+  assert.equal(await page.locator('.browser-engine-pick select option').count(), 8);
   assert((await page.locator('.browser-top-site').count()) >= 3, 'top sites from history');
   assert(!(await page.locator('.browser-top-site strong', { hasText: 'google.com' }).count()), 'a results page is not a top site');
   assert(await page.locator('.browser-restore').isVisible()); assert(await page.locator('.browser-continue button').count() === 1);
@@ -187,18 +187,18 @@ test('Tabs can be reordered by dragging and reopened with Ctrl+Shift+T', async (
 });
 test('Page-focused shortcuts arrive as native "key" events and run (Ctrl+T, Ctrl+H, Ctrl+F)', async () => {
   await fresh(SEED); await openTab('example.com/p'); const id = await page.evaluate(() => +Object.keys(window.__MOCK__.tabs)[0]);
-  await page.evaluate(id => window.__emit(id, 'key', 'ctrl+h'), id); await page.waitForSelector('.web-history'); await page.keyboard.press('Escape'); await page.waitForSelector('.web-history', { state: 'detached' });
+  await page.evaluate(id => window.__emit(id, 'key', 'ctrl+h'), id); await page.waitForSelector('.browser-history'); await page.keyboard.press('Escape'); await page.waitForSelector('.browser-history', { state: 'detached' });
   await page.evaluate(id => window.__emit(id, 'key', 'ctrl+f'), id); await page.waitForSelector('.web-find input');
   await page.evaluate(id => window.__emit(id, 'key', 'ctrl+t'), id); await page.waitForSelector('.browser-start-page'); assert((await page.locator('.web-find').count()) === 0, 'find closes when the tab changes');
 });
 test('History panel: grouped by day, searchable, removal and pause switch work', async () => {
-  await fresh(SEED); await page.keyboard.press('Control+h'); await page.waitForSelector('.web-history'); await shot('web-history');
-  assert((await page.locator('.web-history-row').count()) === 5); assert((await page.locator('.web-history-list h4').count()) >= 2);
-  await page.fill('.web-history-search input', 'dune'); assert((await page.locator('.web-history-row').count()) === 4);
-  await page.hover('.web-history-row >> nth=0'); await page.click('.web-history-row >> nth=0 >> .web-history-remove'); assert((await page.locator('.web-history-row').count()) === 3);
+  await fresh(SEED); await page.keyboard.press('Control+h'); await page.waitForSelector('.browser-history'); await shot('web-history');
+  assert((await page.locator('.browser-history-row').count()) === 5); assert((await page.locator('.browser-history-list h4').count()) >= 2);
+  await page.fill('.browser-history-search input', 'dune'); assert((await page.locator('.browser-history-row').count()) === 4);
+  await page.hover('.browser-history-row >> nth=0'); await page.click('.browser-history-row >> nth=0 >> button[aria-label^="Remove"]'); assert((await page.locator('.browser-history-row').count()) === 3);
   assert((await store('lunaWebHistory')).length === 4);
   await page.click('.web-switch'); assert.equal(await page.evaluate(() => localStorage.lunaWebHistoryPaused), '1');
-  await page.fill('.web-history-search input', ''); page.once('dialog', d => d.accept()); await page.click('button:has-text("Remove all")'); await page.waitForSelector('.web-empty');
+  await page.fill('.browser-history-search input', ''); await page.click('.browser-history-clear'); await page.click('.browser-history-confirm button.danger'); await page.waitForSelector('.browser-history-empty');
   assert.deepEqual(await store('lunaWebHistory'), []);
 });
 test('Clear browsing data: history range, session and closed tabs; site data needs an open tab', async () => {
@@ -246,7 +246,7 @@ test('Narrow window: start page and toolbar stay usable (no horizontal overflow)
 test('Turkish interface: start page and panels speak Turkish', async () => {
   await fresh(SEED, { width: 1280, height: 800 }, 'tr'); const text = await page.locator('.browser-start-page').innerText();
   assert(/Sık uğradıkların/.test(text) && /Kaldığın yerden devam et/.test(text) && /Okumaya devam et/.test(text), text.slice(0, 300));
-  await page.keyboard.press('Control+h'); await page.waitForSelector('.web-history'); assert(/Gezdiğin sayfalar/.test(await page.locator('.web-history').innerText()));
+  await page.keyboard.press('Control+h'); await page.waitForSelector('.browser-history'); assert(/Geçmiş bu bilgisayarda tutulur/.test(await page.locator('.browser-history').innerText()));
 });
 
 test('Merged palette, pinned tabs, new shortcuts and zoom memory stay connected', async () => {

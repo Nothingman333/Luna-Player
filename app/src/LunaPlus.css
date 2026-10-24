@@ -74,8 +74,18 @@
 .ww-chip img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; }
 .ww-chip:hover { border-color: rgba(var(--acc-rgb), .7); }
 .ww-src { margin-top: 4px; font-size: 11px; color: var(--muted, rgba(255,255,255,.55)); }
+.ww-initial { display:grid; place-items:center; width:22px; height:22px; border-radius:50%; background:var(--panel); color:var(--muted); font-size:10px; }
 .d-logo { display: block; max-width: min(420px, 70%); max-height: 130px; object-fit: contain; object-position: left center; margin: 4px 0 6px; filter: drop-shadow(0 2px 12px rgba(0,0,0,.55)); }
 .d-title-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (max-width: 720px) { .cm-row > span:first-child { width: 100%; } .ww-label { width: 100%; } }
 .lp-set select { color-scheme: dark; background: rgba(255,255,255,.07); color: var(--text); border: 1px solid rgba(255,255,255,.12); border-radius: 8px; padding: 7px 10px; font: inherit; min-height: 34px; }
 .lp-set select option { background: #1a1a1f; }
+
+/* The original circles themselves fan out; no secondary menu or rail. */
+.ww-fan {position:relative;flex:1;min-width:0;height:40px;}
+.ww-fan-logo {position:absolute;top:2px;left:0;width:36px;height:36px;min-width:0;padding:0;border:2px solid var(--panel);border-radius:50%;background:var(--panel);color:var(--text);display:grid;place-items:center;overflow:hidden;cursor:pointer;transform:translateX(var(--fan-x));transition:transform .3s cubic-bezier(.22,.8,.25,1),opacity .22s ease;}
+.ww-fan-logo img {width:100%;height:100%;object-fit:cover;border-radius:50%;}
+.ww-fan-logo .ww-initial {width:100%;height:100%;}
+.ww-fan-logo:hover,.ww-fan-logo:focus-visible {border-color:rgba(var(--acc-rgb),.8);outline:2px solid rgba(var(--acc-rgb),.5);outline-offset:2px;}
+.ww-fan-count {position:absolute;top:0;height:40px;padding:0 4px;border:0;background:transparent;color:var(--muted);white-space:nowrap;font-size:12px;transition:left .3s ease,opacity .15s ease;}
+@media(prefers-reduced-motion:reduce){.ww-fan-logo,.ww-fan-count{transition:none;}}

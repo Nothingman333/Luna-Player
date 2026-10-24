@@ -67,7 +67,7 @@ export function TorrentDialog({ onOpen, onClose, initial }: { onOpen: (src: stri
   };
   return (
     <div className="modal-bg" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal wide" onKeyDown={(e) => e.stopPropagation()}>
+      <div className="modal wide link-dialog" onKeyDown={(e) => e.stopPropagation()}>
         <h2>{tt("Bağlantı aç")}</h2>
         <p className="modal-text">{tt("VLC'deki “Ağ akışı aç” gibi:")} <b>{tt("magnet")}</b> / <b>{tt(".torrent")}</b>  {tt("bağlantısı ya da doğrudan bir video adresi (")}<b>{tt("http(s)")}</b>, <b>.m3u8</b>, <b>{tt("rtsp")}</b>{tt("…) yapıştır. Torrentler hemen oynamaya başlar, kalanı arka planda iner.")}</p>
         <div className="rm-row">
@@ -156,7 +156,7 @@ export function DownloadsSection({ list, onPlay, onRemoving, onRemoved }: DlProp
       <section className="row">
         <h2>{tt("İndirmeler")} <span className="muted small">{list.length}</span></h2>
         {err && <div className="plugin-msg small err">{err}</div>}
-        {!list.length && <div className="muted empty-note">{tt("Henüz torrent yok. Üstteki mıknatıs butonuyla magnet linki ya da torrent dosyası açabilirsin.")}</div>}
+        {!list.length && <div className="muted empty-note downloads-empty"><Icon d={I.down} size={24}/><p>{tt("Henüz torrent yok. Üstteki mıknatıs butonuyla magnet linki ya da torrent dosyası açabilirsin.")}</p></div>}
         <div className="dl-list">
           {list.map((t) => {
             const p = pct(t);

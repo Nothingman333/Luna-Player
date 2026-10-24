@@ -1,3 +1,4 @@
+import { appStorage as localStorage } from "./appStorage";
 import {BrowserHistory} from "./BrowserHistory";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
@@ -29,11 +30,12 @@ export function SiteAvatar({ url, size = 34, icon = true }: { url: string; size?
 
 
 /** Ctrl+H: the local history, grouped by day, searchable, with per-row and time-range removal. */
-export function HistoryPanel({ rows, paused, setPaused, open, remove, clearSince, close }: {
+export function HistoryPanel({ rows, paused, setPaused, open, remove, removeSite, clearSince, close }: {
   rows: WebVisit[]; paused: boolean; setPaused: (paused: boolean) => void; open: (url: string, newTab: boolean) => void;
-  remove: (url: string) => void; clearSince: (since: number) => void; close: () => void;
+  remove: (url: string) => void; removeSite?: (host: string) => void; clearSince: (since: number) => void; close: () => void;
 }) {
-  return <BrowserHistory rows={rows.map(r=>({url:r.url,title:r.title,at:r.at,visits:r.count}))} remember={!paused} onKeepChange={value=>setPaused(!value)} onOpen={url=>open(url,false)} onOpenNew={url=>open(url,true)} onForget={remove} onClear={()=>clearSince(0)} onClearSince={clearSince} close={close}/>;
+  const visits=useMemo(()=>rows.map(r=>({url:r.url,title:r.title,at:r.at,visits:r.count})),[rows]);
+  return <BrowserHistory rows={visits} remember={!paused} onKeepChange={value=>setPaused(!value)} onOpen={url=>open(url,false)} onOpenNew={url=>open(url,true)} onForget={remove} onForgetSite={removeSite} onClear={()=>clearSince(0)} onClearSince={clearSince} close={close}/>;
 }
 
 const KEYS: { group: [string, string]; rows: [string, string, string][] }[] = [

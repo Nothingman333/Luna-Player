@@ -1,5 +1,5 @@
 import { invoke } from "./nativeCore";
-import { aiProfiles, AiUse, captureAiUse, otherAi, useOfProfile } from "./ai";
+import { aiProfiles, AiUse, captureAiUse, otherAi, getAiProfileUse } from "./ai";
 import { lang, tt } from "./i18n";
 import { store } from "./library";
 import { SLASH } from "./Slash";
@@ -7,7 +7,12 @@ import { cleanCommands, compareMarkdown, CompareResult, expandCommand, parseComm
 
 // ---------- the user's own commands ("/özet3 …") ----------
 export const loadUserCommands = (): UserCommand[] => cleanCommands(store.json<unknown>("userCommands", []));
-export const saveUserCommands = (l: UserCommand[]) => store.set("userCommands", JSON.stringify(cleanCommands(l)));
+export const saveUserCommands = (l: UserCommand[]) => {
+  const next=cleanCommands(l);if(l.length>40||next.length!==l.length)return false;
+  const raw=store.get("userCommands");
+  if(raw!==null){try{const parsed=JSON.parse(raw);if(!Array.isArray(parsed)||cleanCommands(parsed).length!==parsed.length)return false;}catch{return false;}}
+  return store.set("userCommands", JSON.stringify(next));
+};
 const reserved = () => ["komut", "karsilastir", ...SLASH.flatMap((c) => [c.cmd, ...c.alias])];
 
 /** The prompt a typed user command stands for, or null when the text is not one of them. */
@@ -21,7 +26,8 @@ export function addUserCommand(name: string, prompt: string): string | null {
       : def === "reserved" ? tt("Bu ad Luna’nın kendi komutlarından birine ait; başka bir ad seç.")
       : def === "prompt" ? tt("Komutun metni boş olamaz (en fazla 2000 karakter).") : tt("Biçim: /komut ekle ad = istem metni");
   }
-  saveUserCommands([...loadUserCommands().filter((c) => c.name !== def.name), def]);
+  const current=loadUserCommands();if(current.length>=40&&!current.some(c=>c.name===def.name))return lang()==="tr"?"En fazla 40 komut saklayabilirsin. Önce bir komut sil; eski komutların korunuyor.":"You can save up to 40 commands. Delete one first; your existing commands were kept.";
+  if(!saveUserCommands([...current.filter((c) => c.name !== def.name), def]))return lang()==="tr"?"Komut kaydedilemedi. Depolama alanını ve mevcut kayıtları kontrol et; özgün kayıt korunuyor.":"Could not save the command. Check storage and existing data; the original was kept.";
   return null;
 }
 
@@ -41,7 +47,7 @@ export function userCommandsReply(arg: string): string {
     const name = (rest[0] ?? "").replace(/^\/+/, "").toLocaleLowerCase("tr");
     const all = loadUserCommands();
     if (!all.some((c) => c.name === name)) return tt("“/{0}” adlı bir komutun yok.", name);
-    saveUserCommands(all.filter((c) => c.name !== name));
+    if(!saveUserCommands(all.filter((c) => c.name !== name)))return lang()==="tr"?"Komut silinemedi. Özgün kayıt korunuyor.":"Could not delete the command. The original was kept.";
     return tt("“/{0}” komutu silindi.", name);
   }
   const all = loadUserCommands();
@@ -57,7 +63,7 @@ export function comparisonUses(): AiUse[] {
   const out: AiUse[] = active.key || active.provider === "custom" ? [active] : [];
   for (const p of aiProfiles()) {
     if (String(p.slot) === chosen) continue;
-    const u = useOfProfile(p);
+    const u = getAiProfileUse(p);
     if (u.key) out.push(u);
   }
   return out.slice(0, 4);

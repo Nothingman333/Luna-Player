@@ -100,7 +100,8 @@ test('Q02', 'wrapping and fitting: explicit breaks kept, size shrinks until it f
   const measure = (s) => s.length * 10;
   assert.deepEqual(Q.wrapText('aaa bbb ccc', 75, measure), ['aaa bbb', 'ccc']);
   assert.deepEqual(Q.wrapText('one\ntwo three', 1000, measure), ['one', 'two three']);
-  assert.deepEqual(Q.wrapText('supercalifragilistic x', 50, measure), ['supercalifragilistic', 'x']);
+  // F07: long tokens used to overflow quote cards. They now wrap at code-point boundaries.
+  assert.deepEqual(Q.wrapText('supercalifragilistic x', 50, measure), ['super', 'calif', 'ragil', 'istic', 'x']);
   const m2 = (s, size) => s.length * size * 0.5;
   const big = Q.fitQuote('Short line.', { w: 900, h: 400 }, m2, { max: 76, min: 34, lineHeight: 1.28 });
   assert.equal(big.size, 76); assert.equal(big.lines.length, 1);

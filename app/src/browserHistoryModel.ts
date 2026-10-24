@@ -52,8 +52,8 @@ export function retitleVisit(rows: WebVisit[], url: string, title: string): WebV
 /** A failed load (error page) right after it was recorded is taken back out. */
 export function forgetFailedVisit(rows: WebVisit[], url: string, now: number): WebVisit[] {
   const v = rows.find(r => r.url === url);
-  if (!v || v.lastAdded===false || now - v.at > 60_000) return rows;
-  return v.count <= 1 ? rows.filter(r => r.url !== url) : rows.map(r => r.url === url ? { ...r, count: r.count - 1 } : r);
+  if (!v || v.lastAdded===false || now < v.at || now - v.at > 60_000) return rows;
+  return v.count <= 1 ? rows.filter(r => r.url !== url) : rows.map(r => r.url === url ? { ...r, count: r.count - 1, lastAdded: false } : r);
 }
 
 export const clearVisitsSince = (rows: WebVisit[], since: number) => rows.filter(v => v.at < since);
@@ -155,7 +155,10 @@ export function webSuggestions(input: string, sources: { tabs: { id: number; tit
     if (searches.size >= 2) break;
   }
   const search: Suggestion = { kind: "search", query: text, title: tr ? `${engine.name} ile ara: ${text}` : `Search ${engine.name} for ${text}` };
-  return [...pages, search, ...[...searches].map(s => ({ kind: "search" as const, query: s, title: s }))].slice(0, limit);
+  const completions = [...searches].map(s => ({ kind: "search" as const, query: s, title: s }));
+  // Leave room for the current search and at least one previous search completion.
+  const shown = completions.slice(0, Math.max(0, Math.min(2, limit - 1)));
+  return [...pages.slice(0, Math.max(0, limit - 1 - shown.length)), search, ...shown].slice(0, limit);
 }
 
 /** The open tabs as they were, to offer "continue where you left off" next time. */

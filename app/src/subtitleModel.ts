@@ -6,6 +6,7 @@
  * pure and covered by scripts/subtitle-studio-regression.cjs.
  */
 
+import { decodeTextEntities } from "./textEntities";
 export type Cue = { start: number; end: number; text: string };
 
 const MAX_CUES = 20000;
@@ -31,12 +32,21 @@ export function formatTime(t: number, sep: "," | "." = ","): string {
 
 /** Markup that only styles the text: <i>, <font …>, VTT voice/class tags, {\an8} and ASS override blocks. */
 export function plainText(s: string): string {
-  return s
+  let drawing = false;
+  const visible = s.split(/(\{\\[^}]*\})/g).map(part => {
+    if (/^\{\\/.test(part)) {
+      for (const m of part.matchAll(/\\p(\d+)\b/g)) drawing = Number(m[1]) > 0;
+      return "";
+    }
+    return drawing ? "" : part;
+  }).join("");
+  return decodeTextEntities(visible
     .replace(/\{\\[^}]*\}/g, "")
     .replace(/\\N|\\n/g, "\n")
     .replace(/\\h/g, " ")
+    .replace(/<\d{2,}:\d{2}(?::\d{2})?\.\d{3}>/g, "")
     .replace(/<\/?[a-z][^>]*>/gi, "")
-    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ")
+  )
     .split("\n").map((l) => l.replace(/[ \t]+/g, " ").trim()).filter(Boolean).join("\n");
 }
 
@@ -70,16 +80,25 @@ function parseAss(text: string): Cue[] {
 
 function parseSrtVtt(text: string): Cue[] {
   const out: Cue[] = [];
+  const timing = (l: string) => {
+    if (!l.includes("-->")) return null;
+    const [a, rest] = l.split("-->");
+    const start = parseTime(a), end = parseTime((rest ?? "").trim().split(/\s+/)[0] ?? "");
+    return start == null || end == null ? null : { start, end };
+  };
   for (const block of text.split(/\n[ \t]*\n/)) {
     const lines = block.split("\n");
-    const at = lines.findIndex((l) => l.includes("-->"));
-    if (at < 0) continue;
     if (/^(NOTE|STYLE|REGION)\b/.test(lines[0]?.trim() ?? "")) continue;
-    const [a, rest] = lines[at].split("-->");
-    const start = parseTime(a);
-    const end = parseTime((rest ?? "").trim().split(/\s+/)[0] ?? "");
-    if (start == null || end == null) continue;
-    out.push({ start, end, text: plainText(lines.slice(at + 1).join("\n")) });
+    // Files that leave out the blank line between cues put several cues in one block: every real
+    // timing line starts its own cue (a text line that merely contains "-->" does not).
+    const at = lines.flatMap((l, i) => (timing(l) ? [i] : []));
+    at.forEach((i, n) => {
+      let stop = n + 1 < at.length ? at[n + 1] : lines.length;
+      // the next cue's number sits right above its timing line
+      if (n + 1 < at.length && stop - 1 > i && /^\s*\d+\s*$/.test(lines[stop - 1])) stop--;
+      const t = timing(lines[i])!;
+      out.push({ start: t.start, end: t.end, text: plainText(lines.slice(i + 1, stop).join("\n")) });
+    });
   }
   return out;
 }
@@ -87,22 +106,44 @@ function parseSrtVtt(text: string): Cue[] {
 /** Cues of an SRT, WebVTT or ASS/SSA text, in time order (invalid or empty lines are left out). */
 export function parseSubtitle(raw: string): Cue[] {
   const text = String(raw ?? "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
-  if (/^\s*\[script info\]/im.test(text) || /^\s*dialogue:/im.test(text)) return finish(parseAss(text));
+  if (/^[ \t]*\[script info\]/im.test(text) || /^[ \t]*dialogue:/im.test(text)) return finish(parseAss(text));
   return finish(parseSrtVtt(text));
 }
 
+/** A blank line inside a cue would end the cue when the file is read again: it is written as a plain line break. */
+const blockText = (t: string) => t.replace(/\r\n?/g, "\n").trim().replace(/\n(?:[ \t]*\n)+/g, "\n");
 export function serializeSrt(cues: Cue[]): string {
-  return cues.map((c, i) => `${i + 1}\n${formatTime(c.start)} --> ${formatTime(c.end)}\n${c.text.trim()}\n`).join("\n");
+  return cues.map((c, i) => `${i + 1}\n${formatTime(c.start)} --> ${formatTime(c.end)}\n${blockText(c.text)}\n`).join("\n");
 }
 export function serializeVtt(cues: Cue[]): string {
-  return "WEBVTT\n\n" + cues.map((c) => `${formatTime(c.start, ".")} --> ${formatTime(c.end, ".")}\n${c.text.trim()}\n`).join("\n");
+  const escape = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return "WEBVTT\n\n" + cues.map((c) => `${formatTime(c.start, ".")} --> ${formatTime(c.end, ".")}\n${escape(blockText(c.text))}\n`).join("\n");
 }
 /** The writer that keeps the file's own format (only SRT and VTT are edited in place). */
 export const serializeFor = (file: string, cues: Cue[]) => (/\.vtt$/i.test(file) ? serializeVtt(cues) : serializeSrt(cues));
 
 /** One or two balanced lines of at most `max` characters, split at the most natural point. */
 export function balanceLines(text: string, max = MAX_LINE): string {
-  const words = text.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  max = Number.isFinite(max) ? Math.max(1, Math.floor(max)) : MAX_LINE;
+  const tokens = text.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  // Hard breaks are needed for URLs, identifiers and scripts without word separators.
+  if (tokens.some(w => w.length > max)) {
+    const lines: string[] = []; let current = "";
+    for (const word of tokens) {
+      if (word.length <= max) {
+        if (current && current.length + 1 + word.length > max) { lines.push(current); current = ""; }
+        current += (current ? " " : "") + word; continue;
+      }
+      if (current) { lines.push(current); current = ""; }
+      for (const ch of word) {
+        if (current && current.length + ch.length > max) { lines.push(current); current = ""; }
+        current += ch;
+      }
+    }
+    if (current) lines.push(current);
+    return lines.join("\n");
+  }
+  const words = tokens;
   const flat = words.join(" ");
   if (flat.length <= max) return flat;
   let best = -1, bestScore = Infinity;
@@ -152,11 +193,20 @@ export function splitLong(cues: Cue[], maxChars = 84): Cue[] {
       if (cur) push(cur);
     };
     group(flat.split(/(?<=[.!?…])\s+/));
+    const startMs = Math.round(c.start * 1000), endMs = Math.round(c.end * 1000), span = endMs - startMs;
+    if (span < 1) { out.push({ ...c, text: balanceLines(flat) }); continue; }
+    // A 1 ms interval cannot hold twenty separate rounded cues. Keep its text in fewer cues.
+    if (pieces.length > span) {
+      const grouped: string[] = [], width = Math.ceil(pieces.length / span);
+      for (let i = 0; i < pieces.length; i += width) grouped.push(pieces.slice(i, i + width).join(" "));
+      pieces.splice(0, pieces.length, ...grouped);
+    }
     const total = pieces.reduce((n, p) => n + p.length, 0) || 1;
-    let t = c.start;
+    let t = startMs, used = 0;
     pieces.forEach((p, i) => {
-      const end = i === pieces.length - 1 ? c.end : t + ((c.end - c.start) * p.length) / total;
-      out.push({ start: round(t), end: round(end), text: balanceLines(p) });
+      used += p.length;
+      const end = i === pieces.length - 1 ? endMs : Math.max(t + 1, Math.min(endMs - (pieces.length - i - 1), startMs + Math.round(span * used / total)));
+      out.push({ start: t / 1000, end: end / 1000, text: balanceLines(p) });
       t = end;
     });
   }
@@ -169,7 +219,7 @@ export type CleanReport = { removedNotes: number; removedLines: number; fixedOve
 
 const HI_BRACKETS = /\[[^\]\n]{1,60}\]|\([^)\n]{1,60}\)|\uFF08[^\uFF09\n]{1,60}\uFF09/g;
 const SPEAKER = /^(?:-\s*)?[A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜ0-9 .'\-]{1,24}:\s+/;
-const MUSIC = /^[\s\-]*[♪♫#][^\n]*$/;
+const MUSIC = /^[\s\-]*[♪♫][^\n]*$/;
 
 /** Subtitle Edit–style fixes: hearing-impaired notes, music lines, overlaps, too-short display,
  *  over-long lines and repeated lines. Returns the new cues and what changed. */
@@ -217,7 +267,8 @@ export function cleanCues(input: Cue[], o: CleanOptions): { cues: Cue[]; report:
   for (let i = 0; i < cues.length; i++) {
     const c = cues[i], next = cues[i + 1];
     if (o.overlaps && next && c.end > next.start - 0.04 && next.start > c.start) {
-      c.end = round(Math.max(c.start + 0.3, next.start - 0.04));
+      const candidate = round(Math.max(c.start + Math.min(.001, (next.start - c.start) / 2), next.start - 0.04));
+      c.end = candidate > c.start && candidate <= next.start ? candidate : (c.start + next.start) / 2;
       r.fixedOverlaps++;
     }
     if (o.readingTime) {
@@ -287,17 +338,21 @@ export function translationPrompt(b: Batch, target: string, title: string, gloss
  *  the model skipped keeps its original text and is counted. */
 export function applyTranslation(cues: Cue[], b: Batch, answer: unknown): { cues: Cue[]; missing: number } {
   const got = new Map<number, string>();
+  const conflicts = new Set<number>();
   const list = (answer as { lines?: unknown })?.lines;
   if (Array.isArray(list)) {
     for (const x of list) {
-      const id = Number((x as { id?: unknown })?.id), text = (x as { text?: unknown })?.text;
-      if (Number.isInteger(id) && typeof text === "string" && text.trim() && text.length < 600 && b.lines.some((l) => l.id === id)) got.set(id, text.trim());
+      const id = (x as { id?: unknown })?.id, text = (x as { text?: unknown })?.text;
+      if (typeof id === "number" && Number.isInteger(id) && typeof text === "string" && text.trim() && text.length < 600 && b.lines.some((l) => l.id === id)) {
+        if (got.has(id) && got.get(id) !== text.trim()) conflicts.add(id);
+        got.set(id, text.trim());
+      }
     }
   }
   const next = cues.slice();
   let missing = 0;
   for (const l of b.lines) {
-    const t = got.get(l.id);
+    const t = conflicts.has(l.id) ? undefined : got.get(l.id);
     if (t === undefined) { missing++; continue; }
     next[l.id] = { ...next[l.id], text: t.split("\n").map((x) => x.trim()).filter(Boolean).join("\n") };
   }
@@ -315,7 +370,7 @@ const clock = (t: number) => {
 /** The last lines shown up to `time` (never later ones: no spoilers), as "[m:ss] text", bounded. */
 export function sceneLines(cues: Cue[], time: number, maxLines = 24, maxChars = 2400): string {
   if (!Number.isFinite(time)) return "";
-  const shown = cues.filter((c) => c.start <= time + 0.25);
+  const shown = cues.filter((c) => c.start <= time);
   const out: string[] = [];
   let size = 0;
   for (let i = shown.length - 1; i >= 0 && out.length < maxLines; i--) {
@@ -334,7 +389,7 @@ export function cueAt(cues: Cue[], time: number): number {
     const mid = (lo + hi) >> 1;
     if (cues[mid].start <= time) { found = mid; lo = mid + 1; } else hi = mid - 1;
   }
-  for (let i = found; i >= 0 && i > found - 4; i--) if (cues[i].end > time) return i;
+  for (let i = found; i >= 0; i--) if (cues[i].end > time) return i;
   return -1;
 }
 
@@ -343,8 +398,8 @@ export const foldText = (s: string) => s.toLocaleLowerCase("tr").normalize("NFD"
 
 /** A language code safe for a file name ("tr", "en", "pt-br"…); "und" when unknown. */
 export function langCode(raw: string): string {
-  const c = String(raw ?? "").toLowerCase().replace(/[^a-z-]/g, "").slice(0, 8);
-  return /^[a-z]{2,3}(-[a-z]{2,4})?$/.test(c) && c !== "auto" ? c : "und";
+  const c = String(raw ?? "").trim().toLowerCase().replace(/_/g, "-");
+  return /^[a-z]{2,3}(?:-[a-z]{4})?(?:-(?:[a-z]{2}|\d{3}))?$/.test(c) && c !== "auto" ? c : "und";
 }
 
 // ---------- Whisper output ----------

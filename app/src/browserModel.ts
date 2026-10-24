@@ -2,7 +2,7 @@ export type BrowserPage = { title: string; url: string; text: string; truncated:
 /** Only these fields reach the model, whatever the page's own script returned. */
 export function cleanBrowserPage(raw: any, loading = false): Omit<BrowserPage, "capturedAt"> {
   const text = (value: unknown, max: number) => typeof value === "string" ? value.slice(0, max) : "";
-  const page: Omit<BrowserPage, "capturedAt"> = { title: text(raw?.title, 500), url: text(raw?.url, 2048), text: text(raw?.text, 24000), truncated: raw?.truncated === true };
+  const page: Omit<BrowserPage, "capturedAt"> = { title: text(raw?.title, 500), url: text(raw?.url, 2048), text: text(raw?.text, 24000), truncated: raw?.truncated === true || typeof raw?.text === "string" && raw.text.length > 24000 };
   const lang = text(raw?.lang, 20);
   if (/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$/.test(lang)) page.lang = lang;
   const selection = text(raw?.selection, 4000).trim();
@@ -25,6 +25,8 @@ export function friendlyBrowserError(error: unknown, tr: boolean): string {
     [/^Önce bir web sayfası aç\.?$/i, "Önce bir web sayfası aç.", "Open a web page first."],
     [/^Sayfa değişti; yeniden oku\.?$/i, "Sayfa değişti; yeniden oku.", "The page changed; read it again."],
     [/^Önce sayfa aç\.?$/i, "Önce sayfa aç.", "Open a page first."],
+    [/^Only external HTTP\(S\) addresses are allowed$/i, "Yalnız dış http / https web adresleri açılabilir.", "Only external http / https web addresses can be opened."],
+    [/^Address too long$/i, "Adres çok uzun.", "The address is too long."],
   ];
   const hit = known.find(([pattern]) => pattern.test(raw));
   return hit ? (tr ? hit[1] : hit[2]) : raw;
@@ -32,8 +34,21 @@ export function friendlyBrowserError(error: unknown, tr: boolean): string {
 export type WebTab = { id: number; title: string; url: string; loading: boolean };
 let searchResolver:((text:string)=>string)|undefined;
 export function setSearchResolver(resolver:((text:string)=>string)|null){searchResolver=resolver??undefined;}
+/** Typed or pasted text with lone UTF-16 surrogates would make encodeURIComponent throw "URI malformed". */
+export const wellFormed = (s: string) => s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
+const APP_ADDRESS_HOSTS = ['tauri.localhost', 'ipc.localhost', 'asset.localhost', 'about.localhost'];
+function localBrowserHost(host: string): boolean {
+  if (host === 'localhost' || host.endsWith('.localhost') || /^127(?:\.\d{1,3}){3}$/.test(host)
+    || host === '0.0.0.0' || host === '[::1]' || host === '[::]') return true;
+  // URL canonicalizes mapped IPv4 to two hexadecimal groups. A prefix check would also
+  // reject [::ffff:7f:1] (0.127.0.1), which Rust correctly does not classify as loopback.
+  const mapped = /^\[::ffff:([\da-f]{1,4}):([\da-f]{1,4})\]$/i.exec(host);
+  if (!mapped) return false;
+  const hi = parseInt(mapped[1], 16), lo = parseInt(mapped[2], 16);
+  return hi >>> 8 === 127 || hi === 0 && lo === 0;
+}
 const DEFAULT_SEARCH = "https://www.google.com/search?q=%s";
-const LOCAL_HOST = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i;
+const LOCAL_HOST = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:[/?#]|$)/i;
 const IPV4 = /^(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
 const HOST_PORT = /^[^\s/:]+:\d+(?:\/|$)/;
 const hostPart = (text: string) => /^([^/?#:]+)/.exec(text)?.[1] ?? "";
@@ -63,7 +78,7 @@ export function addressKind(input: string): "empty" | "address" | "search" {
 }
 /** `searchTemplate` is an https address with one %s (see browserSearch.ts); anything else falls back to Google. */
 export function browserAddress(input: string, searchTemplate: string | ((query: string) => string) = searchResolver??DEFAULT_SEARCH): string {
-  const text = input.trim();
+  const text = wellFormed(input.trim());
   if (!text) throw new Error('Bir adres ya da arama yaz.');
   const kind = addressKind(text);
   const template = typeof searchTemplate === "string" && /^https:\/\//.test(searchTemplate) && searchTemplate.split("%s").length === 2 ? searchTemplate : DEFAULT_SEARCH;
@@ -73,9 +88,11 @@ export function browserAddress(input: string, searchTemplate: string | ((query: 
     : explicit ? text
     : (LOCAL_HOST.test(text) || IPV4.test(hostPart(text)) ? 'http://' : 'https://') + text;
   const url = new URL(address);
-  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || !url.hostname
-    || url.hostname === 'tauri.localhost' || url.hostname.endsWith('.tauri.localhost')
-    || (['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) && url.port === '1420'))
+  // Same rules as the native side (browser_url.rs): Luna's own origins and its dev UI port are never opened as a web tab.
+  const host = url.hostname.replace(/\.+$/, '').toLowerCase();
+  const ownOrigin = APP_ADDRESS_HOSTS.some(h => host === h || host.endsWith('.' + h));
+  const loopback = localBrowserHost(host);
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || !host || ownOrigin || (loopback && url.port === '1420'))
     throw new Error('Yalnız http / https web adresleri açılabilir.');
   return url.href;
 }

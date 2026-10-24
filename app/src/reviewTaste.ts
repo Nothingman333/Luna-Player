@@ -1,3 +1,4 @@
+import { appStorage as localStorage } from "./appStorage";
 import { store } from "./library";
 import { ASPECTS, filmKey, normalizeText } from "./filmReviewModel";
 import type { Aspect, FilmTarget, Profile } from "./filmReviewModel";

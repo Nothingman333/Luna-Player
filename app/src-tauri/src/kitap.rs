@@ -18,8 +18,12 @@ pub struct BookReviews {
 }
 
 fn fold(s: &str) -> String {
-    s.to_lowercase()
+    // "İ" lower-cases to "i" plus a combining dot, which is not a letter: it used to become a space, so
+    // "İstanbul" turned into "i-stanbul" and never matched the book's address ("istanbul--123")
+    s.replace('İ', "i")
+        .to_lowercase()
         .chars()
+        .filter(|c| *c != '\u{307}')
         .map(|c| match c { 'ç' => 'c', 'ğ' => 'g', 'ı' | 'î' | 'i' => 'i', 'ö' => 'o', 'ş' => 's', 'ü' | 'û' => 'u', 'â' => 'a', c if c.is_alphanumeric() => c, _ => ' ' })
         .collect::<String>()
         .split_whitespace()
@@ -134,6 +138,9 @@ mod tests {
         let p = serde_json::json!(["— ", {"type": "egik", "item": "Kan mı dedin?"}, " dedi ", {"type": "kitapIdler", "item": {"adi": "Suç ve Ceza"}}, "\n\n İkinci  satır"]);
         assert_eq!(super::review_text(&p), "— Kan mı dedin? dedi Suç ve Ceza\nİkinci  satır");
         assert_eq!(super::fold("Suç ve Ceza"), "suc-ve-ceza");
+        assert_eq!(super::fold("İstanbul Hatırası"), "istanbul-hatirasi");
+        assert_eq!(super::fold("İnsan Ne İle Yaşar"), "insan-ne-ile-yasar");
+        assert_eq!(super::fold("I\u{307}stanbul"), "istanbul");
         let html = r#"<a href="/kitap/insanligimi-yitirirken--333965">x</a><a href="/kitap/suc-ve-ceza--121">y</a>"#;
         assert_eq!(super::pick_book(html, "Suç ve Ceza").as_deref(), Some("suc-ve-ceza--121"));
     }

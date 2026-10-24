@@ -3,7 +3,7 @@
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict'), ts = require('typescript');
 const root = path.resolve(__dirname, '..'), read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
 const transpile = (s) => ts.transpileModule(s, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
-function load(file, imports = () => ({})) { const m = { exports: {} }; new Function('require', 'module', 'exports', transpile(read(file)))(imports, m, m.exports); return m.exports; }
+function load(file, imports = n => n.startsWith('./') ? load(path.join(path.dirname(file), n + '.ts')) : ({})) { const m = { exports: {} }; new Function('require', 'module', 'exports', transpile(read(file)))(imports, m, m.exports); return m.exports; }
 const tests = []; const test = (id, name, run) => tests.push({ id, name, run });
 const L = load('src/lineSearchModel.ts'), A = load('src/aniskipModel.ts'), D = load('src/onThisDayModel.ts');
 

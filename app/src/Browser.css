@@ -146,8 +146,8 @@
 .browser-translation-status { display:flex; align-items:center; gap:9px; padding:7px 28px; color:var(--accent-soft); font-size:10px; border-bottom:1px solid var(--web-line); flex:none; }
 .browser-space-note { height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--muted); padding:30px; text-align:center; }
 .browser-space-note p { max-width:240px; font-size:12px; line-height:1.7; }
-.browser-page-context { display:flex; gap:8px; align-items:center; padding:8px 16px; font-size:11px; background:rgba(var(--acc-rgb),.08); border-bottom:1px solid rgba(var(--acc-rgb),.2); }
-.browser-page-context span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.browser-page-context { display:flex; flex:none; gap:8px; align-items:center; padding:8px 16px; font-size:11px; background:rgba(var(--acc-rgb),.08); border-bottom:1px solid rgba(var(--acc-rgb),.2); }
+.browser-page-context > span:not(.context-actions) { flex:1 1 240px; min-width:0; white-space:normal; overflow-wrap:anywhere; line-height:1.5; }
 .browser-page-context.is-empty { background:rgba(255,255,255,.03); border-bottom-color:var(--web-line,rgba(255,255,255,.07)); color:var(--muted); }
 @media(min-width:1550px) and (min-height:900px) { .browser-start-page { padding-top:50px; } .browser-start-content { max-width:1160px; } .browser-start-hero { min-height:250px; } .browser-start-copy h1 { font-size:56px; } .browser-start-art { transform:scale(1.15); margin-right:50px; } .browser-destination { min-height:157px; padding:24px; } .browser-section-heading { margin-top:32px; } .browser-lower-grid { margin-top:30px; } }
 @media(max-width:900px) { .browser-start-page { padding:24px; } .browser-start-art { width:220px; margin-right:0; } .browser-start-copy h1 { font-size:35px; } .browser-destination { padding:16px; } .browser-lower-grid { gap:16px; } .browser-chrome { padding-left:16px; padding-right:16px; } .browser-header-label { display:none; } }
@@ -189,6 +189,23 @@
 @keyframes browser-pop-in { from { opacity:0; } to { opacity:1; } }
 /* Extras.css caps the tools menu at 76vh, but the menu starts about 168px below the top: on windows shorter than ~700px its bottom left the screen. */
 .browser-shell .browser-tools-pop.extra-browser-tools { max-height:min(620px,calc(100vh - 190px)); overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:#35353c transparent; }
+.browser-tools-pop .luna-extra { font-size:12px; }
+.browser-tools-pop .luna-extra > .chip { width:100%; margin-bottom:10px; }
+.browser-tools-pop .luna-extra details { border:1px solid var(--web-line); border-radius:10px; padding:0 10px 10px; }
+.browser-tools-pop .luna-extra details:not([open]) { padding-bottom:0; }
+.browser-tools-pop .luna-extra details > summary { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:40px; padding:8px 0; list-style:none; font-size:12px; }
+.browser-tools-pop .luna-extra summary::-webkit-details-marker { display:none; }
+.browser-tools-pop .luna-extra summary::after { content:""; width:7px; height:7px; flex:none; border-right:1.5px solid var(--accent); border-bottom:1.5px solid var(--accent); transform:rotate(45deg); margin:0 3px 4px; }
+.browser-tools-pop .luna-extra details[open] > summary::after { transform:rotate(225deg); margin-bottom:-3px; }
+.browser-tools-pop .luna-extra summary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:5px; }
+.browser-tools-pop .luna-extra p { margin:0 0 12px; font-size:12px; line-height:1.7; }
+.browser-tools-pop .luna-extra .chip { min-height:32px; font-size:11px; white-space:normal; text-align:left; }
+.browser-tools-pop .luna-extra .extra-item .chip { max-width:100%; overflow-wrap:anywhere; }
+.browser-tools-pop .luna-extra textarea { font-size:12px; line-height:1.7; min-height:110px; margin-bottom:8px; }
+.browser-tools-pop .luna-extra .extra-row { gap:6px; }
+@media(min-width:560px) {
+  .root:has(.browser-shell:not([hidden])):has(.browser-tools-pop) > .ai-bubble { right:432px; }
+}
 .browser-address { position:relative; }
 .browser-address:focus-within { box-shadow:0 0 0 3px rgba(var(--acc-rgb),.12); }
 .browser-suggest-pop { position:absolute; top:calc(100% + 8px); left:-1px; right:-1px; z-index:70; margin:0; padding:6px; list-style:none; border-radius:14px; background:#1a1a1e; border:1px solid rgba(255,255,255,.1); box-shadow:0 18px 65px rgba(0,0,0,.65); color:var(--text); max-height:min(420px,calc(100vh - 200px)); overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:#35353c transparent; animation:browser-pop-in .12s ease-out; }

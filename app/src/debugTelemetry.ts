@@ -41,7 +41,7 @@ export function installDebugTelemetry(){
 
 /** Instrument application calls without modifying Tauri-owned, read-only runtime objects. */
 export const invoke:typeof nativeInvoke=async(command,args,options)=>{
- if(!installed||quiet.has(command))return nativeInvoke(command,args,options);
+ if(!installed||quiet.has(command)||command.startsWith("dev_"))return nativeInvoke(command,args,options);
  const start=performance.now(),category=debugCategory(command),a=args as any;
  const record=(...values:Parameters<typeof logDebug>)=>{try{logDebug(...values);}catch{}};
  const info=category==="ai"?{provider:command==="gemini"?"gemini":a?.kind,model:a?.model||a?.body?.model,endpoint:a?.url}:command==="mpv"?{operation:a?.args?.[0]||a?.command,argumentCount:a?.args?.length}:args;

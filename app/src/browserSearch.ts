@@ -31,7 +31,7 @@ export function searchTemplate(id: unknown): string {
 export function searchAddress(query: string, template: string = searchTemplate(DEFAULT_SEARCH_ENGINE)): string {
   const ok = typeof template === "string" && /^https:\/\//.test(template) && template.split("%s").length === 2;
   const use = ok ? template : searchTemplate(DEFAULT_SEARCH_ENGINE);
-  const encoded = encodeURIComponent(query);
+  const encoded = encodeURIComponent(String(query).replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD"));
   return use.replace("%s", () => encoded);
 }
 

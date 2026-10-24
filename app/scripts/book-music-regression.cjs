@@ -7,7 +7,7 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
 const root = path.resolve(__dirname, '..'), baseline = process.env.LUNA_BASELINE === '1';
 const readSrc = (name) => baseline && /^(Music|Books)\.tsx$/.test(name)
   ? cp.execFileSync('git', ['show', 'HEAD:app/src/' + name], { cwd: root, encoding: 'utf8', maxBuffer: 64e6 })
-  : fs.readFileSync(path.join(root, 'src', name), 'utf8');
+  : require('./production-source.cjs').read(path.join(root, 'src', name));
 const tsOpts = { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } };
 
 // ---- storage, like the app's (a Map behind localStorage) ----
@@ -73,11 +73,11 @@ function musicHook() {
   let current; const calls = [];
   const env = {
     useState: (...a) => current.useState(...a), useEffect: (...a) => current.useEffect(...a), useMemo: (...a) => current.useMemo(...a),
-    loadMusicFolders: () => store.json('musicFolders', []), store,
+    applyMusicIdentities:tracks=>tracks, loadMusicFolders: () => store.json('musicFolders', []), store,
     invoke: async (cmd, args) => { calls.push(args); return env.scan(args); }, scan: async () => [],
     albumKey: (t) => t.albumArtist + '|' + t.album, tt: (s) => s, window: { addEventListener() {}, removeEventListener() {} },
   };
-  const inst = instantiate('Music.tsx', 'useMusicLibrary', env, 'let libCache=null;const libSubs=new Set();', ['libCache']);
+  const inst = instantiate('Music.tsx', 'useMusicLibrary', env, 'let libCache=null;const setSplit_libCache=v=>libCache=v;const libSubs=new Set();', ['libCache']);
   const rt = hookRuntime((api) => { current = api; return inst.fn(); });
   return { env, rt, calls, inst, state: inst.state };
 }
@@ -124,7 +124,7 @@ function bookHook() {
     loadBookFolders: () => store.json('bookFolders', []), store, withBookInfo: (b) => b, window: { addEventListener() {}, removeEventListener() {} },
     invoke: async (cmd, args) => env.scan(args), scan: async () => [],
   };
-  const inst = instantiate('Books.tsx', 'useBookLibrary', env, 'let libCache=null;const libSubs=new Set();const libChanged=()=>{libCache=null;libSubs.forEach((f)=>f());};', ['libCache']);
+  const inst = instantiate('Books.tsx', 'useBookLibrary', env, 'let libCache=null;const setSplit_libCache=v=>libCache=v;const libSubs=new Set();const libChanged=()=>{libCache=null;libSubs.forEach((f)=>f());};', ['libCache']);
   const rt = hookRuntime((api) => { current = api; return inst.fn(); });
   return { env, rt };
 }
@@ -152,7 +152,7 @@ test('shuffle off restores the very item that is playing, also when the same son
   const m = load('musicModel');
   const A1 = { src: 'a', title: 'first' }, B = { src: 'b', title: 'B' }, A2 = { src: 'a', title: 'second' }, C = { src: 'c', title: 'C' };
   const P = { queue: [A2, C, A1, B], original: [A1, B, A2, C], index: 0, shuffle: true };
-  const inst = instantiate('Music.tsx', 'setShuffle', { P, changed: () => {}, restoreIndex: m.restoreIndex });
+  const inst = instantiate('Music.tsx', 'setShuffle', { P, changed: () => {}, invalidateGapless: () => {}, prepareGapless: async () => {}, restoreIndex: m.restoreIndex });
   inst.fn(false);
   assert.equal(P.shuffle, false); assert.deepEqual(P.queue, [A1, B, A2, C]);
   assert.equal(P.index, 2, 'the second "a" is playing: the next song is C, not B');
@@ -162,7 +162,7 @@ test('shuffle on keeps the playing song first and off brings the original order 
   const m = load('musicModel');
   const q = ['a', 'b', 'c', 'd', 'e'].map((s) => ({ src: s, title: s }));
   const P = { queue: [...q], original: [], index: 2, shuffle: false };
-  const inst = instantiate('Music.tsx', 'setShuffle', { P, changed: () => {}, restoreIndex: m.restoreIndex });
+  const inst = instantiate('Music.tsx', 'setShuffle', { P, changed: () => {}, invalidateGapless: () => {}, prepareGapless: async () => {}, restoreIndex: m.restoreIndex });
   inst.fn(true);
   assert.equal(P.queue[0], q[2]); assert.equal(P.index, 0); assert.equal(P.queue.length, 5);
   inst.fn(false);

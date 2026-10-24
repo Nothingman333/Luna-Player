@@ -1,0 +1,54 @@
+{
+  "total": 12,
+  "passed": 12,
+  "results": [
+    {
+      "name": "Cache evicts the least recently read entry and bounds total weight",
+      "status": "pass"
+    },
+    {
+      "name": "Cache age is measured from loading, not kept forever by repeated reads",
+      "status": "pass"
+    },
+    {
+      "name": "Replacing an entry releases its prior weight; oversized rows are not retained",
+      "status": "pass"
+    },
+    {
+      "name": "Expired entries are swept on write; clear releases cached payloads",
+      "status": "pass"
+    },
+    {
+      "name": "Two concurrent resource reads share one loader",
+      "status": "pass"
+    },
+    {
+      "name": "Failed resource reads can retry instead of caching an empty failure",
+      "status": "pass"
+    },
+    {
+      "name": "Partial resource results may be shown without caching the failure",
+      "status": "pass"
+    },
+    {
+      "name": "Invalidation prevents an older in-flight request from replacing refreshed data",
+      "status": "pass"
+    },
+    {
+      "name": "Clear cannot be undone by a delayed successful read",
+      "status": "pass"
+    },
+    {
+      "name": "Many film versions scan their paths linearly and keep every copy",
+      "status": "pass"
+    },
+    {
+      "name": "Finished lookup is reused within a catalog pass, then refreshed on the next pass",
+      "status": "pass"
+    },
+    {
+      "name": "Recent copy ordering, resume and duplicate counts remain consistent",
+      "status": "pass"
+    }
+  ]
+}

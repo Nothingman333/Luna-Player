@@ -1,3 +1,6 @@
+import {gpuCapabilities,systemProfile} from "./hardwareProfile";
+import {LiveCaptionControl} from "./LiveCaptions";
+import { appStorage as localStorage } from "./appStorage";
 /**
  * Luna's subtitle studio (player › Audio & subtitles › "Subtitle studio…"):
  *  - Create: local Whisper transcription (whisper.cpp): engine and model as cards, names from TMDB
@@ -15,6 +18,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { ExtraModal, exportExtra, putExtra } from "./Extras";
 import { localList, validWord } from "./extrasModel";
 import { aiName, aiReady, assistantJson, captureAiUse } from "./ai";
+import { classifyAiError } from "./assistantReliability";
 import { store } from "./library";
 import { notifyUser, setTaskbarProgress } from "./shellBridge";
 import { fmtTime } from "./mpv";
@@ -237,6 +241,7 @@ type StudioProps = {
   meta?: Meta;
   subFile?: string;
   embedded: boolean;
+  pgsTrack?: number;
   queue: { path: string; title: string }[];
   onAttach: (file: string, label: string, secondary?: boolean) => void;
   onApplySync: (r: S.SyncResult) => void;
@@ -285,7 +290,7 @@ export function SubtitleStudio(p: StudioProps) {
           </span>
         </div>
         <div className="studio-shell">
-          <nav className="studio-rail" role="tablist" aria-orientation="vertical" aria-label={tt("Altyazı stüdyosu")} onKeyDown={onTabKey}>
+          <nav className="studio-rail" role="tablist" aria-orientation="horizontal" aria-label={tt("Altyazı stüdyosu")} onKeyDown={onTabKey}>
             {tabs.map(([k, l, sub]) => (
               <button key={k} data-tab={k} role="tab" aria-selected={tab === k} tabIndex={tab === k ? 0 : -1}
                 className={"studio-tab-btn" + (tab === k ? " on" : "") + (k !== "create" && !hasFile ? " dim" : "")} onClick={() => setTab(k)}>
@@ -306,18 +311,6 @@ export function SubtitleStudio(p: StudioProps) {
   );
 }
 
-function Step({ n, title, done, children }: { n: number; title: string; done: boolean; children: React.ReactNode }) {
-  return (
-    <div className={"studio-step" + (done ? " done" : "")}>
-      <div className="studio-step-head">
-        <span className="studio-step-n" aria-hidden="true">{done ? "✓" : n}</span>
-        <h4>{title}</h4>
-      </div>
-      <div className="studio-step-body">{children}</div>
-    </div>
-  );
-}
-
 const MODEL_INFO: Record<string, { speed: number; quality: number; note: string }> = {
   tiny: { speed: 5, quality: 1, note: tt("Deneme için; isimleri ve kısık konuşmayı sık kaçırır") },
   base: { speed: 4, quality: 2, note: tt("İşlemcide hızlı; temiz sesli videolar için") },
@@ -330,10 +323,26 @@ function Dots({ n, label }: { n: number; label: string }) {
   return <span className="studio-dots" aria-label={`${label} ${n}/5`} title={`${label} ${n}/5`}>{[1, 2, 3, 4, 5].map((i) => <i key={i} className={i <= n ? "on" : ""} />)}</span>;
 }
 
+function OcrTool(p: StudioProps) {
+  const job=useJob();
+  const [languages,setLanguages]=useState<S.OcrLanguage[]>([]),[language,setLanguage]=useState(""),[error,setError]=useState("");
+  useEffect(()=>{let alive=true;S.ocrLanguages().then(list=>{if(alive){setLanguages(list);setLanguage(list.find(l=>l.tag.toLowerCase().startsWith(uiLang()))?.tag??list[0]?.tag??"");}}).catch(e=>{if(alive)setError(errText(e));});return()=>{alive=false;};},[]);
+  const run=()=>job.run(async id=>{setError("");try{if(!p.pgsTrack||!language)return;const file=await S.ocrSubtitles(id,p.path,p.pgsTrack,language);p.onAttach(file,tt("PGS OCR · {0}",language));}catch(e){setError(errText(e));}});
+  return <div className="studio-result"><strong>{tt("PGS görüntülerini metne çevir (Windows OCR)")}</strong><p className="muted small">{tt("Gömülü PGS altyazısını seçin. Windows'ta kurulu dil paketiyle yeni SRT oluşturur; görüntüler bilgisayarda kalır.")}</p>
+    {!p.pgsTrack&&<p className="muted small">{tt("Önce oynatıcının altyazı menüsünden bir PGS parçası seçin.")}</p>}
+    <div className="studio-row"><select aria-label={tt("OCR dili")} value={language} disabled={!!job.state} onChange={e=>setLanguage(e.target.value)}>{languages.map(l=><option key={l.tag} value={l.tag}>{l.name}</option>)}</select><button className="primary" disabled={!p.pgsTrack||!language||!!job.state} onClick={run}>{tt("PGS → SRT")}</button>{job.state&&<button className="chip" onClick={job.cancel}>{tt("İptal")}</button>}</div>
+    {!languages.length&&!error&&<p className="muted small">{tt("Windows OCR dili bulunamadı. Windows Ayarları'ndan dilin optik karakter tanıma paketini kurun.")}</p>}{job.state&&<Progress phase={job.state.phase} pct={job.state.pct} eta={job.state.eta}/>} {error&&<p role="alert" className="extra-status">{error}</p>}
+  </div>;
+}
+
 function CreateTab(p: StudioProps) {
+  const [caps,setCaps]=useState(gpuCapabilities(null));
+  useEffect(()=>{let alive=true;void systemProfile().then(p=>{if(alive)setCaps(gpuCapabilities(p.gpus));}).catch(()=>{});return()=>{alive=false;};},[]);
   const [st, setSt] = useState<S.WhisperStatus | null>(null);
   const [err, setErr] = useState("");
   const [engine, setEngine] = useState("");
+  const [engineType,setEngineType]=useState<"cpu"|"cuda"|"own">("cpu");
+  const [modelChoice,setModelChoice]=useState(store.get("studioModelHint")??"base");
   const [model, setModel] = useState("");
   const [lng, setLng] = useState(S.prefs.lang());
   const [translate, setTranslate] = useState(false);
@@ -347,28 +356,28 @@ function CreateTab(p: StudioProps) {
   const [dlTarget, setDlTarget] = useState("");
   const dl = useJob();
   const q = useWhisperQueue();
-  const refresh = async () => {
-    try { const s = await S.whisperStatus(); setSt(s); setEngine(S.pickEngine(s)); setModel(S.pickModel(s)); } catch (e) { setErr(errText(e)); }
+  const refresh = async (which:"both"|"engine"|"model"="both") => {
+    try { await systemProfile().catch(()=>null); const s = await S.whisperStatus(); setSt(s); if(which!=="model"){const selectedEngine=S.pickEngine(s);setEngine(selectedEngine);setEngineType(/[\\/]cuda[\\/]/i.test(selectedEngine)?"cuda":/[\\/]cpu[\\/]/i.test(selectedEngine)?"cpu":selectedEngine?"own":store.get("studioEngineHint")==="cuda"?"cuda":"cpu");}if(which!=="engine"){const selectedModel=S.pickModel(s);setModel(selectedModel);setModelChoice(s.models.find(m=>m.path===selectedModel)?.name??(selectedModel?"own":store.get("studioModelHint")??"base"));} } catch (e) { setErr(errText(e)); }
   };
   useEffect(() => { void refresh(); }, []);
   const getEngine = (v: "cpu" | "cuda") => { setDlTarget("engine:" + v); return dl.run(async (job) => {
     setErr("");
-    try { const e = await S.getEngine(job, v); S.prefs.setEngine(e); await refresh(); } catch (e) { setErr(errText(e)); } finally { setDlTarget(""); }
+    try { const e = await S.getEngine(job, v); S.prefs.setEngine(e); await refresh("engine"); } catch (e) { setErr(errText(e)); } finally { setDlTarget(""); }
   }); };
   const getModel = (name: string) => { setDlTarget("model:" + name); return dl.run(async (job) => {
     setErr("");
-    try { const m = await S.getModel(job, name); S.prefs.setModel(m); await refresh(); } catch (e) { setErr(errText(e)); } finally { setDlTarget(""); }
+    try { const m = await S.getModel(job, name); S.prefs.setModel(m); await refresh("model"); } catch (e) { setErr(errText(e)); } finally { setDlTarget(""); }
   }); };
   const chooseEngine = async () => {
     const f = await open({ multiple: false, filters: [{ name: "whisper-cli", extensions: ["exe"] }] });
-    if (typeof f === "string") { S.prefs.setEngine(f); setEngine(f); }
+    if (typeof f === "string") { S.prefs.setEngine(f); setEngine(f); setEngineType("own"); }
   };
   const chooseModel = async () => {
     const f = await open({ multiple: false, filters: [{ name: "ggml", extensions: ["bin"] }] });
-    if (typeof f === "string") { S.prefs.setModel(f); setModel(f); }
+    if (typeof f === "string") { S.prefs.setModel(f); setModel(f); setModelChoice("own"); }
   };
-  const useEngine = (e: string) => { S.prefs.setEngine(e); setEngine(e); };
-  const useModel = (m: string) => { S.prefs.setModel(m); setModel(m); };
+  const selectEngine = (e: string) => { S.prefs.setEngine(e); setEngine(e); };
+  const selectModel = (m: string) => { S.prefs.setModel(m); setModel(m); };
   const start = () => {
     S.prefs.setLang(lng);
     store.set("studioTidy", tidy ? "1" : "0");
@@ -382,113 +391,44 @@ function CreateTab(p: StudioProps) {
   const installed = new Map(st?.models.map((m) => [m.name, m]) ?? []);
   const offered = st?.offered ?? [];
   const ownModel = model && !st?.models.some((m) => m.path === model) ? model : "";
-  const ready = !!engine && !!model;
-  const engineCard = (v: "cpu" | "cuda", title: string, sub: string, path?: string) => {
-    const busy = dlTarget === "engine:" + v;
-    const active = !!path && path === engine;
-    return (
-      <div className={"studio-card" + (active ? " on" : "")} key={v}>
-        <div className="studio-card-head"><b>{title}</b>{active ? <span className="studio-badge">{tt("Kullanılıyor")}</span> : path ? <span className="studio-badge soft">{tt("Kurulu")}</span> : null}</div>
-        <small>{sub}</small>
-        {busy && dl.state ? <Progress phase={dl.state.phase} pct={dl.state.pct} eta={dl.state.eta} text={dl.state.text} />
-          : path ? (!active && <button className="chip" onClick={() => useEngine(path)}>{tt("Bunu kullan")}</button>)
-          : <button className="chip" disabled={!!dl.state} onClick={() => getEngine(v)}>{tt("İndir ve kur")}</button>}
-      </div>
-    );
-  };
-  return (
-    <div className="studio-tab">
-      <p className="studio-lead">{tt("Konuşmayı bilgisayarında yazıya döker (whisper.cpp). Ses internete gönderilmez. Uzun bir film işlemcide uzun sürebilir; NVIDIA kartta CUDA sürümü çok daha hızlıdır.")}</p>
-      <Step n={1} title={tt("Motor")} done={!!engine}>
-        <div className="studio-cards two">
-          {engineCard("cpu", tt("İşlemci"), tt("Her bilgisayarda çalışır · 4 MB"), cpu)}
-          {engineCard("cuda", "NVIDIA CUDA 12", tt("NVIDIA ekran kartında çok daha hızlı · 457 MB"), cuda)}
-        </div>
-        <div className="studio-own">
-          {own ? <span className={"extra-path" + (own === engine ? " on" : "")} title={own}>{tt("Kendi dosyan: {0}", own)}</span> : <span className="muted small">{tt("Kendi whisper.cpp kurulumun varsa:")}</span>}
-          {own && own !== engine && <button className="chip" onClick={() => useEngine(own)}>{tt("Bunu kullan")}</button>}
-          <button className="chip" onClick={chooseEngine}>{tt("whisper-cli.exe seç…")}</button>
-        </div>
-      </Step>
-      <Step n={2} title={tt("Model")} done={!!model}>
-        <div className="studio-cards models">
-          {offered.map(([name, size]) => {
-            const info = MODEL_INFO[name] ?? { speed: 3, quality: 3, note: "" };
-            const have = installed.get(name);
-            const active = !!have && have.path === model;
-            const busy = dlTarget === "model:" + name;
-            return (
-              <div key={name} className={"studio-card model" + (active ? " on" : "") + (name === "large-v3-turbo-q5_0" ? " pick" : "")}>
-                <div className="studio-card-head">
-                  <b>{name}</b>
-                  {active ? <span className="studio-badge">{tt("Kullanılıyor")}</span> : name === "large-v3-turbo-q5_0" ? <span className="studio-badge soft">{tt("Önerilen")}</span> : null}
-                </div>
-                <div className="studio-meters">
-                  <span>{tt("Hız")} <Dots n={info.speed} label={tt("Hız")} /></span>
-                  <span>{tt("Doğruluk")} <Dots n={info.quality} label={tt("Doğruluk")} /></span>
-                </div>
-                <small>{info.note} · {have ? `${mb(have.size)} MB` : `~${Math.round(size / 1e7) * 10} MB`}</small>
-                {busy && dl.state ? <Progress phase={dl.state.phase} pct={dl.state.pct} eta={dl.state.eta} text={dl.state.text} />
-                  : have ? (!active && <button className="chip" onClick={() => useModel(have.path)}>{tt("Bunu kullan")}</button>)
-                  : <button className="chip" disabled={!!dl.state} onClick={() => getModel(name)}>{tt("İndir")}</button>}
-              </div>
-            );
-          })}
-        </div>
-        <div className="studio-own">
-          {ownModel ? <span className="extra-path on" title={ownModel}>{tt("Kendi modelin: {0}", fileName(ownModel))}</span> : null}
-          <button className="chip" onClick={chooseModel}>{tt("Model dosyası seç…")}</button>
-          {dl.state && <button className="chip" onClick={dl.cancel}>{tt("İndirmeyi durdur")}</button>}
-        </div>
-      </Step>
-      <Step n={3} title={tt("Ne yazıya dökülsün?")} done={false}>
-        <div className="studio-row">
-          <label className="look-field">{tt("Konuşma dili")}
-            <select value={lng} onChange={(e) => setLng(e.target.value)}>
-              <option value="auto">{tt("Otomatik bul")}</option>
-              {LANGS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-            </select>
-          </label>
-        </div>
-        <div className="studio-opts">
-          <div className="look-row" role="group" aria-label={tt("Hız ve doğruluk")}>
-            <span className="muted small">{tt("Hız ve doğruluk")}</span>
-            {([["fast", tt("Hızlı")], ["balanced", tt("Dengeli")], ["quality", tt("Kaliteli")]] as const).map(([k, l]) => (
-              <button key={k} className={"seg sm" + (preset === k ? " on" : "")} aria-pressed={preset === k} onClick={() => setPreset(k)}>{l}</button>
-            ))}
-          </div>
-          <label className="look-check" title={tt("Silero ses algılama modeli (0,9 MB, ilk kullanımda indirilir)")}><input type="checkbox" checked={vad} onChange={(e) => setVad(e.target.checked)} />{tt("Sessizlikleri ve müziği atla (daha az uydurma satır, daha hızlı)")}</label>
-          <label className="look-check"><input type="checkbox" checked={translate} onChange={(e) => setTranslate(e.target.checked)} />{tt("İngilizceye çevirerek yaz (Whisper)")}</label>
-          <label className="look-check" title={prompt || undefined}><input type="checkbox" checked={usePrompt && !!prompt} disabled={!prompt} onChange={(e) => setUsePrompt(e.target.checked)} />
-            {prompt ? tt("Adı ve karakter isimlerini Whisper'a tanıt (TMDB)") : tt("Karakter isimleri yok (TMDB eşleşmesi gerekli)")}</label>
-          <label className="look-check"><input type="checkbox" checked={tidy} onChange={(e) => setTidy(e.target.checked)} />{tt("Whisper'ın uydurduğu satırları ayıkla (\"İzlediğiniz için teşekkürler\", tekrarlar)")}</label>
-        </div>
-        <div className="studio-picks" role="group" aria-label={tt("Videolar")}>
-          {[{ path: p.path, title: p.title }, ...p.queue].map((x) => (
-            <label key={x.path} className={"studio-pick" + (picked.has(x.path) ? " on" : "")}>
-              <input type="checkbox" checked={picked.has(x.path)} disabled={isLink(x.path)}
-                onChange={(e) => setPicked((s) => { const n = new Set(s); if (e.target.checked) n.add(x.path); else n.delete(x.path); return n; })} />
-              <span className="ellipsis">{x.path === p.path ? <b>{tt("Bu video")} · </b> : null}{x.title}</span>
-            </label>
-          ))}
-        </div>
-        {p.queue.length > 0 && (
-          <div className="studio-row">
-            <button className="chip" onClick={() => setPicked(new Set([p.path, ...p.queue.map((x) => x.path)].filter((x) => !isLink(x))))}>{tt("Altyazısız bölümlerin hepsi")}</button>
-            <button className="chip" onClick={() => setPicked(new Set([p.path]))}>{tt("Yalnız bu video")}</button>
-          </div>
-        )}
-        <div className="studio-row">
-          <button className="primary" disabled={!ready || picked.size === 0} onClick={start}>
-            {picked.size > 1 ? tt("{0} video için altyazı oluştur", picked.size) : tt("Altyazı oluştur")}
-          </button>
-          {!ready && <span className="muted small">{tt("Önce motor ve model gerekli.")}</span>}
-        </div>
-      </Step>
-      {err && <div className="extra-status" role="alert">{err}</div>}
-      <QueueList items={q} />
+  const ready = !!engine && !!model && !(caps.known && !caps.nvidia && /[\\/]cuda[\\/]/i.test(engine));
+  const recommended=store.get("studioModelHint")??"base";
+  const modelInfo=MODEL_INFO[modelChoice];
+  const modelOffer=offered.find(([name])=>name===modelChoice);
+  const selectedInstalled=installed.get(modelChoice);
+  const compatible=engineType!=="cuda"||!caps.known||caps.nvidia;
+  const enginePath=engineType==="cpu"?cpu:engineType==="cuda"?cuda:own;
+  const changeEngine=(type:"cpu"|"cuda"|"own")=>{setEngineType(type);const path=type==="cpu"?cpu:type==="cuda"?cuda:own;if(path)selectEngine(path);else setEngine("");};
+  const changeModel=(name:string)=>{setModelChoice(name);const found=installed.get(name);if(found)selectModel(found.path);else if(name==="own"&&ownModel)setModel(ownModel);else setModel("");};
+  return <div className="studio-tab studio-create">
+    <p className="studio-lead">{tt("Konuşmayı bilgisayarında yazıya dök. Motoru ve modeli seç; ardından altyazıyı oluştur.")}</p>
+    <div className="studio-create-grid">
+      <section className="studio-config"><h4>{tt("Motor")}</h4><label className="studio-select-label">{tt("Çalıştırma yöntemi")}<select aria-label={tt("Whisper motoru")} value={engineType} disabled={!!dl.state} onChange={e=>changeEngine(e.target.value as "cpu"|"cuda"|"own")}><option value="cpu">{tt("İşlemci (CPU)")}{cpu?" · "+tt("Kurulu"):" · 4 MB"}</option><option value="cuda" disabled={caps.known&&!caps.nvidia}>NVIDIA CUDA 12{cuda?" · "+tt("Kurulu"):" · 457 MB"}</option><option value="own">{tt("Kendi motor dosyam")}</option></select></label>
+        <p className="muted small">{engineType==="cuda"?tt("NVIDIA ekran kartı ve uyumlu CUDA sürücüsü gerekir."):engineType==="cpu"?tt("Intel ve AMD sistemlerde de çalışır. Ses internete gönderilmez."):tt("Uyumlu whisper-cli.exe dosyanı seç.")}</p>
+        <div className="studio-row">{engineType==="own"?<button className="chip" disabled={!!dl.state} onClick={chooseEngine}>{tt("whisper-cli.exe seç…")}</button>:enginePath?<span className="studio-ready">✓ {tt("Kurulu")}</span>:<button className="chip" disabled={!!dl.state||!compatible} onClick={()=>getEngine(engineType)}>{tt("Motoru indir")}</button>}</div>
+        {engineType==="own"&&engine&&<small className="extra-path" title={engine}>{fileName(engine)}</small>}
+        {dlTarget.startsWith("engine:")&&dl.state&&<Progress phase={dl.state.phase} pct={dl.state.pct} eta={dl.state.eta}/>}
+      </section>
+      <section className="studio-config"><h4>{tt("Model")}</h4><label className="studio-select-label">{tt("Altyazı modeli")}<select aria-label={tt("Whisper modeli")} disabled={!st||!!dl.state} value={modelOffer||modelChoice==="own"?modelChoice:""} onChange={e=>changeModel(e.target.value)}><option value="" disabled>{tt("Model seç")}</option>{offered.map(([name,size])=><option key={name} value={name}>{name}{name===recommended?" · "+tt("Önerilen"):""}{installed.has(name)?" · "+tt("Kurulu"):" · "+Math.round(size/1048576)+" MB"}</option>)}<option value="own">{tt("Kendi model dosyam")}</option></select></label>
+        {modelInfo&&<div className="studio-meters"><span>{tt("Hız")} <Dots n={modelInfo.speed} label={tt("Hız")}/></span><span>{tt("Doğruluk")} <Dots n={modelInfo.quality} label={tt("Doğruluk")}/></span></div>}
+        <p className="muted small">{modelInfo?.note??tt("Bilgisayarındaki uyumlu ggml modelini seç.")}{selectedInstalled?" · "+mb(selectedInstalled.size)+" MB":""}</p>
+        <div className="studio-row">{modelChoice==="own"?<button className="chip" disabled={!!dl.state} onClick={chooseModel}>{tt("Model dosyası seç…")}</button>:selectedInstalled?<span className="studio-ready">✓ {tt("Kurulu")}</span>:<button className="chip" disabled={!!dl.state||!modelOffer} onClick={()=>getModel(modelChoice)}>{tt("Modeli indir")}</button>}</div>
+        {ownModel&&modelChoice==="own"&&<small className="extra-path" title={ownModel}>{fileName(ownModel)}</small>}
+        {dlTarget.startsWith("model:")&&dl.state&&<Progress phase={dl.state.phase} pct={dl.state.pct} eta={dl.state.eta}/>}
+      </section>
     </div>
-  );
+    <div className="studio-basics"><label className="look-field">{tt("Konuşma dili")}<select value={lng} onChange={e=>setLng(e.target.value)}><option value="auto">{tt("Otomatik bul")}</option>{LANGS.map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label><div className="look-row" role="group" aria-label={tt("Hız ve doğruluk")}>{([["fast",tt("Hızlı")],["balanced",tt("Dengeli")],["quality",tt("Kaliteli")]] as const).map(([key,label])=><button key={key} className={"seg sm"+(preset===key?" on":"")} aria-pressed={preset===key} onClick={()=>setPreset(key)}>{label}</button>)}</div></div>
+    <details className="studio-optional"><summary>{tt("Gelişmiş seçenekler ve video kuyruğu")}</summary><div className="studio-opts">
+      <label className="look-check" title={tt("Silero ses algılama modeli (0,9 MB, ilk kullanımda indirilir)")}><input type="checkbox" checked={vad} onChange={e=>setVad(e.target.checked)}/>{tt("Sessizlikleri ve müziği atla (daha az uydurma satır, daha hızlı)")}</label>
+      <label className="look-check"><input type="checkbox" checked={translate} onChange={e=>setTranslate(e.target.checked)}/>{tt("İngilizceye çevirerek yaz (Whisper)")}</label>
+      <label className="look-check" title={prompt||undefined}><input type="checkbox" checked={usePrompt&&!!prompt} disabled={!prompt} onChange={e=>setUsePrompt(e.target.checked)}/>{prompt?tt("Adı ve karakter isimlerini Whisper'a tanıt (TMDB)"):tt("Karakter isimleri yok (TMDB eşleşmesi gerekli)")}</label>
+      <label className="look-check"><input type="checkbox" checked={tidy} onChange={e=>setTidy(e.target.checked)}/>{tt("Whisper'ın uydurduğu satırları ayıkla (\"İzlediğiniz için teşekkürler\", tekrarlar)")}</label>
+    </div><div className="studio-picks" role="group" aria-label={tt("Videolar")}>{[{path:p.path,title:p.title},...p.queue].map(video=><label key={video.path} className={"studio-pick"+(picked.has(video.path)?" on":"")}><input type="checkbox" checked={picked.has(video.path)} disabled={isLink(video.path)} onChange={e=>setPicked(current=>{const next=new Set(current);if(e.target.checked)next.add(video.path);else next.delete(video.path);return next;})}/><span className="ellipsis">{video.path===p.path?<b>{tt("Bu video")} · </b>:null}{video.title}</span></label>)}</div>{p.queue.length>0&&<div className="studio-row"><button className="chip" onClick={()=>setPicked(new Set([p.path,...p.queue.map(x=>x.path)].filter(x=>!isLink(x))))}>{tt("Altyazısız bölümlerin hepsi")}</button><button className="chip" onClick={()=>setPicked(new Set([p.path]))}>{tt("Yalnız bu video")}</button></div>}</details>
+    <details className="studio-optional"><summary>{tt("Diğer araçlar: canlı altyazı ve PGS OCR")}</summary><LiveCaptionControl path={p.path} engine={engine} model={model} language={lng}/><OcrTool {...p}/></details>
+    {err&&<div className="extra-status" role="alert">{err}</div>}
+    <div className="studio-create-footer"><span className="muted small">{!ready?tt("Önce motor ve model gerekli."):tt("Motor ve model hazır")}</span>{dl.state&&<button className="chip" onClick={dl.cancel}>{tt("İndirmeyi durdur")}</button>}<button className="primary" disabled={!ready||picked.size===0||!compatible||!!dl.state} onClick={start}>{picked.size>1?tt("{0} video için altyazı oluştur",picked.size):tt("Altyazı oluştur")}</button></div>
+    <QueueList items={q}/>
+  </div>;
 }
 
 function QueueList({ items }: { items: QueueItem[] }) {
@@ -578,7 +518,11 @@ function TranslateTab(p: StudioProps) {
         const { system, user } = translationPrompt(batches[i], langLabel(target) + ` (${target})`, p.meta?.title ?? p.title, glossary, style);
         let answer: unknown;
         try { answer = await assistantJson(system, user, use); }
-        catch { answer = await assistantJson(system, user, use); } // one retry: services fail now and then
+        catch (error) {
+          // Retrying a missing/rejected key or quota cannot fix this batch.
+          if (stop.current || !use.key || !["server", "network", "unknown"].includes(classifyAiError(error))) throw error;
+          answer = await assistantJson(system, user, use);
+        }
         const r = applyTranslation(state.out, batches[i], answer);
         state = { out: r.cues, next: i + 1, total: batches.length, missing: state.missing + r.missing, last: batches[i].lines.slice(-4).map((l) => l.id) };
         setRun(state);
@@ -696,6 +640,29 @@ function SyncTab(p: StudioProps) {
   const { cues } = useSubCues(p.subFile);
   const [res, setRes] = useState<S.SyncResult | null>(null);
   const [err, setErr] = useState("");
+  const [reference, setReference] = useState("");
+  const [referenceRatio,setReferenceRatio]=useState(1),[splitPenalty,setSplitPenalty]=useState(7);
+  const [aligned, setAligned] = useState<{result: S.ReferenceAlignment; cues: Cue[]; source: string} | null>(null);
+  useEffect(() => { setAligned(null); setRes(null); }, [p.subFile, p.path]);
+  const referenceRun = () => job.run(async (id) => {
+    setErr(""); setAligned(null);
+    try {
+      if (!cues?.length || !p.subFile || !reference) throw new Error(tt("Önce iki altyazıyı seçin."));
+      const target = cues.map(c => ({...c,start:c.start*referenceRatio,end:c.end*referenceRatio}));
+      const refCues = parseSubtitle(await S.subtitleText(reference)).sort((a,b) => a.start - b.start);
+      const result = await S.alignReference(id, refCues, target,splitPenalty);
+      if (result.offsets.length !== target.length || result.offsets.some(v => !Number.isFinite(v))) throw new Error(tt("Geçersiz eşitleme sonucu"));
+      setAligned({result, cues: target, source: p.subFile});
+    } catch (e) { setErr(errText(e)); }
+  });
+  const saveAligned = async () => {
+    if (!aligned || aligned.source !== p.subFile) return;
+    try {
+      const adjusted = aligned.cues.map((c,i) => ({...c, start: Math.max(0, c.start + aligned.result.offsets[i]), end: Math.max(0.01, c.end + aligned.result.offsets[i])}));
+      const file = await S.saveSubtitle(p.path, fileLang(p.subFile) + ".aligned", serializeSrt(adjusted));
+      p.onAttach(file, tt("Referansla eşitlenmiş altyazı")); setAligned(null);
+    } catch (e) { setErr(errText(e)); }
+  };
   const [previewing, setPreviewing] = useState(false);
   const previewRef = useRef(false);
   previewRef.current = previewing;
@@ -749,6 +716,14 @@ function SyncTab(p: StudioProps) {
           {previewing && <div className="muted small">{tt("Önizleme açık: oynatıcıda deneyip uygula ya da kapat; kapatınca önceki ayar geri gelir.")}</div>}
         </div>
       )}
+      <div className="studio-result">
+        <strong>{tt("Referans altyazıyla eşitle (alass)")}</strong>
+        <div className="studio-row"><label>FPS <select disabled={!!job.state} value={referenceRatio} onChange={e=>{setReferenceRatio(+e.target.value);setAligned(null);}}>{[[1,"1:1"],[25/23.976,"25 → 23.976"],[23.976/25,"23.976 → 25"],[25/24,"25 → 24"],[24/25,"24 → 25"],[24/23.976,"24 → 23.976"],[23.976/24,"23.976 → 24"]].map(([ratio,label])=><option key={ratio} value={ratio}>{label}</option>)}</select></label><label>{uiLang()==="tr"?"Bölünme cezası":"Split penalty"} <input type="number" min={1} max={30} value={splitPenalty} disabled={!!job.state} onChange={e=>{setSplitPenalty(+e.target.value);setAligned(null);}}/></label></div>
+        <p className="muted small">{tt("Bu filme doğru zamanlanmış başka bir altyazı seçin. Farklı kurgu ve kesintiler için satırları ayrı ayrı kaydırır; özgün dosyayı koruyarak yeni SRT kaydeder.")}</p>
+        <div className="studio-row"><button className="chip" disabled={!!job.state} onClick={async () => { const file = await open({multiple:false, filters:[{name:"Subtitle", extensions:["srt","vtt","ass","ssa"]}]}).catch(() => null); if (typeof file === "string") { setReference(file); setAligned(null); } }}>{tt("Referans seç")}</button><span className="muted small">{reference.split(/[\\/]/).pop()}</span>
+        <button className="primary" disabled={!reference || !cues?.length || !!job.state} onClick={referenceRun}>{tt("Satırları eşitle")}</button></div>
+        {aligned && aligned.source === p.subFile && <div className="studio-row"><span>{tt("{0} satır, {1} zaman geçişi", aligned.cues.length, aligned.result.splits)}</span><button className="primary" onClick={() => void saveAligned()}>{tt("Yeni SRT olarak kaydet")}</button></div>}
+      </div>
       {err && <div className="extra-status" role="alert">{err}</div>}
     </div>
   );

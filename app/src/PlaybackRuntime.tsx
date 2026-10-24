@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { invoke } from "./nativeCore";
 import { tt } from "./i18n";
 import { mpv, MpvState, setProp } from "./mpv";
-import { pauseMusic, useMusic } from "./Music";
+import { pauseMusic, useMusic, isMusicPath } from "./Music";
 import { parseSponsorSegments, segmentToSkip, sleepFadeVolume, SponsorSegment, sponsorUrl, youtubeId } from "./playbackExtrasModel";
 import { presenceActivity, scrobbleDue, scrobbleTrack, traktTarget } from "./scrobbleModel";
 import { traktOn, traktScrobble } from "./trakt";
@@ -23,7 +23,7 @@ export function PlaybackRuntime({ s, film, item }: { s: MpvState; film: boolean;
   useExtras();
   const m = useMusic();
   const c = m.now;
-  const music = !film && !!c && !!s.path && (s.path === c.src || (!!c.yt && /googlevideo\.com/i.test(s.path)));
+  const music = !film && !!c && !!s.path && (s.path === c.src || (!!c.server&&isMusicPath(s.path)) || (!!c.yt && /googlevideo\.com/i.test(s.path)));
   const mode = film ? "film" : music ? "music" : null;
 
   // ---- sound: each new file gets its part's profile (mpv may have restarted in between); a loop belongs to its file

@@ -1,0 +1,79 @@
+[
+  {
+    "view": "podcast",
+    "version": "before",
+    "width": 1280,
+    "initialCueButtons": 1000
+  },
+  {
+    "view": "podcast",
+    "version": "after",
+    "width": 1280,
+    "initialCueButtons": 80
+  },
+  {
+    "view": "assistant index",
+    "width": 1280,
+    "paginationAndSearch": true
+  },
+  {
+    "view": "podcast",
+    "version": "before",
+    "width": 640,
+    "initialCueButtons": 1000
+  },
+  {
+    "view": "podcast",
+    "version": "after",
+    "width": 640,
+    "initialCueButtons": 80
+  },
+  {
+    "view": "assistant index",
+    "width": 640,
+    "paginationAndSearch": true
+  },
+  {
+    "view": "podcast",
+    "retry": true,
+    "fallback": true
+  },
+  {
+    "view": "line search",
+    "version": "before",
+    "lateCancelledReadCached": true,
+    "refresh": false
+  },
+  {
+    "view": "line search",
+    "version": "after",
+    "lateCancelledReadCached": false,
+    "refresh": true
+  },
+  {
+    "view": "film draft",
+    "version": "before",
+    "quotaRetry": false,
+    "conflictProtected": true
+  },
+  {
+    "view": "film draft",
+    "version": "after",
+    "quotaRetry": true,
+    "conflictProtected": true
+  },
+  {
+    "view": "browser history",
+    "version": "before",
+    "forgotten": 120,
+    "remaining": 1,
+    "calls": 120
+  },
+  {
+    "view": "browser history",
+    "version": "after",
+    "forgotten": 120,
+    "remaining": 1,
+    "calls": 1
+  }
+]

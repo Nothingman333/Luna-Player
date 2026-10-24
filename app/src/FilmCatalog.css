@@ -55,3 +55,17 @@
   .library-empty-actions { justify-content: flex-start; }
 }
 @media (prefers-reduced-motion: reduce) { .poster:focus-visible .poster-img { transform: none; } }
+
+/* Keep format badges and completion at the top, TMDB at the poster bottom-right. */
+.library-corner { bottom: 12px; }
+.library-corner .library-rating-badge { order: 2; margin-top: auto; }
+.library-corner .done-badge { order: 1; }
+
+.library-corner {top:8px;bottom:auto;right:8px;max-width:calc(100% - 16px);} .library-corner .library-rating-badge {font-size:10px;padding:3px 6px;border-radius:4px;border:1px solid var(--line);color:var(--text);background:var(--panel);} .poster-img:has(.library-rating-badge) .poster-badges {max-width:calc(100% - 90px);flex-wrap:wrap;}
+
+.poster-img > .library-corner {top:8px;bottom:auto;right:8px;}
+
+.poster-img:has(.library-rating-badge) .poster-badges {max-width:calc(100% - 112px);}
+.poster-img:has(.library-rating-badge) .poster-badges {top:36px;left:8px;right:8px;max-width:calc(100% - 16px);flex-wrap:wrap;}
+
+.poster-img > .library-corner {left:8px;right:auto;top:auto;bottom:12px;} .poster-img:has(.library-rating-badge) .poster-badges {top:8px;max-width:calc(100% - 16px);}

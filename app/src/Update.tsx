@@ -1,3 +1,6 @@
+import {releaseChangeLine} from "./changeOrigin";
+import {RELEASE_HISTORY} from "./releaseHistory";
+import {unseenReleases} from "./releaseHistoryModel";
 // Luna updates itself from GitHub, like any installed program: it looks once in a while, says
 // "a new version is ready", and on a click downloads, checks the signature, installs and reopens.
 // Betas (GitHub pre-releases) only when the user turns them on, after a warning.
@@ -5,10 +8,10 @@ import { useEffect, useState } from "react";
 import { invoke } from "./nativeCore";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { tt } from "./i18n";
+import { lang,tt } from "./i18n";
 import { store } from "./library";
 import { Icon, I } from "./Screens";
-import { VERSION_LABEL } from "./version";
+import { APP_VERSION, VERSION_LABEL } from "./version";
 
 type Info = { version: string; notes: string; date: string; beta: boolean; page: string; installable: boolean };
 type State = { found: Info | null; checking: boolean; err: string; checkedAt: number; got: number; total: number; installing: boolean; hidden: boolean };
@@ -80,10 +83,12 @@ function Progress() {
 /** The "a new version is ready" card at the top (not over a playing film). */
 export function UpdateBanner() {
   const s = useUpd();
+  const [dismissed,setDismissed]=useState(()=>store.get("updatePopupSeen")??"");
+  const dismissPopup=(version:string)=>{store.set("updatePopupSeen",version);setDismissed(version);};
   const f = s.found;
   if (!f || s.hidden) return null;
   return (
-    <div className="clip-offer glass upd-offer" role="status">
+    <>{!s.installing && dismissed !== f.version && <section className="update-popup" role="dialog" aria-label={tt("Yeni sürüm hazır")}><h3>{tt("Luna {0} hazır", f.version)}</h3><p>{tt("Güncelleme hazır. İstersen şimdi yükleyebilir ya da daha sonra devam edebilirsin.")}</p><div className="upd-row">{f.installable ? <button className="primary sm" onClick={()=>{dismissPopup(f.version);void install();}}>{tt("Güncelle")}</button> : <button className="primary sm" onClick={()=>{dismissPopup(f.version);void openUrl(f.page);}}>{tt("İndirme sayfası")}</button>}<button className="chip" onClick={()=>dismissPopup(f.version)}>{tt("Sonra")}</button></div></section>}<div className="clip-offer glass upd-offer" role="status">
       <span className="clip-ic"><Icon d={I.down} size={16} /></span>
       <span className="clip-t">
         <b>{f.beta ? tt("Luna {0} (beta) hazır", f.version) : tt("Luna {0} hazır", f.version)}</b>
@@ -98,7 +103,7 @@ export function UpdateBanner() {
           <button className="chip" onClick={() => { store.set("updSkip", f.version); set({ hidden: true }); }}>{tt("Bu sürümü atla")}</button>
         </>
       )}
-    </div>
+    </div></>
   );
 }
 
@@ -155,4 +160,12 @@ export function UpdateSettings({ onBackup }: { onBackup: () => void }) {
       <div className="set-hint">{tt("Luna yeni sürümü GitHub'dan alır; indirilen dosyanın imzası kontrol edilir, sonra kurulup Luna yeniden açılır. Verilerin yerinde kalır.")}</div>
     </div>
   );
+}
+
+export function ReleaseNews(){
+ const [open,setOpen]=useState(()=>store.get("releaseNewsSeen")!==APP_VERSION);
+ if(!open)return null;
+ const releases=unseenReleases(RELEASE_HISTORY,store.get("releaseNewsSeen"),APP_VERSION);
+ const close=()=>{store.set("releaseNewsSeen",APP_VERSION);setOpen(false);};
+ return <div className="modal-bg" onClick={e=>{if(e.target===e.currentTarget)close();}} onKeyDown={e=>{if(e.key==="Escape"){e.stopPropagation();close();}}}><section className="modal release-news" role="dialog" aria-modal="true" aria-labelledby="release-news-title"><h2 id="release-news-title">{tt("Luna {0} · Neler yeni?",VERSION_LABEL)}</h2><div className="release-history">{releases.map(release=><section key={release.version}><h3>{release.version}</h3><p style={{whiteSpace:"pre-wrap"}}>{release.text.split("\n").map(line=>releaseChangeLine(line,lang()==="en")).join("\n")}</p></section>)}</div><div className="modal-actions"><button className="primary" autoFocus onClick={close}>{tt("Başlayalım")}</button></div></section></div>;
 }

@@ -1,3 +1,8 @@
+import {CountrySelect} from "./CountrySelect";
+import {AiUsageSettings} from "./AiUsageSettings";
+import {HardwareCapabilities} from "./HardwareCapabilities";
+import { flushDatabaseStorage } from "./databaseStorage";
+import {MatchBadge} from "./MatchBadge";
 import {DebugLauncher} from "./DebugPanel";
 import { FilmMetadataPanel, DiagnosticTools } from "./EverydayTools";
 import { editionLabels } from "./everydayModel";
@@ -9,7 +14,7 @@ import { openPanel } from "./paletteExtras";
 import { TonightPicker } from "./TonightPicker";
 import { OnThisDay } from "./OnThisDay";
 import { useTint } from "./posterTint";
-import { GeneralExtras, BulkRelink, PlaybackPreferences, SeriesTracker, MediaNotebook, extraText } from "./Extras";
+import { GeneralExtras, BulkRelink, PlaybackPreferences, SeriesTracker, ExtraModal, extraText } from "./Extras";
 import { ExtrasSettings } from "./ExtrasSettings";
 import { defaultSubLangs, lang, setLang, tt, DEC } from "./i18n";
 import { BUILD_AGENT, BUILD_AGENT_NAMES, VERSION_LABEL } from "./version";
@@ -249,7 +254,6 @@ export function Header({ browserOpen, onBrowser, mode, setMode, tabs: modeTabs, 
 }
 
 // ---------- cards ----------
-const STAR = "M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z";
 function PosterBase({ it, a, copyCount, episodes, resume, reason, watched, stamp }: PosterProps) {
   void stamp; // a change of the library (finished, downloaded, relinked…) re-renders the card
   const m = it.meta, facts = itemFacts(it);
@@ -281,7 +285,7 @@ function PosterBase({ it, a, copyCount, episodes, resume, reason, watched, stamp
       <div className={"poster-img" + (status ? " remote" : "")}
         title={status === "remote" ? tt("İndirilmeli · detaylardan indirebilirsin") : status === "missing" ? tt("Dosya bulunamadı · detaylardan yeniden bağlayabilirsin") : undefined}>
         {(done || facts.rating > 0) && <div className="library-corner">
-          {facts.rating > 0 && <span className="library-rating-badge" title={extraText("TMDB topluluk puanı (senin puanın değil)", "TMDB community rating (not your own)")} aria-label={extraText(`TMDB puanı ${facts.rating.toFixed(1)}`, `TMDB rating ${facts.rating.toFixed(1)}`)}><small>TMDB</small>★ {facts.rating.toFixed(1)}</span>}
+          {facts.rating > 0 && <span className="library-rating-badge" title={extraText("TMDB topluluk puanı (senin puanın değil)", "TMDB community rating (not your own)")} aria-label={extraText(`TMDB puanı ${facts.rating.toFixed(1)}`, `TMDB rating ${facts.rating.toFixed(1)}`)}>TMDB {facts.rating.toFixed(1)}</span>}
           {done && <span className="done-badge" title={tt("Bitirdin")}>✓</span>}
         </div>}
         {poster ? <img src={poster} alt="" loading="lazy" onLoad={(e) => e.currentTarget.classList.add("loaded")} onError={() => { posterFailures.fail(poster); again((x) => x + 1); }} />
@@ -666,7 +670,9 @@ function FileCard({ e, it, season, episode, rec, a }: {
   const thumb = useThumb(e.path, true);
   return (
     <button className="card" onClick={() => a.play(e.path)} onContextMenu={(ev) => a.menu(ev, { path: e.path, item: it })}>
-      <div className="thumb" style={thumb ? { backgroundImage: `url("${thumb}")` } : undefined}>
+      <div className={"thumb folder-preview"+(a.missing.has(e.path)?" remote":"")} style={thumb ? { backgroundImage: `url("${thumb}")` } : undefined}>
+        {!thumb && <span className="folder-preview-fallback" aria-hidden="true"><Icon d={I.film} size={34}/></span>}
+        {a.missing.has(e.path)&&<span className="library-state-chip">{extraText("Dosya yok","File missing")}</span>}
         <div className="thumb-play"><Icon d={I.play} fill size={28} /></div>
         {it && <InfoBtn onClick={() => a.details(it.key)} />}
         <div className="thumb-badges"><Badges path={e.path} compact /></div>
@@ -719,6 +725,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
   const [season, setSeason] = useState(file.season ?? seasons[0] ?? 1);
   const [eps, setEps] = useState<Episode[]>([]);
   const [more, setMore] = useState(false);
+  const [extraPanel,setExtraPanel]=useState<"preferences"|"series"|"file"|null>(null);
   const info = useMediaInfo(file.path);
 
   useEffect(() => {
@@ -748,7 +755,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
           <TitleLogo kind={m?.kind} id={m && m.id > 0 ? m.id : undefined} title={m?.title || it.parsed.title} />
           <div className="d-meta">
             {m && m.rating > 0 && (
-              <button className="rating" title={extraText("TMDB topluluk puanı (senin puanın değil) · TMDB sayfasını aç", "TMDB community rating (not your own) · open the TMDB page")}
+              <button className="rating" title={extraText("Bilgi kaynağı: TMDB","Metadata source: TMDB")+` · ${m?.kind}/${m?.id} · `+extraText("TMDB topluluk puanı (senin puanın değil)","TMDB community rating (not your own)")}
                 aria-label={extraText(`TMDB topluluk puanı ${m.rating.toFixed(1)}; TMDB sayfasını aç`, `TMDB community rating ${m.rating.toFixed(1)}; open the TMDB page`)}
                 onClick={() => openUrl(m.id > 0 ? `https://www.themoviedb.org/${m.kind}/${m.id}?language=${lang()}` : `https://www.themoviedb.org/search?query=${encodeURIComponent(m.title)}`)}>
                 <span className="rating-src">TMDB</span>★ {m.rating.toFixed(1).replace(".", DEC)}
@@ -759,6 +766,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
             {m && m.runtime > 0 ? <span>{formatRuntime(m.runtime, tt("sa"), tt("dk"))}</span> : null}
             {m?.genres?.length ? <span>{m.genres.slice(0, 3).join(", ")}</span> : null}
           </div>
+          <FilmMetadataPanel item={it} menuOnly/>
           <Badges path={file.path} big />
           {m && m.id > 0 && <WhereToWatch kind={m.kind} id={m.id} />}
           {copies.length > 1 && (
@@ -792,14 +800,8 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
               <Icon d={I.check} size={20} />
             </button>
             <TasteButtons it={it} />
-            <span className="d-quick"><MediaNotebook buttonClass="act" path={file.path} title={m?.title || it.parsed.title} time={rec?.time || 0} subtitle="" seek={(time, path) => window.dispatchEvent(new CustomEvent("luna-open-note", { detail: { path, time } }))} /></span>
-            <button className="act" data-tip={extraText("Film değerlendirmesi", "Film review")} aria-label={extraText("Film değerlendirmesine git", "Go to the film review")}
-              onClick={() => { const el = document.getElementById("film-decision"); if (!el) return; el.scrollIntoView({ block: "start", behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); el.focus({ preventScroll: true }); }}>
-              <Icon d={STAR} size={20} />
-            </button>
-            <button className="act" data-tip={tt("Altyazı ekle")} aria-label={tt("Altyazı ekle")} onClick={() => onAddSub(file.path)}>
-              <Icon d={I.subs} size={20} />
-            </button>
+            <button className="act" data-tip={extraText("Film defterim","My film notebook")} aria-label={extraText("Film defterim","My film notebook")} onClick={()=>window.dispatchEvent(new CustomEvent("luna-film-notebook",{detail:{path:file.path}}))}><Icon d="M5 3h14v18l-7-4-7 4Z M9 7h6 M9 10h6" size={20}/></button>
+
             <button className="act" data-tip={tt("YouTube'da Türkçe fragman")} aria-label={tt("Fragman")}
               onClick={() => { const t = m?.title || it.parsed.title; const y = m?.year || it.parsed.year; openUrl(youtubeTrailer(y ? `${t} (${y})` : t)); }}>
               <Icon d={I.play} fill size={16} />
@@ -809,25 +811,20 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
                 <Icon d={I.chat} size={20} />
               </button>
             )}
-            <button className="act" data-tip={tt("Diğer seçenekler")} aria-label={tt("Diğer seçenekler")} onClick={(e) => a.menu(e, { path: file.path, item: it })}>
+            <button className="act" data-tip={tt("Diğer seçenekler")} aria-label={tt("Diğer seçenekler")} onClick={(e) => openMenu(e,[{label:tt("Altyazı ekle"),act:()=>onAddSub(file.path)},{label:extraText("Dosya ve altyazı bilgisi","File and subtitle information"),act:()=>setExtraPanel("file")},{label:extraText("Bilgileri düzenle","Edit metadata"),act:()=>window.dispatchEvent(new CustomEvent("luna-edit-metadata",{detail:it.key}))},{label:extraText("Bu dosyanın hatırlanan tercihleri","Remembered preferences for this file"),act:()=>setExtraPanel("preferences")},...(!isTv&&m&&m.id>0?[{label:extraText("Film serilerini takip et","Follow film collections"),act:()=>setExtraPanel("series")}]:[]),"sep",{label:tt("Dosya seçenekleri"),act:()=>a.menu(e,{path:file.path,item:it})}])}>
               <Icon d={I.more} size={22} />
             </button>
           </div>
-          <FilmMetadataPanel item={it}/>{copies.length>1&&<button className="chip" onClick={()=>{store.remove("lunaPreferredCopy:"+(m?.id?m.kind+":"+m.id:it.key));setPick(null);rerender(n=>n+1);}}>{extraText("Hatırlanan sürüm seçimini sıfırla","Reset preferred version")}</button>}
+          <MatchBadge kind={m?.kind??it.parsed.kind} id={m?.id}/>
+          {copies.length>1&&<button className="chip" onClick={()=>{store.remove("lunaPreferredCopy:"+(m?.id?m.kind+":"+m.id:it.key));setPick(null);rerender(n=>n+1);}}>{extraText("Hatırlanan sürüm seçimini sıfırla","Reset preferred version")}</button>}
           {missingPanel}
 
           {download}
-          <div className="muted small">
-            {extSub ? tt("Altyazı: {0}", fileName(extSub)) : hasSub ? tt("Altyazı mevcut") : tt("Altyazı yok · oynatınca internetten aranır")}
-            {info?.size ? ` · ${fmtSize(info.size)}` : ""}
-          </div>
+          <div className="muted small">{rec&&rec.duration>0?tt("{0} kaldı",fmtTime(Math.max(0,rec.duration-rec.time))):extraText("Henüz başlanmadı","Not started")}</div>
         </div>
       </section>
 
-      <MediaNotebook buttonClass="chip" path={file.path} title={m?.title||it.parsed.title} time={rec?.time||0} subtitle="" seek={(time,path)=>window.dispatchEvent(new CustomEvent("luna-open-note",{detail:{path,time}}))}/>
-      <PlaybackPreferences path={file.path}/>
-      {!isTv && m && m.id > 0 && <SeriesTracker movieId={m.id}/>}
-      <div id="film-decision" tabIndex={-1}><FilmDecisionPanel key={it.key} film={{ title: m?.title || it.parsed.title, year: m?.year || it.parsed.year, kind: m?.kind ?? it.parsed.kind, id: m?.id, rating: m?.rating }} /></div>
+      {extraPanel && <ExtraModal title={extraPanel==="file"?extraText("Dosya ve altyazı bilgisi","File and subtitle information"):extraPanel==="preferences"?extraText("Bu dosyanın hatırlanan tercihleri","Remembered preferences for this file"):extraText("Film serilerini takip et","Follow film collections")} close={()=>setExtraPanel(null)}>{extraPanel==="file"?<div><p>{extSub?tt("Altyazı: {0}",fileName(extSub)):hasSub?tt("Altyazı mevcut"):tt("Altyazı yok · oynatınca internetten aranır")}</p><p>{info?.size?fmtSize(info.size):extraText("Boyut bilinmiyor","Unknown size")}</p></div>:extraPanel==="preferences"?<PlaybackPreferences path={file.path} expanded/>:<SeriesTracker movieId={m?.id} expanded/>}</ExtraModal>}
 
       {m?.cast?.length ? (
         <section className="row">
@@ -845,6 +842,8 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
           </div>
         </section>
       ) : null}
+
+      <div id="film-decision" tabIndex={-1}><FilmDecisionPanel key={it.key} notebook={{path:file.path,title:m?.title||it.parsed.title,time:rec?.time||0,seek:(time,path)=>window.dispatchEvent(new CustomEvent("luna-open-note",{detail:{path,time}}))}} film={{ title: m?.title || it.parsed.title, year: m?.year || it.parsed.year, kind: m?.kind ?? it.parsed.kind, id: m?.id, rating: m?.rating }} /></div>
 
       {isTv && (
         <section className="row">
@@ -1191,6 +1190,7 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
     store.set("reviewAiNote", rvNote.trim().slice(0, 1000));
     store.set("geminiModel", gemModel.trim() || "gemini-flash-latest");
     await flushSecrets();
+    await flushDatabaseStorage();
   };
   const save = async () => {
     try { await persist(); onClose(); window.location.reload(); }
@@ -1244,7 +1244,7 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
             <div className="set-body" key={sec}>
               {sec === "general" && (
                 <>
-                  <div className="set-card">
+                  <div className="set-card set-locale-grid">
                     <div className="field">
                       <span>{tt("Dil")}</span>
                       <div className="seg-row">
@@ -1253,6 +1253,7 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                       </div>
                       <div className="set-hint">{tt("Dil değişince uygulama yeniden yüklenir; diğer ayarların kaydedilir.")}</div>
                     </div>
+                    <CountrySelect/>
                   </div>
                   <div className="set-card">
                     <div className="field">
@@ -1264,6 +1265,7 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                     </div>
                   </div>
                   <UpdateSettings onBackup={() => setSec("backup")} />
+                  <HardwareCapabilities />
                   <GeneralExtras/>
                   <StudioSettings/>
                   <ShellSettings/>
@@ -1293,6 +1295,7 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
               )}
               {sec === "keys" && (
                 <>
+                  <AiUsageSettings />
                   <div className="set-note">{tt("Anahtarlar ücretsiz; Windows'un Kimlik Bilgileri kasasında, şifreli olarak sadece bu bilgisayarda saklanır.")}</div>
                   <div className="set-card">
                     <KeyField label="TMDB" hint={tt("Afişler, özetler, oyuncular, Keşfet ve sana özel öneriler")} value={tmdbKey} onChange={setTmdbKey}
@@ -1439,7 +1442,7 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                 </>
               )}
               {sec === "extras" && <ExtrasSettings />}
-              {sec === "backup" && <><BackupSettings /><BulkRelink /><DiagnosticTools /><DebugLauncher /></>}
+              {sec === "backup" && <><BackupSettings /><BulkRelink /><DiagnosticTools /><section className="set-card"><h3>{extraText("Hata ayıklama", "Debugging")}</h3><p className="set-hint">{extraText("Canlı olayları filtrele, hata ayrıntılarını incele ve paylaşmak istediğin kayıtları kopyala.", "Filter live events, inspect error details and copy the records you want to share.")}</p><div className="backup-row"><DebugLauncher /></div></section></>}
               {sec === "downloads" && (
                 <div className="set-card">
                   <div className="field">

@@ -16,7 +16,7 @@ export type OEntry = {
 export type OFeed = { url: string; title: string; entries: OEntry[]; next?: string; search?: string };
 
 const ACQ = "http://opds-spec.org/acquisition";
-const BOOK_TYPES = /epub|pdf|cbz|comicbook/i;
+const BOOK_TYPES = /epub|pdf|cbz|mobi|azw3|fb2|comicbook/i;
 export const kindOf = (type: string) => (/pdf/i.test(type) ? "pdf" : /cbz|comicbook/i.test(type) ? "cbz" : "epub");
 
 export async function fetchText(url: string): Promise<string> {

@@ -274,3 +274,39 @@
   .studio-progress .dl-bar > div.busy { animation: none; }
   .skip-seg .skip-left, .whisper-pill .ring { transition: none; }
 }
+
+/* Compact tool tabs keep the full toolset available above its content. */
+.modal.extra-modal:has(.studio) { width: min(800px, 95vw); }
+.studio .studio-shell { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.studio .studio-rail { position: static; flex-direction: row; flex-wrap: wrap; gap: 6px; }
+.studio .studio-tab-btn { flex: 1 1 140px; padding: 10px; }
+.studio .studio-tab-text small { white-space: normal; }
+.studio .studio-tab-btn.on { box-shadow: inset 0 -2px 0 var(--accent); }
+@media (max-width: 600px) { .studio .studio-tab-btn { flex-basis: 120px; } .studio .studio-cards.two { grid-template-columns: minmax(0, 1fr); } }
+
+.studio .studio-rail { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); }
+.studio .studio-tab-btn { min-width: 0; gap: 7px; }
+.studio .studio-tab-text b { font-size: 13px; }
+.studio .studio-tab-text small { font-size: 11px; }
+.studio-optional { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.studio-optional > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.studio-optional[open] > summary { margin-bottom: 12px; }
+@media(max-width:600px) { .studio .studio-rail { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+
+/* The create screen is a compact form, not six model cards stacked above its action. */
+.modal.extra-modal:has(.studio) { width: min(900px,calc(100vw - 32px)); max-height: calc(100dvh - 40px); }
+.studio .studio-create-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+.studio .studio-config { border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.studio .studio-config p { margin: 0; line-height: 1.5; }
+.studio .studio-select-label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; }
+.studio .studio-select-label select { width: 100%; min-width: 0; }
+.studio .studio-basics { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
+.studio .studio-create-footer { position: sticky; bottom: -1px; display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 12px 0 2px; background: var(--panel); border-top: 1px solid var(--line); z-index: 2; }
+.studio .studio-create-footer > span { margin-right: auto; }
+.studio .studio-optional > .studio-opts { margin-top: 14px; }
+.studio .studio-ready { color: var(--accent-soft,var(--accent)); font-size: 12px; }
+.studio .studio-rail { gap: 4px; padding: 4px; }
+.studio .studio-tab-btn { padding: 8px; }
+.studio .studio-context { margin-bottom: 10px; }
+.studio .studio-tab { gap: 12px; }
+@media(max-width:620px){.studio .studio-create-grid{grid-template-columns:minmax(0,1fr)}.studio .studio-create-footer{flex-wrap:wrap}.studio .studio-create-footer>span{flex-basis:100%}}

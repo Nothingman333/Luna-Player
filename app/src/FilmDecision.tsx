@@ -1,4 +1,4 @@
-import {savedFilmAnalysis} from "./filmAnalysisStorage";
+
 import { useEffect, useId, useRef, useState } from "react";
 import { store } from "./library";
 import { invoke } from "./nativeCore";
@@ -7,16 +7,20 @@ import { tt, locale } from "./i18n";
 import { ASPECTS, addAnalysis, cleanProfile, cleanWorkspace, filmKey, parseReviews, personalFit } from "./filmReviewModel";
 import type { Aspect, FilmTarget, Mood, Workspace } from "./filmReviewModel";
 import { ReviewAiCard } from "./FilmReviewAi";
-import { TastePanel } from "./TastePanel";
+
+import { useFilmDraft } from "./useFilmDraft";
+import { ExtraModal, MediaNotebook, extraText } from "./Extras";
 import "./FilmDecision.css";
 
 const labels: Record<Aspect, string> = { story: "Hikâye", pace: "Tempo", acting: "Oyunculuk", visuals: "Görsellik", emotion: "Karakter ve duygu", sound: "Müzik ve ses" };
 const label = (a: Aspect) => tt(labels[a]);
 const profileKey = (f: FilmTarget) => "filmDecision:profile:" + (f.kind === "tv" ? "tv" : "movie");
-export function FilmDecisionPanel({ film }: { film: FilmTarget }) {
-  return <DecisionWorkspace key={filmKey(film)} film={film} />;
+type NotebookContext={path:string;title:string;time:number;seek:(seconds:number,path:string)=>void};
+export function openFilmNotebook(film:FilmTarget) { window.dispatchEvent(new CustomEvent("luna-film-notebook",{detail:{key:filmKey(film)}})); }
+export function FilmDecisionPanel({ film,notebook }: { film: FilmTarget;notebook?:NotebookContext }) {
+  return <DecisionWorkspace key={filmKey(film)} film={film} notebook={notebook} />;
 }
-function DecisionWorkspace({ film }: { film: FilmTarget }) {
+function DecisionWorkspace({ film,notebook }: { film: FilmTarget;notebook?:NotebookContext }) {
   const key = "filmDecision:work:" + filmKey(film), pk = profileKey(film), uid = useId();
   const [work, setWork] = useState(() => cleanWorkspace(store.json(key, null)));
   const [profile, setProfile] = useState(() => cleanProfile(store.json(pk, null)));
@@ -24,7 +28,13 @@ function DecisionWorkspace({ film }: { film: FilmTarget }) {
   const [selected, setSelected] = useState(0), [status, setStatus] = useState("");
   const [note, setNote] = useState(work.feedback.note), [draft, setDraft] = useState(work.draft);
   const [reasons, setReasons] = useState<Aspect[]>(work.feedback.reasons);
+  const draftState = useFilmDraft("filmDecision:recovery:" + filmKey(film), { note, draft, reasons }, { note: work.feedback.note, draft: work.draft, reasons: work.feedback.reasons });
   const pending = useRef(0), mounted = useRef(false);
+  const [diaryOpen,setDiaryOpen]=useState(false),[diaryTab,setDiaryTab]=useState<"thoughts"|"scenes"|"draft">("thoughts");
+
+  const [scanOpen,setScanOpen]=useState(false);
+  useEffect(()=>{const show=()=>{setScanOpen(true);};window.addEventListener("luna-local-reviews",show);return()=>window.removeEventListener("luna-local-reviews",show);},[]);
+  useEffect(()=>{const open=(event:Event)=>{const detail=(event as CustomEvent<{path?:string;key?:string}>).detail;if(!detail || !(detail.key===filmKey(film) || (notebook && detail.path===notebook.path)))return;setDiaryOpen(true);setDiaryTab(notebook?"scenes":"thoughts");};window.addEventListener("luna-film-notebook",open);return()=>window.removeEventListener("luna-film-notebook",open);},[notebook?.path,film]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; pending.current++; }; }, []);
   useEffect(() => {
     const sync = (event: Event) => {
@@ -55,7 +65,7 @@ function DecisionWorkspace({ film }: { film: FilmTarget }) {
   const oldFit = personalFit(previous, learnedProfile, mood);
   const feedback = (vote: Workspace["feedback"]["vote"]) => {
     const latest = cleanWorkspace(store.json(key, null));
-    if (save({ ...latest, feedback: { vote, reasons, note } })) setStatus(tt("Bu eser için geri bildirimin kaydedildi."));
+    if (save({ ...latest, feedback: { vote:vote===latest.feedback.vote?"none":vote, reasons, note } })) setStatus(tt("Bu eser için geri bildirimin kaydedildi."));
   };
   const exportData = async () => {
     const json = JSON.stringify({ luna: "film-decision", version: 1, film: { title: film.title, year: film.year, kind: film.kind, id: film.id, rating: film.rating }, workspace: work, profile, method: "keywords-v1" }, null, 2);
@@ -71,34 +81,48 @@ function DecisionWorkspace({ film }: { film: FilmTarget }) {
       setStatus(tt("Analiz ve notlar dışa aktarıldı."));
     } catch { setStatus(tt("Dışa aktarılamadı. Kayıt yerini ve yazma iznini kontrol et.")); }
   };
-  const [aiRun, setAiRun] = useState(() => savedFilmAnalysis(film));
-  const filmScores: Partial<Record<Aspect, number>> = aiRun ? Object.fromEntries(aiRun.verdict.aspects.filter((x) => x.score != null).map((x) => [x.aspect, x.score!])) : {};
   return <section className="la" aria-label={tt("Luna Analiz")}>
-    <ReviewAiCard film={film} profile={learnedProfile} mood={mood} setMood={setMood} label={label} onRun={setAiRun} onReviews={(json) => analyze(json, true, tt("Letterboxd yorumları yerel taramaya da eklendi."))} />
+    <ReviewAiCard film={film} profile={learnedProfile} mood={mood} setMood={setMood} label={label} onReviews={(json) => analyze(json, true, tt("Letterboxd yorumları yerel taramaya da eklendi."))} />
 
-    <TastePanel kind="film" scores={filmScores} sub={film.kind === "tv" ? tt("Diziler için") : undefined} />
 
-    <details className="la-sec">
-      <summary><h3>{tt("İzledikten sonra")}</h3><span>{work.feedback.vote === "like" ? tt("Beğendin") : work.feedback.vote === "dislike" ? tt("Beğenmedin") : tt("Notun ve sebeplerin")}</span></summary>
+    {diaryOpen&&<ExtraModal title={extraText("Film defterim","My film notebook")} close={()=>setDiaryOpen(false)} className="workspace-modal"><div className="film-diary la">
+      <div className="film-diary-tabs" role="tablist" aria-label={extraText("Film defteri bölümleri","Film notebook sections")}>{([["thoughts",extraText("Düşüncelerim","My thoughts")],...(notebook?[["scenes",extraText("Sahneler ve alıntılar","Scenes and quotes")]]:[]),["draft",tt("Yorum taslağım")]] as ["thoughts"|"scenes"|"draft",string][]).map(([tab,label])=><button key={tab} id={uid+tab+"-tab"} className={"chip"+(diaryTab===tab?" on":"")} role="tab" aria-selected={diaryTab===tab} aria-controls={uid+tab+"-panel"} onClick={()=>setDiaryTab(tab)}>{label}</button>)}</div>
+      {draftState.recovery && <div className="la-draft-recovery" role="status"><div><b>{extraText("Yarım kalan notların var", "You have unfinished notes")}</b><small>{extraText("Kayıtlı yorumun değişmedi. Taslağı geri getirebilir veya silebilirsin.", "Your saved review is unchanged. Restore or discard the draft.")}</small></div><button className="chip" onClick={() => { const row=draftState.recover(); if(row){setNote(row.note);setDraft(row.draft);setReasons(row.reasons);} }}>{extraText("Taslağı geri getir", "Restore draft")}</button><button className="chip" onClick={() => { if(confirm(extraText("Yarım kalan kurtarma taslağı silinsin mi?", "Discard the unfinished recovery draft?"))) draftState.discard(); }}>{extraText("Taslağı sil", "Discard draft")}</button></div>}
+      <fieldset className="la-note-fields" disabled={!!draftState.recovery}>
+      <div role="tabpanel" id={uid+"thoughts-panel"} aria-labelledby={uid+"thoughts-tab"} hidden={diaryTab!=="thoughts"}>
       <p className="la-muted">{tt("Seni etkileyen ya da uzaklaştıran konuları işaretle: Zevklerim bunları kullanır. Bu not Letterboxd'a veya izleme günlüğüne gönderilmez.")}</p>
       <div className="la-reasons">{ASPECTS.map((a) => <button key={a} className={"seg" + (reasons.includes(a) ? " on" : "")} aria-pressed={reasons.includes(a)} onClick={() => setReasons(reasons.includes(a) ? reasons.filter((x) => x !== a) : [...reasons, a])}>{label(a)}</button>)}</div>
       <label className="la-label" htmlFor={uid + "note"}>{tt("Beni etkileyen veya uzaklaştıran gerekçeler")}</label>
       <textarea id={uid + "note"} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder={tt("ör. sonu çok etkileyiciydi, ikinci yarısı yavaş")} />
       <div className="la-actions">
-        <button className={"chip" + (work.feedback.vote === "like" ? " on" : "")} onClick={() => feedback("like")}>👍 {tt("Beğendim · kaydet")}</button>
-        <button className={"chip" + (work.feedback.vote === "dislike" ? " on" : "")} onClick={() => feedback("dislike")}>👎 {tt("Beğenmedim · kaydet")}</button>
+        <button className={"chip" + (work.feedback.vote === "like" ? " on" : "")} onClick={() => feedback("like")} aria-pressed={work.feedback.vote==="like"}><VoteIcon/> {tt("Beğendim · kaydet")}</button>
+        <button className={"chip" + (work.feedback.vote === "dislike" ? " on" : "")} onClick={() => feedback("dislike")} aria-pressed={work.feedback.vote==="dislike"}><VoteIcon down/> {tt("Beğenmedim · kaydet")}</button>
         <button className="chip" onClick={() => feedback("none")}>{tt("Nötr · kaydet")}</button>
       </div>
+      </div>
+      <div role="tabpanel" id={uid+"draft-panel"} aria-labelledby={uid+"draft-tab"} hidden={diaryTab!=="draft"}>
       <label className="la-label" htmlFor={uid + "draft"}>{tt("Yorum taslağım")}</label>
       <textarea id={uid + "draft"} maxLength={6000} value={draft} onChange={(e) => setDraft(e.target.value)} rows={4} />
       <div className="la-actions">
         <button className="chip" disabled={!note.trim()} onClick={() => { if (draft.trim() && !confirm(tt("Mevcut taslağı notlarından yeniden oluşturmak istiyor musun?"))) return; setDraft(film.title + (film.year ? " (" + film.year + ")" : "") + "\n\n" + note.trim()); }}>{tt("Notlarımdan taslak oluştur")}</button>
         <button className="chip" onClick={() => { if (save({ ...cleanWorkspace(store.json(key, null)), draft })) setStatus(tt("Taslak kaydedildi.")); }}>{tt("Taslağı kaydet")}</button>
+        <button className="chip" disabled={!draftState.dirty} onClick={() => { const latest=cleanWorkspace(store.json(key,null));if(save({...latest,draft,feedback:{...latest.feedback,note,reasons}}))setStatus(extraText("Notların ve yorum taslağın kaydedildi. Beğeni durumun korunuyor.","Notes and review draft saved. Your like or dislike is unchanged.")); }}>{extraText("Bütün notlarımı kaydet", "Save all my notes")}</button>
       </div>
-    </details>
+      </div>
+      <p className="la-draft-state" role="status">{draftState.dirty?extraText("Kaydedilmemiş değişiklikler", "Unsaved changes"):extraText("Notların güncel", "Notes are up to date")}{draftState.status?" · "+draftState.status:""}</p>
+      {draftState.retryable && <button className="chip" onClick={draftState.retry}>{extraText("Kurtarma kaydını yeniden dene", "Retry recovery save")}</button>}
+      </fieldset>
+      {notebook&&<div role="tabpanel" id={uid+"scenes-panel"} aria-labelledby={uid+"scenes-tab"} hidden={diaryTab!=="scenes"}><MediaNotebook key={notebook.path} embedded {...notebook} subtitle=""/></div>}
+    <div className="la-actions -foot">
+      <button className="chip" onClick={exportData}>{tt("Bu eserin analiz ve notlarını dışa aktar")}</button>
+      <button className="chip" disabled={!work.history.length} onClick={() => { if (confirm(tt("Bu eserin analiz geçmişi silinsin mi? Notların ve tercihlerin korunur."))) { if (save({ ...cleanWorkspace(store.json(key, null)), history: [] })) setSelected(0); } }}>{tt("Analiz geçmişini temizle")}</button>
+      <span className="la-muted">{tt("Yerel · özel. Dışa aktarma, son kaydedilen notları içerir; tam Luna yedeğinden ayrıdır.")}</span>
+    </div>
+    {status&&<p role="status">{status}</p>}
+    </div></ExtraModal>}
 
-    <details className="la-sec" open={!aiRun && !!analysis}>
-      <summary><h3>{tt("Yerel tarama")}</h3><span>{tt("internetsiz, anahtar sözcüklerle")}</span></summary>
+    {scanOpen&&<ExtraModal title={extraText("Yorumları internetsiz tara","Scan reviews offline")} close={()=>setScanOpen(false)} className="workspace-modal"><div className="la local-review-scan">
+
       <p className="la-muted">{tt("Bu bir yapay zekâ değerlendirmesi değil; Türkçe ve İngilizce anahtar sözcük taraması. İroniyi ve bağlamı kaçırabilir. Sinyal, film puanı veya beğenme olasılığı değildir. En az iki konuda açık işaret yoksa hesaplanmaz.")}</p>
       <div className="la-scores -small">
         <div className="la-score"><span>{tt("Kişisel yorum sinyali")}</span><strong>{fit.score === null ? "—" : fit.score}<small>{fit.score === null ? "" : "/100"}</small></strong><em className="-plain">{tt("Açık işaret bulunan konu: {0}", fit.covered)}</em></div>
@@ -128,13 +152,9 @@ function DecisionWorkspace({ film }: { film: FilmTarget }) {
           {r.evidence.length ? r.evidence.map((ev) => <blockquote key={ev.review}><p>{ev.excerpt}</p><cite>{tt("Yorum {0}", ev.review + 1)}{analysis.reviews[ev.review].source && " · " + analysis.reviews[ev.review].source}</cite><details><summary>{tt("Yorumun tamamı · spoiler olabilir")}</summary><p>{analysis.reviews[ev.review].text}</p></details></blockquote>) : <p className="la-muted">{tt("Bu konuda işaret bulunamadı.")}</p>}
         </details>)}
       </div>}
-    </details>
+    </div></ExtraModal>}
 
-    <div className="la-actions -foot">
-      <button className="chip" onClick={exportData}>{tt("Bu eserin analiz ve notlarını dışa aktar")}</button>
-      <button className="chip" disabled={!work.history.length} onClick={() => { if (confirm(tt("Bu eserin analiz geçmişi silinsin mi? Notların ve tercihlerin korunur."))) { if (save({ ...cleanWorkspace(store.json(key, null)), history: [] })) setSelected(0); } }}>{tt("Analiz geçmişini temizle")}</button>
-      <span className="la-muted">{tt("Yerel · özel. Dışa aktarma, son kaydedilen notları içerir; tam Luna yedeğinden ayrıdır.")}</span>
-    </div>
-    {status && <p className="la-status" role="status">{status}</p>}
   </section>;
 }
+
+function VoteIcon({down=false}:{down?:boolean}){return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" style={down?{transform:"rotate(180deg)"}:undefined} aria-hidden="true"><path d="M7 10v11H3V10h4Zm0 0 5-8c3 0 3 3 1 7h6a2 2 0 0 1 2 2l-2 8a2 2 0 0 1-2 2H7"/></svg>;}

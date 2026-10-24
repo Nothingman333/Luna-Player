@@ -5,7 +5,7 @@ const src = (f) => path.resolve(__dirname, '../src', f);
 const load = (f) => { const m = { exports: {} }; new Function('exports', 'module', ts.transpileModule(fs.readFileSync(src(f), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText)(m.exports, m); return m.exports; };
 const P = load('assistantProviderModel.ts'), T = load('assistantToolRun.ts'), H = load('assistantHistory.ts'), R = load('assistantReliability.ts'), V = load('assistantPresentation.ts');
 // the real tool declarations (Gemini schema) straight from Taste.tsx
-const taste = fs.readFileSync(src('Taste.tsx'), 'utf8').replace(/\r\n/g, '\n');
+const taste = require('./production-source.cjs').read(src('Taste.tsx')).replace(/\r\n/g, '\n');
 const from = taste.indexOf('const TOOLS = ') + 'const TOOLS = '.length, to = taste.indexOf('\nconst TOOL_MODE');
 const lit = taste.slice(from, to), body = lit.slice(0, lit.lastIndexOf('}];') + 3);
 const actionSource=fs.readFileSync(src('assistantWorkspaceActions.ts'),'utf8');

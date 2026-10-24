@@ -35,22 +35,27 @@ export function SubtitleDialog({ path, onAttach, onClose, onWhisper }: {
   const title = store.json<Record<string, { title?: string; year?: string } | null>>("meta", {});
   const metaTitle = title[groupKey(parsed)] ?? undefined;
 
+  const [searchTitle,setSearchTitle]=useState(metaTitle?.title ?? parsed.title);
+  const [searchedTitle,setSearchedTitle]=useState(metaTitle?.title ?? parsed.title);
+  const [manual,setManual]=useState(false);
   const runId = useRef(0);
-  const run = (k = key, l = langs) => {
+  const run = (k = key, l = langs, name = searchedTitle, byName = manual) => {
     if (!k) return;
     const my = ++runId.current;
     setErr("");
+    setSearchedTitle(name);setManual(byName);
     setHits(null);
     invoke<SubHit[]>("search_subtitles", {
       path, apiKey: k, langs: l,
       query: {
-        title: metaTitle?.title ?? parsed.title,
-        year: parsed.year ?? (metaTitle?.year ? Number(metaTitle.year) : undefined),
-        season: parsed.season, episode: parsed.episode,
+        title: name.trim() || metaTitle?.title || parsed.title,
+        manual: byName,
+        year: byName ? undefined : parsed.year ?? (metaTitle?.year ? Number(metaTitle.year) : undefined),
+        season: byName ? undefined : parsed.season, episode: byName ? undefined : parsed.episode,
       },
     }).then((h) => my === runId.current && setHits(h)).catch((e) => { if (my === runId.current) { setErr(String(e)); setHits([]); } });
   };
-  useEffect(() => { run(); }, []);
+  useEffect(() => { run(); return()=>{runId.current++;}; }, []);
 
   const saveKey = async () => {
     const k = keyDraft.trim();
@@ -88,11 +93,12 @@ export function SubtitleDialog({ path, onAttach, onClose, onWhisper }: {
         <div className="row-head" style={{ margin: 0 }}>
           <h2>{tt("Altyazı ekle")}</h2>
           <span className="grow" />
-          {onWhisper && <button className="ghost sm" onClick={onWhisper} title={tt("Konuşmayı bilgisayarında yazıya döker (whisper.cpp)")}>{tt("Sesten oluştur…")}</button>}
+          {onWhisper && <button className="primary sm studio-launch" onClick={onWhisper} title={tt("Konuşmayı bilgisayarında yazıya döker (whisper.cpp)")}>{tt("Altyazı stüdyosu")}</button>}
           <button className="ghost sm" onClick={fromDisk}>{tt("Bilgisayardan yükle…")}</button>
         </div>
         <div className="muted small ellipsis">{path.split(/[\\/]/).pop()}</div>
 
+        {key && <form className="sub-search-form" onSubmit={e=>{e.preventDefault();if(searchTitle.trim())run(key,langs,searchTitle,true);}}><label>{tt("Eser adıyla ara")}<input value={searchTitle} maxLength={200} onChange={e=>setSearchTitle(e.target.value)} aria-label={tt("Altyazı aranacak eser adı")} /></label><button className="chip" disabled={!searchTitle.trim() || busy!==null}>{tt("İsimle ara")}</button><button type="button" className="chip" disabled={busy!==null} onClick={()=>{const title=metaTitle?.title??parsed.title;setSearchTitle(title);run(key,langs,title,false);}}>{tt("Dosyayla eşleştir")}</button></form>}
         {!key ? (
           <div className="sub-key">
             <p>{tt("İnternetten aramak için bir kere OpenSubtitles API anahtarını gir.")}
@@ -126,7 +132,10 @@ export function SubtitleDialog({ path, onAttach, onClose, onWhisper }: {
                 <option value="tr,en,de,fr,es,it,ru,ar">{tt("Birçok dil")}</option>
               </select>
             </div>
+            {manual && <div className="muted small">{tt("İsimle arama: {0} · dosya eşleştirmesi kullanılmadı", searchedTitle)}</div>}
+            {hits && hits.length>0 && !hits.some(h=>h.hashMatch) && <div className="muted small">{tt("Tam dosya eşleşmesi yok. Eser adını ve bölümü kontrol et; gerekirse isimle yeniden ara.")}</div>}
             {err && <div className="sub-err">{err}</div>}
+            {hits && !hits.length && !err && onWhisper && <div className="sub-studio-offer" role="status"><b>{tt("Uyumlu altyazı bulunamadı")}</b><span>{tt("Konuşmayı bilgisayarında yazıya dökelim.")}</span><button className="primary sm" onClick={onWhisper}>{tt("Altyazı stüdyosunu aç")}</button></div>}
             <div className="sub-list">
               {hits === null && <div className="sub-loading"><span className="spinner" />  {tt("OpenSubtitles'ta aranıyor…")}</div>}
               {hits && !list.length && !err && <div className="muted">{onWhisper ? tt("Altyazı bulunamadı. Bilgisayardan yükleyebilir ya da Sesten oluştur ile Whisper'a yazdırabilirsin.") : tt("Altyazı bulunamadı. Bilgisayardan yükleyebilirsin.")}</div>}

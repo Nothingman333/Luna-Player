@@ -115,7 +115,7 @@ static WATCHER: Mutex<Option<notify::RecommendedWatcher>> = Mutex::new(None);
 pub fn watch_folders(app: AppHandle, film: Vec<String>, music: Vec<String>, books: Vec<String>) -> Result<u32, String> {
     use notify::{event::ModifyKind, EventKind, RecursiveMode, Watcher};
     // the old watcher (and with it the old sender, which ends the old debounce thread) goes first
-    *WATCHER.lock().unwrap() = None;
+    *WATCHER.lock().unwrap_or_else(|e| e.into_inner()) = None;
     let roots: Vec<String> = film.iter().chain(&music).chain(&books).filter(|r| Path::new(r).is_dir()).cloned().collect();
     if roots.is_empty() {
         return Ok(0);
@@ -143,7 +143,7 @@ pub fn watch_folders(app: AppHandle, film: Vec<String>, music: Vec<String>, book
             watched += 1;
         }
     }
-    *WATCHER.lock().unwrap() = Some(watcher);
+    *WATCHER.lock().unwrap_or_else(|e| e.into_inner()) = Some(watcher);
     std::thread::spawn(move || {
         let t0 = Instant::now();
         let mut deb = core::Debounce::default();

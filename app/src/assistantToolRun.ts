@@ -126,7 +126,7 @@ export function classifyToolResult(text: string): "ok" | "noop" | "partial" | "f
   if (/^(EKLENMEDİ|BELİRSİZ|HATA|GEÇERSİZ|Başlık yok|Liste adı yok|Not boş|Kişi adı yok|Bilinmeyen işlem|Bu işlem burada yapılamıyor|Oynatıcı hazır değil|Silinemedi|Adı değiştirilemedi|Bağlantı okunamadı|Letterboxd okunamadı|Kütüphanede YOK|Bu adda birden çok|Birden çok dosya|Bu not bulunamadı|Silinecek bir şey bulunamadı)/i.test(t)) return "failed";
   if (/^(Zaten |Already )/i.test(t)) return "noop";
   if (/\d+\s*\/\s*\d+\s.*(silindi|eklendi|çıkarıldı)[^.]*;.*(silinemedi|eklenemedi|başarısız)/i.test(t)) return "partial";
-  if (/bulunamad|bulamad|böyle bir .* yok|^Liste bulunamadı|not found|\bfailed\b|\berror\b/i.test(t.slice(0, 160))) return "failed";
+  if (/bulunamad|bulamad|böyle bir .* yok|^Liste bulunamadı|not found|^(?:error|failed)\s*[:：]/i.test(t.slice(0, 160))) return "failed";
   return "ok";
 }
 

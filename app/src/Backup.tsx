@@ -1,3 +1,5 @@
+import { flushDatabaseStorage } from "./databaseStorage";
+import { appStorage as localStorage } from "./appStorage";
 import {ExtraModal,extraText} from "./Extras";
 import {preserveApiConnections,backupComparison,backupDate,localBackupDay,sameBackupPath} from "./backupModel";
 import "./BackupTools.css";
@@ -122,7 +124,7 @@ export function BackupSettings() {
       await writeBackup(path);if(!alive.current)return;
     }
     const data=preserveApiConnections(preview.data,snapshot());data.lunaMark="1";
-    await replaceStorage(localStorage,data,next=>invoke("state_save",{json:JSON.stringify(next)}));
+    await replaceStorage(localStorage,data,async next=>{await flushDatabaseStorage();await invoke("database_replace",{json:JSON.stringify(next)});await invoke("state_save",{json:JSON.stringify(next)});});
     location.reload();
   });
   const comparison=preview?backupComparison(snapshot(),preserveApiConnections(preview.data,snapshot())):null;

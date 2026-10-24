@@ -1,3 +1,6 @@
+import {createPortal} from "react-dom";
+import {gpuCapabilities,systemProfile} from "./hardwareProfile";
+import { appStorage as localStorage } from "./appStorage";
 import { tt, DEC } from "./i18n";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "./nativeCore";
@@ -39,9 +42,10 @@ export type VideoSet = {
   a4k: "off" | "fast" | "hq";
   /** frame interpolation synced to the display (smoother camera moves in 24 fps films) */
   smooth: boolean;
+  vsr: "off" | "nvidia" | "intel";
 };
 export const VIDEO_DEFAULTS: VideoSet = {
-  brightness: 0, contrast: 0, saturation: 0, gamma: 0, hue: 0, sharpen: 0, denoise: 0, deband: false, zoom: 0, rotate: 0, aspect: "no", fill: false, hq: false, a4k: "off", smooth: false,
+  brightness: 0, contrast: 0, saturation: 0, gamma: 0, hue: 0, sharpen: 0, denoise: 0, deband: false, zoom: 0, rotate: 0, aspect: "no", fill: false, hq: false, a4k: "off", smooth: false, vsr: "off",
 };
 export const loadVideoSet = (path: string): VideoSet => {
   try { return { ...VIDEO_DEFAULTS, ...JSON.parse(localStorage.getItem("vset:" + path) ?? "{}") }; }
@@ -63,9 +67,15 @@ export function applyVideoSet(v: VideoSet) {
     vf.push(`@dn:lavfi=[hqdn3d=${d.toFixed(1)}:${(d * 0.75).toFixed(1)}:${(d * 1.5).toFixed(1)}:${(d * 1.1).toFixed(1)}]`);
   }
   if (v.sharpen > 0) vf.push(`@sharp:lavfi=[cas=${Math.min(1, v.sharpen / 100).toFixed(2)}]`);
-  const hw = vf.length ? "auto-copy-safe" : "auto-safe";
+  const vsr = v.vsr === "nvidia" || v.vsr === "intel" ? v.vsr : "off";
+  // VSR requires D3D11 hardware frames; CPU-only denoise/sharpen cannot share this chain.
+  if (vsr !== "off") { vf.length = 0; vf.push(`@vsr:d3d11vpp=format=nv12:scale=2:scaling-mode=${vsr}`); }
+  const hw = vsr !== "off" ? "d3d11va" : vf.length ? "auto-copy-safe" : "auto-safe";
   if (hw !== lastHwdec) { setProp("hwdec", hw); lastHwdec = hw; }
-  setProp("vf", vf.join(","));
+  void setProp("vf", vf.join(",")).catch(error => {
+    if (vsr !== "off") { void setProp("vf", "").catch(() => {}); void setProp("hwdec", "auto-safe").catch(() => {}); lastHwdec = "auto-safe"; }
+    window.dispatchEvent(new CustomEvent("luna-extra-error", { detail: String(error) }));
+  });
   // Scaling and shaders change only when they differ (each change rebuilds mpv's render chain).
   const hq = !!v.hq;
   if (hq !== lastHq) {
@@ -82,7 +92,7 @@ export function applyVideoSet(v: VideoSet) {
     if (smooth) setProp("tscale", "oversample");
     lastSmooth = smooth;
   }
-  const chain = v.a4k === "fast" || v.a4k === "hq" ? anime4kChain(v.a4k) : [];
+  const chain = vsr === "off" && (v.a4k === "fast" || v.a4k === "hq") ? anime4kChain(v.a4k) : [];
   const key = chain.join("|");
   if (key !== lastShaders) { setProp("glsl-shaders", chain); lastShaders = key; }
 }
@@ -98,16 +108,18 @@ const SLIDERS: [keyof VideoSet, string, number, number][] = [
 ];
 
 /** Gear panel: picture settings for the current video, saved for that video only. */
-export function VideoPanel({ path, onClose, onScenes, onClip }: { path: string; onClose: () => void; onScenes?: () => void; onClip?: () => void }) {
+export function VideoPanel({ path, onClose, onScenes, onClip, enhancements = false, embedded = false }: { path: string; onClose: () => void; onScenes?: () => void; onClip?: () => void; enhancements?: boolean; embedded?: boolean }) {
   const [v, setV] = useState<VideoSet>(() => loadVideoSet(path));
   const [frame, setFrame] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const pending = useRef<Partial<VideoSet>>({});
+  const dirty = useRef<Partial<VideoSet>>({});
+  useEffect(()=>{const sync=(event:Event)=>{if((event as CustomEvent).detail===path)setV(loadVideoSet(path));};setV(loadVideoSet(path));window.addEventListener("luna-video-settings",sync);return()=>window.removeEventListener("luna-video-settings",sync);},[path]);
   const timer = useRef(0);
   useEffect(() => {
     const down = (e: MouseEvent) => {
       const t = e.target as HTMLElement;
-      if (box.current && !box.current.contains(t) && !t.closest(".vset-anchor")) onClose();
+      if (box.current && !box.current.contains(t) && !t.closest(".vset-anchor, .up-anchor")) onClose();
     };
     window.addEventListener("mousedown", down);
     return () => { window.removeEventListener("mousedown", down); clearTimeout(timer.current); };
@@ -117,11 +129,15 @@ export function VideoPanel({ path, onClose, onScenes, onClip }: { path: string; 
     try {
       if (JSON.stringify(next) === JSON.stringify(VIDEO_DEFAULTS)) localStorage.removeItem("vset:" + path);
       else localStorage.setItem("vset:" + path, JSON.stringify(next));
+      window.dispatchEvent(new CustomEvent("luna-video-settings",{detail:path}));
     } catch {}
   };
   // Picture properties are cheap but a drag fires dozens of events: send at most ~20/s.
   const live = (k: keyof VideoSet, val: number) => {
+    dirty.current[k]=val as never;
+    if((k==="sharpen"||k==="denoise")&&val>0)dirty.current.vsr="off";
     setV((cur) => ({ ...cur, [k]: val }));
+    if ((k === "sharpen" || k === "denoise") && val > 0) setV(cur => ({ ...cur, vsr: "off" }));
     pending.current[k] = val as never;
     if (timer.current) return;
     timer.current = window.setTimeout(() => {
@@ -131,25 +147,26 @@ export function VideoPanel({ path, onClose, onScenes, onClip }: { path: string; 
     }, 50);
   };
   // Sharpness and grain removal rebuild a video filter (expensive): applied when the slider is released.
-  const commit = () => setV((cur) => { applyVideoSet(cur); save(cur); return cur; });
+  const commit = () => {clearTimeout(timer.current);timer.current=0;pending.current={};const next={...loadVideoSet(path),...dirty.current};dirty.current={};setV(next);applyVideoSet(next);save(next);};
   const set = (patch: Partial<VideoSet>) => {
     // a slider value still waiting to be sent would land after this and undo it (e.g. Reset)
     clearTimeout(timer.current);
     timer.current = 0;
     pending.current = {};
-    const next = { ...v, ...patch };
+    dirty.current={};
+    const next = { ...loadVideoSet(path), ...patch };
     setV(next);
     applyVideoSet(next);
     save(next);
   };
 
   return (
-    <div className="tracks vset" ref={box}>
+    <div className={"vset" + (embedded ? " embedded" : " tracks")} ref={box}>
       <div className="vset-head">
-        <h3>{tt("Görüntü")}</h3><span className="grow" />
-        <button className="chip" onClick={() => set(VIDEO_DEFAULTS)}>{tt("Sıfırla")}</button>
+        <h3>{enhancements ? tt("Luna iyileştirmeleri") : tt("Görüntü")}</h3><span className="grow" />
+        <button className="chip" onClick={() => set(enhancements ? {hq:false,a4k:"off",vsr:"off",smooth:false} : {...VIDEO_DEFAULTS,hq:v.hq,a4k:v.a4k,vsr:v.vsr,smooth:v.smooth})}>{tt("Sıfırla")}</button>
       </div>
-      {SLIDERS.map(([k, label, min, max]) => (
+      {!enhancements && <>{SLIDERS.map(([k, label, min, max]) => (
         <label key={k} className="vslider">
           <span>{label}</span>
           <input type="range" min={min} max={max} value={v[k] as number}
@@ -164,7 +181,9 @@ export function VideoPanel({ path, onClose, onScenes, onClip }: { path: string; 
         
         {tt("Bant giderme (renk geçişlerindeki basamaklanma)")}
       </label>
-      <QualityBlock v={v} set={set} />
+      </>}
+      {enhancements && <QualityBlock v={v} set={set} />}
+      {!enhancements && <>
       {(onScenes || onClip) && (
         <div className="look-row">
           {onScenes && <button className="chip" onClick={() => { onClose(); onScenes(); }}>{tt("Sahne ızgarası (Ctrl+G)")}</button>}
@@ -202,6 +221,7 @@ export function VideoPanel({ path, onClose, onScenes, onClip }: { path: string; 
           </div>
         </div>
       )}
+      </>}
       <div className="muted small">{tt("Sadece bu video için kaydedilir · çift tık sıfırlar")}</div>
     </div>
   );
@@ -210,6 +230,8 @@ export function VideoPanel({ path, onClose, onScenes, onClip }: { path: string; 
 /** Scaling quality and the optional Anime4K shaders (downloaded on request, verified). */
 function QualityBlock({ v, set }: { v: VideoSet; set: (p: Partial<VideoSet>) => void }) {
   const [files, setFiles] = useState<string[]>(shaders);
+  const [caps,setCaps]=useState(gpuCapabilities(null));
+  useEffect(()=>{let alive=true;void systemProfile().then(p=>{if(alive)setCaps(gpuCapabilities(p.gpus));}).catch(()=>{});return()=>{alive=false;};},[]);
   const [dl, setDl] = useState<number | null>(null);
   const [err, setErr] = useState("");
   useEffect(() => { void loadShaders().then(setFiles); }, []);
@@ -222,6 +244,13 @@ function QualityBlock({ v, set }: { v: VideoSet; set: (p: Partial<VideoSet>) => 
   };
   return (
     <div className="vset-quality">
+      <div className="look-row">
+        <span className="muted small">{tt("Süper çözünürlük")}</span>
+        {([["off", tt("Kapalı")], ["nvidia", "NVIDIA RTX"], ["intel", "Intel VSR"]] as const).map(([key, label]) => (
+          <button key={key} className={"seg sm" + (v.vsr === key ? " on" : "")} disabled={key !== "off" && caps.known && !caps[key]} title={key !== "off" && caps.known && !caps[key] ? tt("Bu üreticiye ait ekran kartı algılanmadı") : tt("Kart ve sürücü desteği ayrıca gerekir")} onClick={() => set({ vsr: key, ...(key !== "off" ? { sharpen: 0, denoise: 0, a4k: "off" as const } : {}) })}>{label}</button>
+        ))}
+      </div>
+      <div className="muted small">{tt("Uyumlu ekran kartı ve sürücü gerekir. VSR, keskinleştirme ve Anime4K ile birlikte kullanılmaz.")}</div>
       <label className="look-check">
         <input type="checkbox" checked={v.hq} onChange={(e) => set({ hq: e.target.checked })} />
         {tt("Yüksek kalite ölçekleme (mpv, ekran kartını biraz daha yorar)")}
@@ -229,7 +258,7 @@ function QualityBlock({ v, set }: { v: VideoSet; set: (p: Partial<VideoSet>) => 
       <div className="look-row">
         <span className="muted small">{tt("Anime4K")}</span>
         {([["off", tt("Kapalı")], ["fast", tt("Hızlı")], ["hq", tt("Kaliteli")]] as const).map(([k, l]) => (
-          <button key={k} className={"seg sm" + (v.a4k === k ? " on" : "")} disabled={k !== "off" && !have} onClick={() => set({ a4k: k })}>{l}</button>
+          <button key={k} className={"seg sm" + (v.a4k === k ? " on" : "")} disabled={k !== "off" && !have} onClick={() => set({ a4k: k, ...(k !== "off" ? { vsr: "off" as const } : {}) })}>{l}</button>
         ))}
         {!have && <button className="chip" disabled={dl !== null} onClick={get}>{dl !== null ? tt("İndiriliyor… {0}%", Math.round(dl)) : tt("Shaderları indir (0,8 MB)")}</button>}
       </div>
@@ -237,7 +266,7 @@ function QualityBlock({ v, set }: { v: VideoSet; set: (p: Partial<VideoSet>) => 
       {err && <div className="muted small">{err}</div>}
       <label className="look-check">
         <input type="checkbox" checked={!!v.smooth} onChange={(e) => set({ smooth: e.target.checked })} />
-        {tt("Akıcı hareket (kare ara değerleme; kamera kaydırmaları daha yumuşak, ekran kartını biraz daha yorar)")}
+        {tt("Akıcı hareket · mpv ara değerleme (AI kare üretimi değildir)")}
       </label>
     </div>
   );
@@ -325,7 +354,7 @@ export function SubAppearance() {
 }
 
 /** Netflix-style "Audio & Subtitles" panel. */
-export function TracksPanel({ s, onSearch, onSync, onClose, onStudio, onTranscript }: {
+export function TracksPanel({ s, onSearch, onSync, onClose, onTranscript }: {
   s: MpvState; onSearch: () => void; onSync: () => void; onClose: () => void; onStudio?: () => void; onTranscript?: () => void;
 }) {
   const audio = s.tracks.filter((t) => t.type === "audio");
@@ -374,7 +403,7 @@ export function TracksPanel({ s, onSearch, onSync, onClose, onStudio, onTranscri
         )}
         <button className="titem link" onClick={onSearch}>{tt("Altyazı ara / yükle…")}</button>
         <button className="titem link" onClick={onSync}>{tt("Senkronu ayarla…")}</button>
-        {onStudio && <button className="titem link" onClick={onStudio}>{tt("Altyazı stüdyosu (Whisper, çeviri, sesle senkron)…")}</button>}
+
         {onTranscript && <button className="titem link" onClick={onTranscript}>{tt("Replikler paneli (R)")}</button>}
       </div>
       <div className="tcol look">
@@ -437,41 +466,19 @@ export function ContextMenu({ s, x, y, extra, onClose }: {
     ...(extra.length ? ["sep" as const, ...extra] : []),
   ];
 
-  const W = 280;
-  const left = Math.min(x, window.innerWidth - W - 8);
-  const top = Math.min(y, window.innerHeight - entries.length * 34 - 16);
-
-  return (
-    <div className="cm-bg" onMouseDown={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }}>
-      <div className="cm" style={{ left, top, width: W }} onMouseDown={(e) => e.stopPropagation()}>
-        {entries.map((e, i) => {
-          if (e === "sep") return <div key={i} className="cm-sep" />;
-          if ("sub" in e)
-            return (
-              <div key={i} className="cm-item has-sub" onMouseEnter={() => setOpen(i)}>
-                <span>{e.label}</span><span className="muted">›</span>
-                {open === i && (
-                  <div className={"cm sub" + (left + W * 2 > window.innerWidth ? " flip" : "")}>
-                    {e.sub.map((c, j) => c === "sep" ? <div key={j} className="cm-sep" /> : "act" in c && (
-                      <button key={j} className="cm-item" onClick={() => { c.act(); onClose(); }}>
-                        <span className="cm-check">{c.on ? "✓" : ""}</span>
-                        <span className="grow ellipsis">{c.label}</span>
-                        {c.hint && <span className="muted small">{c.hint}</span>}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          return (
-            <button key={i} className="cm-item" onMouseEnter={() => setOpen(null)} onClick={() => { e.act(); onClose(); }}>
-              <span className="cm-check">{e.on ? "✓" : ""}</span>
-              <span className="grow">{e.label}</span>
-              {e.hint && <span className="muted small">{e.hint}</span>}
-            </button>
-          );
-        })}
-      </div>
+  const root = useRef<HTMLDivElement>(null), subBox = useRef<HTMLDivElement>(null);
+  const [anchor,setAnchor]=useState({left:0,top:0});
+  const W=Math.min(280,window.innerWidth-16);
+  const left=Math.max(8,Math.min(x,window.innerWidth-W-8));
+  const [top,setTop]=useState(Math.max(8,y));
+  useEffect(()=>{const place=()=>{setTop(Math.max(8,Math.min(y,window.innerHeight-(root.current?.offsetHeight??0)-8)));setOpen(null);setAnchor(a=>({...a}));};place();window.addEventListener("resize",place);return()=>window.removeEventListener("resize",place);},[x,y]);
+  useEffect(()=>{if(open===null)return;const sub=subBox.current;if(!sub)return;const rect=sub.getBoundingClientRect();sub.style.top=Math.max(8,Math.min(anchor.top,window.innerHeight-rect.height-8))+"px";},[open,anchor]);
+  const reveal=(index:number,el:HTMLElement)=>{const r=el.getBoundingClientRect();setAnchor({left:left+W+260>window.innerWidth?Math.max(8,left-260):left+W,top:r.top});setOpen(index);};
+  const selected=open===null?null:entries[open];
+  return createPortal(<div className="cm-bg" onMouseDown={onClose} onKeyDown={e=>{if(e.key==="Escape"){e.stopPropagation();onClose();}if(e.key==="ArrowLeft")setOpen(null);}} onContextMenu={e=>{e.preventDefault();onClose();}}>
+    <div ref={root} className="cm player-menu-root" role="menu" style={{left,top,width:W}} onMouseDown={e=>e.stopPropagation()}>
+      {entries.map((entry,i)=>entry==="sep"?<div key={i} className="cm-sep"/>:"sub" in entry?<button key={i} type="button" className="cm-item has-sub" role="menuitem" aria-haspopup="menu" aria-expanded={open===i} onMouseEnter={e=>reveal(i,e.currentTarget)} onFocus={e=>reveal(i,e.currentTarget)} onClick={e=>reveal(i,e.currentTarget)} onKeyDown={e=>{if(e.key==="ArrowRight"){e.preventDefault();reveal(i,e.currentTarget);requestAnimationFrame(()=>subBox.current?.querySelector<HTMLButtonElement>("button")?.focus());}}}><span>{entry.label}</span><span aria-hidden>›</span></button>:<button key={i} className="cm-item" role="menuitem" onFocus={()=>setOpen(null)} onMouseEnter={()=>setOpen(null)} onClick={()=>{entry.act();onClose();}}><span className="cm-check">{entry.on?"✓":""}</span><span className="grow">{entry.label}</span>{entry.hint&&<span className="muted small">{entry.hint}</span>}</button>)}
     </div>
-  );
+    {selected&&selected!=="sep"&&"sub" in selected&&<div ref={subBox} className="cm player-submenu" role="menu" aria-label={selected.label} style={{left:Math.min(anchor.left,window.innerWidth-268),top:anchor.top,width:Math.min(260,window.innerWidth-16)}} onMouseDown={e=>e.stopPropagation()}>{selected.sub.map((entry,i)=>entry==="sep"?<div key={i} className="cm-sep"/>:"act" in entry&&<button key={i} className="cm-item" role="menuitem" onClick={()=>{entry.act();onClose();}}><span className="cm-check">{entry.on?"✓":""}</span><span className="grow ellipsis">{entry.label}</span>{entry.hint&&<span className="muted small">{entry.hint}</span>}</button>)}</div>}
+  </div>,document.body);
 }

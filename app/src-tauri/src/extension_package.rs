@@ -5,6 +5,8 @@ use serde_json::Value;
 const FILE_LIMIT: u64 = 16 * 1024 * 1024;
 const TOTAL_LIMIT: u64 = 128 * 1024 * 1024;
 pub const PACKAGE_LIMIT: u64 = 32 * 1024 * 1024;
+/// Accept the optional UTF-8 BOM without loosening JSON validation or package limits.
+fn parse_json(data:&[u8])->Result<Value,serde_json::Error>{serde_json::from_slice(data.strip_prefix(&[0xEF,0xBB,0xBF][..]).unwrap_or(data))}
 #[derive(Clone, Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct Preview { pub token: String, pub name: String, pub version: String, pub description: String, pub permissions: Vec<String>, pub hosts: Vec<String>, pub manifest_version: u64, pub source: String, pub bytes: u64, pub signature_verified: bool }
@@ -53,7 +55,7 @@ pub fn unpack(data:&[u8],dest:&Path,expected:Option<&str>)->Result<u64,String>{
   let mut f=zip.by_index(i).map_err(|e|e.to_string())?;let mut out=std::fs::OpenOptions::new().create_new(true).write(true).open(target).map_err(|e|e.to_string())?;
   let n=std::io::copy(&mut f.by_ref().take(FILE_LIMIT+1),&mut out).map_err(|e|e.to_string())?;actual=actual.checked_add(n).ok_or("Boyut taşması")?;if n>FILE_LIMIT||actual>TOTAL_LIMIT{return Err("Dosya sınırı aşıldı".into());}
  }
- if let Some(signed)=signed{let path=dest.join("manifest.json");let mut m:Value=serde_json::from_slice(&bounded_read(&path,1024*1024)?).map_err(|_|"Geçersiz manifest")?;let object=m.as_object_mut().ok_or("Geçersiz manifest")?;object.insert("key".into(),Value::String(signed.key));std::fs::write(path,serde_json::to_vec_pretty(&m).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;}
+ if let Some(signed)=signed{let path=dest.join("manifest.json");let mut m:Value=parse_json(&bounded_read(&path,1024*1024)?).map_err(|_|"Geçersiz manifest")?;let object=m.as_object_mut().ok_or("Geçersiz manifest")?;object.insert("key".into(),Value::String(signed.key));std::fs::write(path,serde_json::to_vec_pretty(&m).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;}
  Ok(total)
 }
 pub fn copy_folder(src:&Path,dest:&Path)->Result<u64,String>{
@@ -71,11 +73,11 @@ pub fn copy_folder(src:&Path,dest:&Path)->Result<u64,String>{
  }let(mut count,mut total)=(0,0);walk(src,dest,&mut count,&mut total,0)?;Ok(total)
 }
 pub fn preview(dir:&Path,token:String,source:String,bytes:u64,signature_verified:bool)->Result<Preview,String>{
- let data=bounded_read(&dir.join("manifest.json"),1024*1024)?;let mut m:Value=serde_json::from_slice(&data).map_err(|_|"manifest.json geçersiz".to_string())?;
+ let data=bounded_read(&dir.join("manifest.json"),1024*1024)?;let mut m:Value=parse_json(&data).map_err(|_|"manifest.json geçersiz".to_string())?;
  let mv=m["manifest_version"].as_u64().ok_or("manifest_version eksik")?;if !matches!(mv,2|3){return Err("Desteklenmeyen manifest sürümü".into());}
  let mut messages=Value::Null;
  if let Some(locale)=m["default_locale"].as_str().filter(|s|s.len()<30&&s.bytes().all(|c|c.is_ascii_alphanumeric()||c==b'_'||c==b'-')){
-  if let Ok(data)=bounded_read(&dir.join("_locales").join(locale).join("messages.json"),1024*1024){messages=serde_json::from_slice(&data).unwrap_or(Value::Null);}
+  if let Ok(data)=bounded_read(&dir.join("_locales").join(locale).join("messages.json"),1024*1024){messages=parse_json(&data).unwrap_or(Value::Null);}
  }
  let localize=|value:&Value|->String{let raw=value.as_str().unwrap_or("");if raw.starts_with("__MSG_")&&raw.ends_with("__")&&raw.len()>=8{let key=&raw[6..raw.len()-2];if let Some(s)=messages.as_object().and_then(|o|o.iter().find(|(k,_)|k.eq_ignore_ascii_case(key))).and_then(|(_,v)|v["message"].as_str()){return s.into();}}raw.into()};
  let name=localize(&m["name"]);if name.trim().is_empty(){return Err("Eklenti adı eksik".into());}
@@ -98,6 +100,7 @@ pub fn preview(dir:&Path,token:String,source:String,bytes:u64,signature_verified
 
 #[cfg(test)]mod archive_tests{
 use super::*;use std::{path::PathBuf,io::{Cursor,Write}};
+#[test]fn imports_bom_manifest_and_messages(){let d=dir();let bytes=zip(&[("manifest.json",b"\xEF\xBB\xBF{\"manifest_version\":3,\"name\":\"__MSG_title__\",\"default_locale\":\"en\",\"version\":\"1.0\"}"),("_locales/en/messages.json",b"\xEF\xBB\xBF{\"title\":{\"message\":\"Reader\"}}")]);let size=unpack(&bytes,&d,None).unwrap();let p=preview(&d,"token".into(),"Local ZIP".into(),size,false).unwrap();assert_eq!(p.name,"Reader");assert!(!std::fs::read(d.join("manifest.json")).unwrap().starts_with(&[0xEF,0xBB,0xBF]));std::fs::remove_dir_all(d).unwrap();}
 fn dir()->PathBuf{let p=std::env::temp_dir().join(format!("luna-import-test-{}-{:?}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));std::fs::create_dir(&p).unwrap();p}
 fn zip(rows:&[(&str,&[u8])])->Vec<u8>{let mut zip=zip::ZipWriter::new(Cursor::new(Vec::new()));for(name,data)in rows{zip.start_file(*name,zip::write::SimpleFileOptions::default()).unwrap();zip.write_all(data).unwrap();}zip.finish().unwrap().into_inner()}
 #[test]fn imports_wrapper_and_localized_manifest(){let d=dir();let bytes=zip(&[("sample/manifest.json",br#"{"manifest_version":3,"name":"__MSG_title__","default_locale":"en","version":"1.0","permissions":["storage"],"host_permissions":["https://example.com/*"],"update_url":"https://example.com/update"}"#),("sample/_locales/en/messages.json",br#"{"title":{"message":"Reader"}}"#),("sample/_metadata/verified_contents.json",b"metadata")]);let size=unpack(&bytes,&d,None).unwrap();let p=preview(&d,"token".into(),"Local ZIP".into(),size,false).unwrap();assert_eq!(p.name,"Reader");assert!(p.permissions.contains(&"storage".into()));assert!(!d.join("_metadata").exists());assert!(!std::fs::read_to_string(d.join("manifest.json")).unwrap().contains("update_url"));std::fs::remove_dir_all(d).unwrap();}

@@ -1,6 +1,7 @@
 import { invoke } from "./nativeCore";
 import { store, flushSecrets } from "./library";
-import { fromAnthropic, fromOpenAi, providerPayloadError } from "./assistantProviderModel";
+import { extractJsonObject, fromAnthropic, fromOpenAi, providerPayloadError } from "./assistantProviderModel";
+import { toAnthropicRequest, toOpenAiRequest } from "./assistantRequestModel";
 
 /** Which service answers for the assistant. Everything in Luna speaks Gemini's request format;
  *  for the others it is translated here, and the answer translated back. */
@@ -65,13 +66,13 @@ export async function commitAiProfiles(profiles:AiProfile[],keys:Record<number,s
 }
 /** What actually answers: a service with its key, model and base URL. */
 export type AiUse = { provider: AiProvider; model: string; key: string; base: string; label: string };
-function useOf(pr: AiProfile): AiUse {
+function getProviderUse(pr: AiProfile): AiUse {
   const key = store.get(profileKeyName(pr.slot)) ?? "";
   const base = cleanBase(pr.base);
   return { provider: pr.provider, model: pr.model || spec(pr.provider).model, key: pr.provider === "custom" ? (base ? key || "-" : "") : key, base, label: pr.name };
 }
 /** A saved profile as the service, model, key and base URL a request uses. */
-export const useOfProfile = (pr: AiProfile): AiUse => useOf(pr);
+export const getAiProfileUse = (pr: AiProfile): AiUse => getProviderUse(pr);
 /** The assistant's profile, if one is chosen (Settings › Accounts). */
 const activeProfile = () => aiProfile(store.get("aiProfile"));
 
@@ -87,7 +88,7 @@ export const aiBase = () => { const pr = activeProfile(); return cleanBase(pr &&
 /** The assistant can answer: a key for the chosen service (a local server at a base URL may need none). */
 export function aiKey(p: AiProvider = aiProvider()): string {
   const pr = activeProfile();
-  if (pr && pr.provider === p) return useOf(pr).key;
+  if (pr && pr.provider === p) return getProviderUse(pr).key;
   const k = store.get(spec(p).keyName) ?? "";
   if (p === "custom") return aiBase() ? k || "-" : "";
   return k;
@@ -97,7 +98,7 @@ export const aiName = () => activeProfile()?.name ?? (aiProvider() === "custom" 
 
 /** A turn keeps its provider, model, base URL and key even if Settings change meanwhile. */
 export function captureAiUse():AiUse{
- const profile=activeProfile();if(profile)return useOf(profile);
+ const profile=activeProfile();if(profile)return getProviderUse(profile);
  const provider=aiProvider();return {provider,model:aiModel(provider),key:aiKey(provider),base:aiBase(),label:aiName()};
 }
 
@@ -115,110 +116,8 @@ export async function aiModels(p: AiProvider, key: string, base?: string): Promi
 }
 
 // ---------- Gemini request → OpenAI / Anthropic ----------
-/** Gemini's schema ("OBJECT", "STRING"…) in JSON Schema (lower-case types). */
-function schema(s: any): any {
-  if (!s || typeof s !== "object") return s;
-  if (Array.isArray(s)) return s.map(schema);
-  const out: any = {};
-  for (const [k, v] of Object.entries(s)) {
-    if (k === "type" && typeof v === "string") out.type = v.toLowerCase();
-    else if (k === "nullable") continue;
-    else if (k === "properties") out.properties = Object.fromEntries(Object.entries(v as any).map(([n, x]) => [n, schema(x)]));
-    else if (k === "items") out.items = schema(v);
-    else out[k] = v;
-  }
-  if (out.type === "object" && !out.properties) out.properties = {};
-  return out;
-}
-/** The tools offered. When Luna requires one of a few ("call show_film"), only those are offered: OpenAI's
- *  "required" and Claude's "any" would otherwise let the model pick any of the forty. */
-const declarations = (body: any): any[] => {
-  const all = (body.tools ?? []).flatMap((t: any) => t.functionDeclarations ?? []);
-  const fc = body.toolConfig?.functionCallingConfig;
-  const only: string[] | undefined = fc?.mode === "ANY" ? fc.allowedFunctionNames : undefined;
-  return only?.length ? all.filter((d: any) => only.includes(d.name)) : all;
-};
-const systemText = (body: any): string => (body.systemInstruction?.parts ?? []).map((p: any) => p.text ?? "").join("\n");
-const wantsJson = (body: any) => body.generationConfig?.responseMimeType === "application/json";
-
-/** Gemini's turns as a list of {role, parts}, with ids given to each function call so the results can point back at them. */
-function turns(body: any) {
-  const pending: { id: string; name: string }[] = [];
-  return (body.contents ?? []).map((c: any, i: number) => {
-    const parts = (c.parts ?? []).map((p: any, j: number) => {
-      if (p.functionCall) { const id = `call_${i}_${j}`; pending.push({ id, name: p.functionCall.name }); return { ...p, _id: id }; }
-      if (p.functionResponse) {
-        const at = pending.findIndex((x) => x.name === p.functionResponse.name);
-        const hit = at >= 0 ? pending.splice(at, 1)[0] : pending.shift();
-        return { ...p, _id: hit?.id ?? `call_${p.functionResponse.name}` };
-      }
-      return p;
-    });
-    return { role: c.role === "model" ? "model" : "user", parts };
-  });
-}
-
-function toOpenAi(body: any, model: string) {
-  const messages: any[] = [];
-  let sys = systemText(body);
-  if (wantsJson(body)) sys += "\n\nAnswer with JSON only.";
-  if (sys.trim()) messages.push({ role: "system", content: sys });
-  for (const t of turns(body)) {
-    const texts = t.parts.filter((p: any) => typeof p.text === "string" && p.text).map((p: any) => p.text);
-    if (t.role === "model") {
-      const calls = t.parts.filter((p: any) => p.functionCall).map((p: any) => ({ id: p._id, type: "function", function: { name: p.functionCall.name, arguments: JSON.stringify(p.functionCall.args ?? {}) } }));
-      messages.push({ role: "assistant", content: texts.join("\n") || null, ...(calls.length ? { tool_calls: calls } : {}) });
-      continue;
-    }
-    for (const p of t.parts.filter((p: any) => p.functionResponse))
-      messages.push({ role: "tool", tool_call_id: p._id, content: JSON.stringify(p.functionResponse.response ?? {}) });
-    const pics = t.parts.filter((p: any) => p.inlineData).map((p: any) => ({ type: "image_url", image_url: { url: `data:${p.inlineData.mimeType};base64,${p.inlineData.data}` } }));
-    if (pics.length) messages.push({ role: "user", content: [...texts.map((x: string) => ({ type: "text", text: x })), ...pics] });
-    else if (texts.length) messages.push({ role: "user", content: texts.join("\n") });
-  }
-  const tools = declarations(body).map((d) => ({ type: "function", function: { name: d.name, description: d.description ?? "", parameters: schema(d.parameters ?? { type: "OBJECT" }) } }));
-  const out: any = { model, messages };
-  if (tools.length) {
-    out.tools = tools;
-    const fc = body.toolConfig?.functionCallingConfig;
-    if (fc?.mode === "ANY") out.tool_choice = fc.allowedFunctionNames?.length === 1 ? { type: "function", function: { name: fc.allowedFunctionNames[0] } } : "required";
-    else if (fc?.mode === "NONE") out.tool_choice = "none";
-  }
-  return out;
-}
-
-function toAnthropic(body: any, model: string) {
-  const messages: { role: "user" | "assistant"; content: any[] }[] = [];
-  const push = (role: "user" | "assistant", blocks: any[]) => {
-    if (!blocks.length) return;
-    const last = messages[messages.length - 1];
-    if (last?.role === role) last.content.push(...blocks); else messages.push({ role, content: blocks });
-  };
-  for (const t of turns(body)) {
-    const blocks: any[] = [];
-    for (const p of t.parts) {
-      if (typeof p.text === "string" && p.text.trim()) blocks.push({ type: "text", text: p.text });
-      else if (p.functionCall) blocks.push({ type: "tool_use", id: p._id, name: p.functionCall.name, input: p.functionCall.args ?? {} });
-      else if (p.functionResponse) blocks.push({ type: "tool_result", tool_use_id: p._id, content: JSON.stringify(p.functionResponse.response ?? {}) });
-      else if (p.inlineData) blocks.push({ type: "image", source: { type: "base64", media_type: p.inlineData.mimeType, data: p.inlineData.data } });
-    }
-    // the results of tool calls come first in their turn
-    blocks.sort((a, b) => (b.type === "tool_result" ? 1 : 0) - (a.type === "tool_result" ? 1 : 0));
-    push(t.role === "model" ? "assistant" : "user", blocks);
-  }
-  if (messages[0]?.role !== "user") messages.unshift({ role: "user", content: [{ type: "text", text: "…" }] });
-  let sys = systemText(body);
-  if (wantsJson(body)) sys += "\n\nAnswer with JSON only.";
-  const out: any = { model, max_tokens: 8192, messages, ...(sys.trim() ? { system: sys } : {}) };
-  const tools = declarations(body).map((d) => ({ name: d.name, description: d.description ?? "", input_schema: schema(d.parameters ?? { type: "OBJECT" }) }));
-  if (tools.length) {
-    out.tools = tools;
-    const fc = body.toolConfig?.functionCallingConfig;
-    if (fc?.mode === "ANY") out.tool_choice = fc.allowedFunctionNames?.length === 1 ? { type: "tool", name: fc.allowedFunctionNames[0] } : { type: "any" };
-    else if (fc?.mode === "NONE") out.tool_choice = { type: "none" };
-  }
-  return out;
-}
+// The translation itself is pure and tested: assistantRequestModel.ts (it also carries temperature,
+// the output limit and JSON mode over, which used to be dropped for every non-Gemini provider).
 
 /** One request to the chosen non-Gemini provider, in and out in Gemini's format. Google Search
  *  (a Gemini-only tool) is left out; the caller sees no groundingMetadata and treats it as unsourced. */
@@ -230,12 +129,12 @@ export async function otherAi(body: any, use?: Partial<AiUse> & { provider: AiPr
   const k = use?.key ?? aiKey(p);
   const key = k === "-" ? "" : k;
   if (p === "claude") {
-    const raw = await invoke<any>("llm_post", { kind: "anthropic", url: endpoint(p) + "/messages", key, body: toAnthropic(body, model) });
+    const raw = await invoke<any>("llm_post", { kind: "anthropic", url: endpoint(p) + "/messages", key, body: toAnthropicRequest(body, model) });
     const failure = providerPayloadError(raw);
     if (failure) throw new Error(failure);
     return { r: fromAnthropic(raw), id: model, noSearch };
   }
-  const raw = await invoke<any>("llm_post", { kind: "openai", url: endpoint(p, use?.base) + "/chat/completions", key, body: toOpenAi(body, model) });
+  const raw = await invoke<any>("llm_post", { kind: "openai", url: endpoint(p, use?.base) + "/chat/completions", key, body: toOpenAiRequest(body, model, p === "custom" ? "custom" : "openai") });
   const failure = providerPayloadError(raw);
   if (failure) throw new Error(failure);
   return { r: fromOpenAi(raw), id: model, noSearch };
@@ -252,7 +151,7 @@ export function reviewAi(): ReviewAi {
   const spoilers = store.get("reviewAiSpoilers") !== "0";
   const choice = store.get("reviewAiProvider") ?? "";
   const pr = choice.startsWith("profile:") ? aiProfile(choice.slice(8)) : null;
-  if (pr) { const use = useOf(pr); return { provider: pr.provider, model: use.model, count, note, spoilers, use }; }
+  if (pr) { const use = getProviderUse(pr); return { provider: pr.provider, model: use.model, count, note, spoilers, use }; }
   const p = AI_PROVIDERS.some((x) => x.id === choice) ? (choice as AiProvider) : aiProvider();
   const model = (store.get("reviewAiModel") ?? "").trim() || aiModel(p);
   const base = p === "custom" ? aiBase() : "";
@@ -269,8 +168,7 @@ export async function reviewAiJson(system: string, user: string, r = reviewAi())
     ? await invoke<any>("gemini", { key: r.use.key, model: r.model, body })
     : (await otherAi(body, r.use)).r;
   const text = (res?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? "").join("");
-  const json = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
-  return JSON.parse(json);
+  return extractJsonObject(text);
 }
 
 /** One JSON answer from the assistant's own service (Settings › Accounts), e.g. for the subtitle
@@ -282,7 +180,5 @@ export async function assistantJson(system: string, user: string, use: AiUse = c
     ? await invoke<any>("gemini", { key: use.key, model: use.model, body })
     : (await otherAi(body, use)).r;
   const text = (res?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? "").join("");
-  const start = text.indexOf("{"), end = text.lastIndexOf("}");
-  if (start < 0 || end <= start) throw new Error("The AI answer had no JSON");
-  return JSON.parse(text.slice(start, end + 1));
+  return extractJsonObject(text);
 }

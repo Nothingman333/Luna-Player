@@ -229,13 +229,13 @@ function SoundControls({ mode }: { mode: SoundMode }) {
 }
 
 /** Closes a popover on a click outside it or on Esc (Esc is not passed on: the film stays open). */
-function useDismiss(onClose: () => void, ignore?: React.RefObject<HTMLElement | null>) {
+function useDismiss(onClose: () => void, ignore?: React.RefObject<HTMLElement | null>, boundary?: string) {
   const box = useRef<HTMLDivElement>(null);
   const cb = useRef(onClose); cb.current = onClose;
   useEffect(() => {
     const down = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (box.current && !box.current.contains(t) && !ignore?.current?.contains(t)) cb.current();
+      if (box.current && !box.current.contains(t) && !ignore?.current?.contains(t) && !(boundary && box.current.closest(boundary)?.contains(t))) cb.current();
     };
     const key = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); cb.current(); } };
     const t = window.setTimeout(() => window.addEventListener("mousedown", down), 0);
@@ -247,13 +247,13 @@ function useDismiss(onClose: () => void, ignore?: React.RefObject<HTMLElement | 
 const activeCount = (m: SoundMode) => { const f = loadSound(m); return [f.normalize, f.night, f.voice, f.bands.some((g) => g !== 0)].filter(Boolean).length; };
 
 /** The film player's sound panel: effects, equaliser and the A-B loop. */
-export function SoundPanel({ time, onClose }: { time: number; onClose: () => void }) {
-  const box = useDismiss(onClose);
+export function SoundPanel({ time, onClose, embedded = false }: { time: number; onClose: () => void; embedded?: boolean }) {
+  const box = useDismiss(onClose,undefined,".vset-anchor");
   useExtras();
   const ab = abLoop;
   const n = activeCount("film");
   return (
-    <div className="tracks vset lx-sound" ref={box} role="dialog" aria-label={tt("Ses ayarları")}>
+    <div className={"vset lx-sound" + (embedded ? " embedded" : " tracks")} ref={box} role="dialog" aria-label={tt("Ses ayarları")}>
       <div className="vset-head">
         <h3>{tt("Ses")}</h3>
         {n > 0 && <span className="lx-badge">{tt("{0} açık", n)}</span>}

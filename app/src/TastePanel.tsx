@@ -1,10 +1,10 @@
 import { useEffect, useId, useState } from "react";
 import { store } from "./library";
-import { tt, locale } from "./i18n";
+import { tt, locale, lang } from "./i18n";
 import { ASPECTS, cleanProfile } from "./filmReviewModel";
 import type { Aspect, Profile } from "./filmReviewModel";
 import { Switch } from "./FilmReviewAi";
-import { TASTE_NAMES, effectiveWeight, learnedTaste, profileKeyOf, suggestedWeights, workPrefix } from "./reviewTaste";
+import { TASTE_NAMES, learnedTaste, profileKeyOf, suggestedWeights, workPrefix } from "./reviewTaste";
 import type { TasteKind } from "./reviewTaste";
 import "./FilmDecision.css";
 
@@ -64,33 +64,31 @@ export function TastePanel({ kind, scores = {}, sub, open = true }: { kind: Tast
   const num = (x: number) => x.toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const t = intro(kind);
   return <details className="la-sec" open={open}>
-    <summary><h3>{tt("Zevklerim")}</h3><span>{sub ?? subtitle(kind)}</span>
+    <summary><h3>{kind==="film"?(lang()==="tr"?"Zevk tercihlerim":"Taste preferences"):tt("Zevklerim")}</h3><span>{sub ?? subtitle(kind)}</span>
       <button className={"la-info" + (info ? " on" : "")} aria-label={tt("Zevklerim nedir?")} title={tt("Zevklerim nedir?")} aria-expanded={info} onClick={(e) => { e.preventDefault(); e.stopPropagation(); setInfo((x) => !x); }}>i</button></summary>
     {info && <div className="la-infobox" role="note">
       <b>{tt("Zevklerim nedir?")}</b>
       <p>{t.topics}</p>
       <ul>
         <li><b>{tt("Noktalar")}</b> — {tt("bir konuya senin verdiğin önem (kare = hesaba katma, 5 nokta = çok önemli). Hesabın %35'i budur.")}</li>
-        <li><b>×1,65</b> — {tt("konunun gerçekte ne kadar ağır bastığı.")} {t.learn}</li>
+
         {t.scoreHere && <li><b>{tt("bu eserde 8,4")}</b> — {t.scoreHere}</li>}
         <li><b>{tt("Eleştiriliyorsa uyar")}</b> — {tt("bu konu zayıfsa \"Senin için\" puanı düşer ve uyarı çıkar.")}</li>
       </ul>
     </div>}
+    <p className="la-scale-key">{tt("Önem: {0}/5", "0–5")}</p>
     <div className="la-taste">
       {ASPECTS.map((a) => {
-        const eff = effectiveWeight(a, profile, learned);
+
         return <div className="la-taste-row" key={a}>
           <b>{label(a)}</b>
           <div className="la-dots" role="radiogroup" aria-label={tt("{0} senin için ne kadar önemli?", label(a))}>
-            {[0, 1, 2, 3, 4, 5].map((n) => <button key={n} role="radio" aria-checked={profile.weights[a] === n} className={(n === 0 ? "-off" : "") + (n > 0 && n <= profile.weights[a] ? " on" : "") + (n === 0 && profile.weights[a] === 0 ? " on" : "")}
+            {[0, 1, 2, 3, 4, 5].map((n) => <button key={n} role="radio" aria-label={n === 0 ? tt("Hesaba katma") : tt("Önem: {0}/5", n)} tabIndex={profile.weights[a] === n ? 0 : -1} aria-checked={profile.weights[a] === n} className={(n === 0 ? "-off" : "") + (n > 0 && n <= profile.weights[a] ? " on" : "") + (n === 0 && profile.weights[a] === 0 ? " on" : "")}
+              onKeyDown={(e) => { const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0; if (!step && e.key !== "Home" && e.key !== "End") return; e.preventDefault(); e.stopPropagation(); const next = e.key === "Home" ? 0 : e.key === "End" ? 5 : (n + step + 6) % 6; save({ ...profile, weights: { ...profile.weights, [a]: next } }); e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>("button")[next]?.focus(); }}
               title={n === 0 ? tt("Hesaba katma") : tt("Önem: {0}/5", n)} onClick={() => save({ ...profile, weights: { ...profile.weights, [a]: n } })} />)}
           </div>
-          <span className="la-eff">
-            {eff ? <b>×{eff.toLocaleString(locale(), { maximumFractionDigits: 2 })}</b> : <b className="-off">{tt("katılmıyor")}</b>}
-            {learned?.boost[a] && <i className="-up">↑ {tt("beğenilerinden")}</i>}
-            {learned?.penalty[a] && <i className="-down">↓ {tt("beğenmediklerinden")}</i>}
-          </span>
-          <span className="la-film">{scores[a] != null ? tt("bu eserde {0}", num(scores[a]!)) : ""}</span>
+          <span className="la-eff"><b>{tt("Önem: {0}/5",profile.weights[a])}</b>{learned?.boost[a]&&<i className="-up">{tt("beğenilerinden")}</i>}{learned?.penalty[a]&&<i className="-down">{tt("beğenmediklerinden")}</i>}</span>
+          <span className="la-film">{scores[a] != null ? tt("Eser: {0}/10", num(scores[a]!)) : ""}</span>
           <span className="la-warn"><Switch on={profile.avoid.includes(a)} label={tt("{0}: eleştiriliyorsa uyar", label(a))} onChange={(on) => save({ ...profile, avoid: on ? [...profile.avoid, a] : profile.avoid.filter((x) => x !== a) })} />{tt("Eleştiriliyorsa uyar")}</span>
         </div>;
       })}

@@ -82,8 +82,12 @@ pub async fn browser_downloads(app:AppHandle,caller:Webview,action:String,id:Opt
   "open"=>{let row=rows.iter().find(|r|Some(r.id)==id&&r.state=="done").ok_or("Tamamlanmış indirme bulunamadı")?;let p=std::path::Path::new(&row.path);if !p.is_file(){return Err("İndirilen dosya taşınmış veya silinmiş".into());}
    // Unknown, active-content and executable types are only revealed, never launched.
    let ext=p.extension().and_then(|s|s.to_str()).unwrap_or("").to_ascii_lowercase();let safe=matches!(ext.as_str(),"mp4"|"mkv"|"webm"|"mp3"|"flac"|"wav"|"ogg"|"jpg"|"jpeg"|"png"|"webp"|"gif"|"txt"|"pdf"|"epub");
-   let mut cmd=std::process::Command::new("explorer.exe");if reveal.unwrap_or(false)||!safe{cmd.arg(format!("/select,{}",p.display()));}else{cmd.arg(p);}
-   use std::os::windows::process::CommandExt;cmd.creation_flags(0x08000000).spawn().map_err(|e|e.to_string())?;
+   let mut cmd=std::process::Command::new("explorer.exe");
+   // Explorer wants `/select,"C:\a b\file"` verbatim: normal argument quoting wraps the whole switch and
+   // Explorer then opens Documents for any download whose path contains a space.
+   use std::os::windows::process::CommandExt;
+   if reveal.unwrap_or(false)||!safe{cmd.raw_arg(format!("/select,\"{}\"",p.display()));}else{cmd.arg(p);}
+   cmd.creation_flags(0x08000000).spawn().map_err(|e|e.to_string())?;
   },_=>return Err("Geçersiz indirme işlemi".into())
  }Ok(rows.clone())
 }

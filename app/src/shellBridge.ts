@@ -4,9 +4,10 @@
  * can fail (a key another program owns, a notification permission denied): it then does nothing.
  */
 import { invoke } from "./nativeCore";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
-import { isRegistered, register, unregister } from "@tauri-apps/plugin-global-shortcut";
+import { isRegistered, unregister } from "@tauri-apps/plugin-global-shortcut";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { store } from "./library";
 
@@ -54,18 +55,27 @@ export function setTaskbarProgress(pct: number | null) {
 
 // ---------- global media keys ----------
 const MEDIA_KEYS = ["MediaPlayPause", "MediaTrackNext", "MediaTrackPrevious", "MediaStop"] as const;
-export type MediaAction = "playpause" | "next" | "prev" | "stop";
-const ACTION: Record<string, MediaAction> = { MediaPlayPause: "playpause", MediaTrackNext: "next", MediaTrackPrevious: "prev", MediaStop: "stop" };
-/** Registers (or releases) the media keys for the whole system. Keys another program holds are skipped. */
-export async function setMediaKeys(on: boolean, handler: (a: MediaAction) => void): Promise<void> {
+export type MediaAction = "playpause" | "play" | "pause" | "next" | "prev" | "stop" | "seek" | "seek-relative" | "volume";
+let mediaListener: (() => void) | undefined;
+let mediaGeneration = 0;
+/** Releases legacy reservations and lets Windows route media keys to Luna's SMTC session. */
+export async function setMediaKeys(on: boolean, handler: (a: MediaAction, value?: number) => void): Promise<void> {
+  const generation = ++mediaGeneration;
+  mediaListener?.(); mediaListener = undefined;
   for (const key of MEDIA_KEYS) {
-    try {
-      const has = await isRegistered(key);
-      if (has) await unregister(key);
-      if (on) await register(key, (e) => { if (e.state === "Pressed") handler(ACTION[key]); });
-    } catch { /* held by another program */ }
+    try { if (await isRegistered(key)) await unregister(key); } catch { /* legacy reservation absent */ }
   }
+  if (generation !== mediaGeneration) return;
+  if (on) {
+    const unlisten = await listen<{action: MediaAction; value?: number}>("media-action", ({payload}) => handler(payload.action, payload.value));
+    if (generation !== mediaGeneration) { unlisten(); return; }
+    mediaListener = unlisten;
+  }
+  await invoke("media_controls_enable", {on});
+  window.dispatchEvent(new Event("luna-media-ready"));
 }
+export const updateMediaControls = (playback: {title: string; artist?: string; album?: string; cover?: string | null; duration: number; position: number; paused: boolean; active: boolean}) =>
+  invoke("media_controls_update", {playback}).catch(() => {});
 
 // ---------- start with Windows ----------
 export const autostartOn = () => isEnabled().catch(() => false);

@@ -1,12 +1,20 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import react, {reactCompilerPreset} from "@vitejs/plugin-react";
+import babel from "@rolldown/plugin-babel";
 // @ts-expect-error type error without @types/node package
 import process from "node:process";
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(() => ({
-  plugins: [react()],
+  plugins: [react(), babel({presets:[reactCompilerPreset({compilationMode:"annotation"})]}), {
+    name: "luna-woff2-only",
+    enforce: "pre",
+    transform(code, id) {
+      if (!id.includes("@fontsource") || !id.endsWith(".css")) return;
+      return code.replace(/,?\s*url\([^)]+\)\s*format\(['"]woff['"]\)/g, "");
+    },
+  }],
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

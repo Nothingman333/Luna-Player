@@ -30,6 +30,7 @@ export function QuoteCard({ src, onClose }: { src: QuoteSource; onClose: () => v
   const [style, setStyle] = useState<CardStyle>("cinema");
   const [format, setFormat] = useState<CardFormat>("story");
   const [text, setText] = useState(() => cleanQuote(src.text));
+  const original = cleanQuote(src.text), characters = Array.from(text).length;
   const [frame, setFrame] = useState<HTMLImageElement | null | "loading">("loading");
   const [showTime, setShowTime] = useState(true);
   const [msg, setMsg] = useState("");
@@ -63,7 +64,8 @@ export function QuoteCard({ src, onClose }: { src: QuoteSource; onClose: () => v
         </div>
         <div className="qc-side">
           <label className="qc-label" htmlFor="qc-text">{tt("Replik")}</label>
-          <textarea id="qc-text" className="qc-text" rows={4} value={text} maxLength={280} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
+          <textarea id="qc-text" className="qc-text" rows={4} value={text} aria-describedby="qc-text-count" onChange={(e) => setText(Array.from(e.target.value).slice(0, 280).join(""))} onKeyDown={(e) => e.stopPropagation()} />
+          <div className="qc-text-tools"><span id="qc-text-count" className="muted small">{tt("{0}/280 karakter", characters)}</span><button className="chip" disabled={text === original} onClick={() => setText(original)}>{tt("Özgün repliğe dön")}</button></div>
           <div className="qc-label">{tt("Görünüm")}</div>
           <div className="seg-row">
             {([["cinema", tt("Sinema")], ["poster", tt("Afiş")], ["minimal", tt("Yalın")]] as [CardStyle, string][]).map(([k, l]) => (

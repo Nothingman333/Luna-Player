@@ -92,7 +92,7 @@ export function traktBody(t: TraktTarget, progress: number): any {
 export type PresenceInput = { mode: "film" | "music"; title: string; artist?: string; paused: boolean; time: number; duration: number; now: number; labels: { film: string; music: string; paused: string } };
 /** The activity Discord shows: what plays, by whom, and (while it plays) the time left. */
 export function presenceActivity(p: PresenceInput): any {
-  const cut = (s: string) => (s.length > 120 ? s.slice(0, 117) + "…" : s);
+  const cut = (s: string) => { const c = Array.from(s); return c.length > 120 ? c.slice(0, 117).join("") + "…" : s; };
   const title = cut(p.title.trim() || "Luna Player");
   const a: any = {
     type: p.mode === "music" ? 2 : 3,

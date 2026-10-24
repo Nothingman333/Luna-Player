@@ -5,6 +5,7 @@ import { tt } from "./i18n";
 import { flushSecrets, store } from "./library";
 import { Switch } from "./FilmReviewAi";
 import { addUserCommand, loadUserCommands, saveUserCommands } from "./assistantExtras";
+import { extraText } from "./Extras";
 import { loadSponsor, saveSponsor, sponsorLabel, useExtras } from "./PlaybackExtras";
 import { SPONSOR_CATEGORIES } from "./playbackExtrasModel";
 import { flushScrobbles, lastfmLogin, lbBase, lbValidate, pendingScrobbles, scrobbleStatus } from "./scrobble";
@@ -207,6 +208,7 @@ function DiscordCard() {
 }
 
 function CommandsCard() {
+  const nameInput=useRef<HTMLInputElement>(null);
   const [list, setList] = useState(loadUserCommands);
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -216,7 +218,7 @@ function CommandsCard() {
     if (e) { setErr(e); return; }
     setErr(""); setName(""); setPrompt(""); setList(loadUserCommands());
   };
-  const remove = (n: string) => { saveUserCommands(list.filter((c) => c.name !== n)); setList(loadUserCommands()); };
+  const remove = (n: string) => { if(!confirm(extraText(`“/${n}” komutu silinsin mi?`,`Delete the “/${n}” command?`)))return;if(!saveUserCommands(list.filter((c) => c.name !== n))){setErr(extraText("Komut silinemedi; kayıtların korundu.","Could not delete the command; your data was kept."));return;}setErr("");setList(loadUserCommands()); };
   return (
     <div className="set-card lx-set">
       <h3>{tt("Kendi asistan komutların")}</h3>
@@ -225,17 +227,19 @@ function CommandsCard() {
         <ul className="lx-cmds">
           {list.map((c) => (
             <li key={c.name}><b>/{c.name}</b><span title={c.prompt}>{c.prompt.replace(/\s+/g, " ")}</span>
+              <button className="chip" onClick={()=>{setName(c.name);setPrompt(c.prompt);setErr("");requestAnimationFrame(()=>{nameInput.current?.scrollIntoView({block:"center"});nameInput.current?.focus({preventScroll:true});});}}>{extraText("Düzenle","Edit")}</button>
               <button className="chip" onClick={() => remove(c.name)} aria-label={tt("“/{0}” komutunu sil", c.name)}>{tt("Sil")}</button></li>
           ))}
         </ul>
       )}
       <div className="lx-set-row">
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder={tt("Komut adı (ör. özet3)")} aria-label={tt("Komut adı")} style={{ maxWidth: 200 }} spellCheck={false} />
+        <input ref={nameInput} value={name} maxLength={24} onChange={(e) => setName(e.target.value)} placeholder={tt("Komut adı (ör. özet3)")} aria-label={tt("Komut adı")} style={{ maxWidth: 200 }} spellCheck={false} />
       </div>
-      <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={tt("Asistana gidecek metin: Bunu üç maddede özetle: {metin}")} aria-label={tt("Komutun metni")} />
+      <textarea value={prompt} maxLength={2000} onChange={(e) => setPrompt(e.target.value)} placeholder={tt("Asistana gidecek metin: Bunu üç maddede özetle: {metin}")} aria-label={tt("Komutun metni")} />
       <div className="lx-set-row">
         <button className="chip" onClick={add} disabled={!name.trim() || !prompt.trim()}>{tt("Komutu kaydet")}</button>
-        {err && <span className="lx-set-bad">{err}</span>}
+        {(name||prompt)&&<button className="chip" onClick={()=>{setName("");setPrompt("");setErr("");}}>{extraText("Vazgeç","Cancel")}</button>}
+        {err && <span className="lx-set-bad" role="alert">{err}</span>}
       </div>
     </div>
   );

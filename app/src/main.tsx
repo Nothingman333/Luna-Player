@@ -1,6 +1,9 @@
+import { appStorage as localStorage } from "./appStorage";
+import { flushDatabaseStorage } from "./databaseStorage";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {startupPhase,startupFailure,startupReady} from "./startupStatus";
 import {installDebugTelemetry,debugSecrets} from "./debugTelemetry";
-import { durableState } from "./safety";
+import { createSnapshotWriter } from "./snapshotWriter";
 import { applyAccessibility } from "./Extras";
 import React from "react";
 import ReactDOM from "react-dom/client";
@@ -37,6 +40,9 @@ window.addEventListener("keydown", (e) => {
   const bgs = document.querySelectorAll<HTMLElement>(".modal-bg");
   const top = Array.from(bgs).reverse().find(bg=>bg.getClientRects().length&&getComputedStyle(bg).visibility!=="hidden"&&!bg.inert);
   if (!top) return;
+  // An analysis menu handles its own Escape and restores focus; keep its preview open.
+  const analysisMenu = top.querySelector<HTMLElement>(".la-opts");
+  if (analysisMenu?.getClientRects().length) return;
   e.preventDefault();
   e.stopImmediatePropagation();
   top.click();
@@ -48,32 +54,18 @@ if(!isSubs){debugSecrets(()=>SECRET_KEYS.map(key=>store.get(key)||""));installDe
 // ---------- durable state ----------
 // WebView2 keeps localStorage in a database it may throw away after a crash. Luna mirrors it to
 // luna-state.json and restores from there when the webview's copy is gone.
+const saveSnapshot = createSnapshotWriter(json => invoke<void>("state_save", { json }));
 const snapshot = () => {
   if (storageRestoreInProgress()) return;
   try {
     const o: Record<string, string> = {};
     for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i)!; if (!SECRET_KEYS.includes(k)) o[k] = localStorage.getItem(k) ?? ""; }
-    if (Object.keys(o).length > 2) invoke("state_save", { json: JSON.stringify(o) }).catch(() => {});
+    if (Object.keys(o).length > 2) void saveSnapshot(o).catch(() => {});
   } catch {}
 };
-async function restore() {
-  startupPhase("state_load · Kayıtlı veriler / Saved data");
-  try {
-    const raw = await invoke<string | null>("state_load");
-    if (!raw) return;
-    const o = durableState(JSON.parse(raw));
-    const seed = o.__seed === "1", force = o.__seed === "force";
-    const empty = !localStorage.getItem("lunaMark");
-    for (const [k, v] of Object.entries(o)) {
-      if (k === "__seed") continue;
-      if (empty || force || (seed && localStorage.getItem(k) == null)) localStorage.setItem(k, v);
-    }
-  } catch {}
-}
 
 (async () => {
   if (!isSubs) {
-    await restore();
     // the API keys from Windows (an old plain copy, also one the state file just brought back, moves there)
     startupPhase("secrets_load · Anahtarlar / Credentials");
     await loadSecrets();
@@ -83,9 +75,17 @@ async function restore() {
     if (localStorage.getItem("lang") === "tr" ? loadedLang !== "tr" : loadedLang !== "en") { location.reload(); return; }
     invoke("set_lang", { lang: localStorage.getItem("lang") === "tr" ? "tr" : "en" }).catch(() => {});
     try { localStorage.setItem("lunaMark", "1"); } catch {}
+    await flushDatabaseStorage();
+    let closing = false;
+    void getCurrentWindow().onCloseRequested(async event => {
+      if(closing)return;
+      event.preventDefault();
+      try { await flushDatabaseStorage(); closing=true;await getCurrentWindow().close(); }
+      catch { startupFailure(new Error("Kayıtlar diske yazılamadı. Pencere açık tutuldu; boş alanı kontrol edip yeniden kapatın.")); }
+    });
     setInterval(snapshot, 20000);
     window.addEventListener("beforeunload", snapshot);
-    document.addEventListener("visibilitychange", snapshot);
+    document.addEventListener("visibilitychange", () => { snapshot();void flushDatabaseStorage().catch(()=>{}); });
     setTimeout(snapshot, 5000);
   }
   startupPhase("react_render · Arayüz / Interface");

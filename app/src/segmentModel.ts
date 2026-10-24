@@ -5,14 +5,17 @@
  */
 
 export type SegKind = "intro" | "recap" | "credits" | "preview";
-export type Segment = { kind: SegKind; start: number; end: number; source: "chapter" | "mark" | "aniskip" };
+export type Segment = { kind: SegKind; start: number; end: number; source: "chapter" | "mark" | "aniskip" | "fingerprint" };
 export type Marks = { introStart?: number; introEnd?: number };
 
 const CHAPTER_KINDS: [SegKind, RegExp][] = [
   ["recap", /\b(recap|previously|résumé|rückblick)\b|önceki bölüm|önceki bölümlerde|özet/i],
-  ["intro", /\b(intro|opening|op|title sequence|opening credits|main titles?|vorspann)\b|giriş jeneriği|açılış|jenerik başı/i],
+  // "OP" / "ED" (anime) only as the whole title ("OP", "ED 2"): "Ed Sheeran" or a character named Ed is not the credits
+  ["intro", /^\s*op\s*[-:#]?\s*\d{0,2}\s*$/i],
+  ["intro", /\b(intro|opening|title sequence|opening credits|main titles?|vorspann)\b|giriş jeneriği|açılış|jenerik başı/i],
   ["preview", /\b(preview|next episode|next time|sneak peek)\b|gelecek bölüm|sonraki bölümde|fragman/i],
-  ["credits", /\b(credits|ending|ed|end titles|end credits|outro|abspann)\b|kapanış|jenerik/i],
+  ["credits", /^\s*ed\s*[-:#]?\s*\d{0,2}\s*$/i],
+  ["credits", /\b(credits|ending|end titles|end credits|outro|abspann)\b|kapanış|jenerik/i],
 ];
 
 /** A chapter title's kind ("Opening" → intro, "Previously on…" → recap); null for ordinary chapters. */
@@ -25,7 +28,7 @@ export function chapterKind(title: string | undefined): SegKind | null {
 
 /** Skippable spans from mpv's chapter list (each chapter runs to the next one or the end). */
 export function chapterSegments(chapters: { title?: string; time: number }[] | undefined, duration: number): Segment[] {
-  const list = (chapters ?? []).filter((c) => Number.isFinite(c?.time)).slice().sort((a, b) => a.time - b.time);
+  const list = (chapters ?? []).filter((c) => Number.isFinite(c?.time) && c.time >= 0 && (!(duration > 0) || c.time < duration)).slice().sort((a, b) => a.time - b.time);
   const out: Segment[] = [];
   list.forEach((c, i) => {
     const kind = chapterKind(c.title);
@@ -37,6 +40,7 @@ export function chapterSegments(chapters: { title?: string; time: number }[] | u
 
 /** The intro a user marked for a series (same times in every episode). */
 export function markSegments(m: Marks | null | undefined, duration: number): Segment[] {
+  if (typeof m?.introStart !== "number" || typeof m.introEnd !== "number") return [];
   const s = Number(m?.introStart), e = Number(m?.introEnd);
   if (!Number.isFinite(s) || !Number.isFinite(e) || e - s < 3 || e - s > 600 || s < 0) return [];
   if (duration > 0 && s >= duration) return [];
@@ -46,11 +50,11 @@ export function markSegments(m: Marks | null | undefined, duration: number): Seg
 /** All sources together, sorted; a later source's overlapping span of the same kind is dropped. */
 export function mergeSegments(...lists: Segment[][]): Segment[] {
   const out: Segment[] = [];
-  for (const s of lists.flat().sort((a, b) => a.start - b.start)) {
+  for (const s of lists.flat()) {
     if (out.some((o) => o.kind === s.kind && s.start < o.end && s.end > o.start)) continue;
     out.push(s);
   }
-  return out;
+  return out.sort((a, b) => a.start - b.start);
 }
 
 /** The segment the playhead is in; not during its last second (nothing left to skip). */
@@ -59,3 +63,5 @@ export function activeSegment(segs: Segment[], time: number): Segment | null {
 }
 
 export const segmentKey = (s: Segment) => `${s.kind}@${Math.round(s.start)}`;
+
+export function fingerprintSegments(value:unknown,duration:number):Segment[]{if(!Array.isArray(value))return[];return value.filter((s):s is Segment=>!!s&&typeof s==="object"&&(s.kind==="intro"||s.kind==="credits")&&Number.isFinite(s.start)&&Number.isFinite(s.end)&&s.start>=0&&s.end-s.start>=15&&s.end-s.start<=120&&(!(duration>0)||s.end<=duration+1)).map(s=>({...s,source:"fingerprint"}));}

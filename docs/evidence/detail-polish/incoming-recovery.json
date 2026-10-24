@@ -1,0 +1,13 @@
+{
+  "originalSize": 3546,
+  "originalSha256": "52ba95f7bf42cd35cc8c1e840c27929b7893542181669ef9ce2077a363f48ffd",
+  "originalArchiveHasCentralDirectory": false,
+  "member": "luna-1.6.7-ek-duzeltmeler-tur2.patch",
+  "deflateComplete": true,
+  "compressedBytes": 3464,
+  "expandedBytes": 9011,
+  "crc32": "9a3fa9c5",
+  "allDescriptorValuesVerified": true,
+  "patchSha256": "89e0a45ae97c9cb5c4e347e68150be362c96d7bd63c085b9eb61fd1e3d95cdca",
+  "originalModified": false
+}

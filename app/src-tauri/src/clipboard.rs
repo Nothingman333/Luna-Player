@@ -21,7 +21,17 @@ const CF_UNICODETEXT: u32 = 13;
 
 fn text() -> Option<String> {
     unsafe {
-        if OpenClipboard(0) == 0 {
+        // a clipboard manager (or the program that copied) often still holds it for a moment: the
+        // link was lost for good when the first try failed, so it is tried a few more times
+        let mut opened = false;
+        for _ in 0..6 {
+            if OpenClipboard(0) != 0 {
+                opened = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(60));
+        }
+        if !opened {
             return None;
         }
         let mut out = None;

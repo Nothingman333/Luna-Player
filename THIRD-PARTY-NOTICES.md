@@ -82,3 +82,15 @@ keep their own licenses.
 
 Luna Player does not include any films, books, music, streams or search sources. Only open content you have
 the right to use.
+
+
+## Luna 1.6.9C integrations
+
+- Foliate-js: MIT, upstream johnfactotum/foliate-js commit `78914aef4466eb960965702401634c2cb348e9b1`. Sources, license and local changes are in `app/src/vendor/foliate/`. Book scripts disabled; PDF remains on the existing PDF.js path.
+- @ctrl/video-filename-parser 5.12.0: MIT. Upstream https://github.com/scttcper/video-filename-parser.
+- rusty-chromaprint 0.3.0: MIT. Pure Rust audio fingerprints; source/license supplied by the locked crate, https://github.com/darksv/rusty-chromaprint.
+- alass-core 2.0.0: GPL-3.0 (Cargo metadata), https://github.com/kaegi/alass.
+- souvlaki 0.8.3: MIT, https://github.com/Sinono3/souvlaki.
+- adblock 0.13.3: MPL-2.0, https://github.com/brave/adblock-rust. Filter subscriptions retain their own upstream licenses; they are fetched at runtime rather than copied into Luna sources.
+- rmcp SDK, rusqlite/SQLite, libloading, Rustls and their transitive dependencies retain the licenses in their locked packages. Dependency source is available through Cargo.lock package identifiers and crates.io.
+- SongRec and Demucs are optional external tools selected by the user; their executables/models are not redistributed in this source update. No Syncplay implementation source was copied; Luna implements the documented line protocol. The experimental libmpv adapter uses the public C ABI and does not bundle a DLL.

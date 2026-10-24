@@ -1,0 +1,64 @@
+// Real input/output regressions. LUNA_MODEL_ROOT optionally runs the same cases on an older source.
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),ts=require('typescript');
+const root=process.env.LUNA_MODEL_ROOT||path.resolve(__dirname,'../src'),cache={};
+function load(name){if(cache[name])return cache[name];const m={exports:{}};cache[name]=m.exports;new Function('module','exports','require',ts.transpileModule(fs.readFileSync(path.join(root,name+'.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(m,m.exports,n=>load(n.replace('./','')));return cache[name]=m.exports;}
+const U=load('userCommandsModel'),M=load('assistantMarkdown'),Q=load('quoteCardModel'),P=load('podcastExtrasModel'),S=load('subtitleModel'),G=load('segmentModel'),L=load('lineSearchModel'),R=load('rsvpModel'),T=load('titleExtrasModel'),H=load('browserHistoryModel'),B=load('browserModel'),E=load('browserSearchModel');
+const tests=[],test=(id,name,f)=>tests.push({id,name,f});const cue=(start,end,text)=>({start,end,text}),opts={hearingImpaired:false,music:false,overlaps:false,readingTime:false,wrap:false,duplicates:false};
+test(1,'Custom commands preserve dollar replacement characters',()=>assert.equal(U.expandCommand('/x $& $$',[{name:'x',prompt:'{text}'}]),'$& $$'));
+test(2,'User text cannot become a second template substitution',()=>assert.equal(U.expandCommand('/x {selection}',[{name:'x',prompt:'{text}'}],'secret'),'{selection}'));
+test(3,'Decomposed Unicode command names match their saved names',()=>assert.equal(U.expandCommand('/o\u0308zet hello',[{name:'özet',prompt:'{text}'}]),'hello'));
+const links=[];const render=s=>M.renderAssistantMarkdown(s,{link:(label,url)=>{links.push(url);return `<a href="${url}">${label||url}</a>`;}});
+test(4,'A sentence period is not part of the assistant source URL',()=>{links.length=0;const html=render('See https://example.org/page.');assert.deepEqual(links,['https://example.org/page']);assert(html.endsWith('.<br/>'));});
+test(5,'Balanced parentheses survive Markdown source links',()=>{links.length=0;render('[Film](https://example.org/Film_(2021))');assert.deepEqual(links,['https://example.org/Film_(2021)']);});
+test(6,'Ordered lists preserve their starting number',()=>assert.match(render('3. Third\n4. Fourth'),/<ol start="3">/));
+test(7,'Unbroken quote text stays inside the exported card width',()=>{const lines=Q.wrapText('Supercalifragilisticexpialidocious',8,s=>Array.from(s).length);assert(lines.every(s=>Array.from(s).length<=8));assert.equal(lines.join(''),'Supercalifragilisticexpialidocious');});
+test(8,'Quote cards retain intentional blank paragraph lines',()=>assert.deepEqual(Q.wrapText('One\n\nTwo',100,s=>s.length),['One','','Two']));
+test(9,'VTT export round-trips literal markup and entity text',()=>{const text='<not a tag> &amp;';assert.equal(S.parseSubtitle(S.serializeVtt([cue(0,2,text)]))[0].text,text);});
+test(10,'Truncated quote text never contains a broken surrogate',()=>{const text='a'.repeat(278)+'😀'.repeat(4);assert(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(Q.cleanQuote(text)));});
+test(11,'Podcast timestamps reject overflowing clock fields',()=>{assert(Number.isNaN(P.parseTimestamp('01:61')));assert(Number.isNaN(P.parseTimestamp('1.5:20')));assert.equal(P.parseTimestamp('63.5'),63.5);});
+test(12,'Missing chapter timestamps are not invented at zero',()=>assert.equal(P.parseChaptersJson({chapters:[{startTime:null,title:'Missing'}]}).length,0));
+test(13,'Negative chapter timestamps are rejected rather than moved',()=>assert.equal(P.parseChaptersJson({chapters:[{startTime:-10,title:'Wrong'}]}).length,0));
+test(14,'Podcast cues without blank separators stay separate',()=>assert.equal(P.parseCues('00:00:01.000 --> 00:00:02.000\nOne\n2\n00:00:03.000 --> 00:00:04.000\nTwo').length,2));
+test(15,'WebVTT NOTE blocks cannot become podcast speech',()=>assert.equal(P.parseCues('WEBVTT\n\nNOTE\n00:00:01.000 --> 00:00:02.000\nMetadata').length,0));
+test(16,'Subtitle entities decode once, including numeric Unicode',()=>{assert.equal(P.parseCues('00:00:01.000 --> 00:00:02.000\n&amp;lt; &#x1F600;')[0].text,'&lt; 😀');assert.equal(S.plainText('&#65; &amp;lt;'),'A &lt;');assert.equal(L.cleanLine('A &amp; B'),'A & B');});
+test(17,'JSON transcript null time does not create a phantom cue',()=>assert.equal(P.parseTranscriptJson({segments:[{startTime:null,body:'Missing'}]}).length,0));
+test(18,'Backwards JSON transcript intervals are rejected',()=>assert.equal(P.parseTranscriptJson({segments:[{startTime:20,endTime:10,body:'Backwards'}]}).length,0));
+test(19,'Timed podcast formats take priority over plain text',()=>{const timed={url:'https://example.org/en.vtt',type:'text/vtt',lang:'en'},plain={url:'https://example.org/tr.txt',type:'text/plain',lang:'tr'};assert.equal(P.pickTranscript([plain,timed],'tr'),timed);});
+test(20,'Regional language preferences match base transcript language',()=>{const es={url:'https://example.org/es.vtt',type:'text/vtt',lang:'es'},en={url:'https://example.org/en.vtt',type:'text/vtt',lang:'en'};assert.equal(P.pickTranscript([es,en],'en-US'),en);});
+test(21,'HTML transcript scripts and styles are not spoken',()=>assert.deepEqual(P.textParagraphs('<style>.a{color:red}</style><script>alert(1)</script><p>Speech</p>',true),['Speech']));
+test(22,'Inline WebVTT timestamps are not displayed as dialogue',()=>assert.equal(S.parseSubtitle('WEBVTT\n\n00:01.000 --> 00:03.000\nHello <00:02.000>world')[0].text,'Hello world'));
+test(23,'ASS vector drawing commands are not shown as speech',()=>assert.deepEqual(S.parseSubtitle('[Events]\nDialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\p1}m 0 0 l 10 10{\\p0}Hello'),[cue(1,3,'Hello')]));
+test(24,'Subtitle wrapping handles a word longer than the line',()=>{const text='W'.repeat(100),wrapped=S.balanceLines(text,42);assert(wrapped.split('\n').every(s=>s.length<=42));assert.equal(wrapped.replace(/\n/g,''),text);});
+test(25,'Whisper splitting never creates zero-length rounded cues',()=>{const rows=S.splitLong([cue(1,1.001,'word '.repeat(100))]);assert(rows.every(c=>c.end>c.start));assert.equal(rows[0].start,1);assert.equal(rows.at(-1).end,1.001);});
+test(26,'Short adjacent cues really stop overlapping after cleanup',()=>{const out=S.cleanCues([cue(0,1,'A'),cue(.1,2,'B')],{...opts,overlaps:true}).cues;assert(out[0].end<=out[1].start);assert(out[0].end>out[0].start);});
+test(27,'Music cleanup preserves dialogue starting with a number sign',()=>assert.equal(S.cleanCues([cue(0,2,'#1 is the winner.')],{...opts,music:true}).cues.length,1));
+test(28,'Assistant scene context does not disclose future subtitles',()=>assert.equal(S.sceneLines([cue(10.2,12,'Spoiler')],10),''));
+test(29,'An active long cue remains visible behind five short cues',()=>assert.equal(S.cueAt([cue(0,100,'Long'),...Array.from({length:5},(_,i)=>cue(i+1,i+1.5,'Short'))],10),0));
+test(30,'Null AI translation IDs cannot overwrite subtitle zero',()=>{const rows=[cue(0,2,'Original')],b=S.translationBatches(rows)[0],out=S.applyTranslation(rows,b,{lines:[{id:null,text:'Wrong'}]});assert.equal(out.cues[0].text,'Original');assert.equal(out.missing,1);});
+test(31,'Conflicting duplicate translation IDs keep the original',()=>{const rows=[cue(0,2,'Original')],out=S.applyTranslation(rows,S.translationBatches(rows)[0],{lines:[{id:0,text:'A'},{id:0,text:'B'}]});assert.equal(out.cues[0].text,'Original');assert.equal(out.missing,1);});
+test(32,'Underscore locale identifiers produce correct subtitle language',()=>assert.equal(S.langCode('pt_BR'),'pt-br'));
+test(33,'Negative chapter offsets cannot produce a skip action',()=>assert.deepEqual(G.chapterSegments([{time:-10,title:'Intro'},{time:10,title:'Story'}],100),[]));
+test(34,'Skip chapter endpoints never exceed the actual media length',()=>assert.equal(G.chapterSegments([{time:80,title:'Credits'},{time:200,title:'End'}],100)[0]?.end,100));
+test(35,'A missing custom intro start is not coerced to zero',()=>assert.deepEqual(G.markSegments({introStart:null,introEnd:20},100),[]));
+test(36,'Explicitly prioritized skip marks beat an earlier chapter offset',()=>{const own={kind:'intro',start:12,end:30,source:'mark'},chapter={kind:'intro',start:10,end:40,source:'chapter'};assert.deepEqual(G.mergeSegments([own],[chapter]),[own]);});
+test(37,'Overlapping search highlights are merged without losing letters',()=>{const line={start:0,text:'abc def ab',fold:'abc def ab'},ranges=L.highlightRanges(line,'ab abc');assert.equal(L.segments(line.text,ranges).filter(s=>s.hit).map(s=>s.t).join('|'),'abc|ab');});
+test(38,'All repeated matching words in a subtitle are highlighted',()=>{const line={start:0,text:'hello hello',fold:'hello hello'};assert.deepEqual(L.highlightRanges(line,'hello'),[[0,5],[6,11]]);});
+test(39,'Podcast episode matching keeps identifying query parameters',()=>{
+  // Before extraction the production helper lived in PodcastExtras.tsx: execute that exact arrow.
+  const previous=()=>{const source=fs.readFileSync(path.join(root,'PodcastExtras.tsx'),'utf8'),match=/const sameAudio\s*=\s*([^;]+);/.exec(source);assert(match,'Production audio matcher must exist');return new Function('return ('+ts.transpileModule('const fn='+match[1],{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText.replace(/^const fn\s*=\s*/,'').replace(/;\s*$/,'')+')')();};
+  const same=P.sameEpisodeAudio||previous();assert.equal(same('https://example.org/audio?id=1','https://example.org/audio?id=2'),false);assert(same('https://example.org/audio?id=1&Signature=old','https://example.org/audio?Signature=new&id=1'));
+});
+test(40,'RSVP recognition points never split a Unicode letter',()=>{const word='𝒜𝒷𝒸𝒹';assert.deepEqual(R.splitAtOrp(word),['𝒜','𝒷','𝒸𝒹']);assert.equal(R.wordDelay('𝒜𝒷𝒸𝒹𝒺𝒻',300),200);});
+test(41,'A null TMDB logo entry cannot crash film details',()=>assert.equal(T.pickLogo({logos:[null,{file_path:'/ok.png',iso_639_1:'tr'}]},'tr'),'/ok.png'));
+test(42,'Broken provider URLs are not shown as watch links',()=>assert.equal(T.parseProviders({results:{TR:{link:'https://',flatrate:[{provider_id:1,provider_name:'TV'}]}}},['TR']).providers.link,null));
+test(43,'A duplicated provider does not create duplicate buttons',()=>assert.equal(T.parseProviders({results:{TR:{flatrate:[{provider_id:1,provider_name:'TV'},{provider_id:1,provider_name:'TV'}]}}},['TR']).providers.flatrate.length,1));
+test(44,'Title logos prefer a legible width within the same language',()=>assert.equal(T.pickLogo({logos:[{file_path:'/tiny.png',iso_639_1:'tr',width:30,vote_average:10},{file_path:'/large.png',iso_639_1:'tr',width:1200,vote_average:8}]},'tr'),'/large.png'));
+const visit={url:'https://example.org/',title:'Page',at:100000,first:1,count:3,lastAdded:true};
+test(45,'Duplicate browser failure events undo a visit only once',()=>{const first=H.forgetFailedVisit([visit],visit.url,100001);assert.deepEqual(H.forgetFailedVisit(first,visit.url,100002),first);});
+test(46,'An older browser error cannot remove a newer visit',()=>assert.deepEqual(H.forgetFailedVisit([visit],visit.url,99999),[visit]));
+test(47,'Past search completions are reachable when page suggestions are full',()=>{const history=[{...visit,url:'https://www.google.com/search?q=dune+part+two',title:'Search'}],tabs=Array.from({length:9},(_,i)=>({id:i,title:'Dune '+i,url:`https://example.org/${i}`}));assert(H.webSuggestions('dune',{tabs,bookmarks:[],history},E.searchEngine('google'),100001,true).some(s=>s.kind==='search'&&s.query==='dune part two'));});
+test(48,'Page clipping is disclosed to the assistant even if the page claims otherwise',()=>assert.equal(B.cleanBrowserPage({text:'x'.repeat(24001),truncated:false}).truncated,true));
+test(49,'Google Maps addresses are not disguised as web search queries',()=>assert.equal(E.searchedWords('https://www.google.com/maps?q=Istanbul'),null));
+test(50,'Bare localhost with a query is navigated instead of searched',()=>assert.equal(B.browserAddress('localhost?view=library'),'http://localhost/?view=library'));
+let failed=0;const results=[];for(const {id,name,f}of tests){try{f();results.push({id,name,status:'pass'});console.log(`PASS F${String(id).padStart(2,'0')} ${name}`);}catch(e){failed++;results.push({id,name,status:'fail',error:e.message});console.error(`FAIL F${String(id).padStart(2,'0')} ${name}\n${e.message}`);}}
+const summary={total:tests.length,passed:tests.length-failed,failed,results};if(process.env.LUNA_RESULTS_FILE)fs.writeFileSync(process.env.LUNA_RESULTS_FILE,JSON.stringify(summary,null,2));console.log(JSON.stringify({total:tests.length,passed:tests.length-failed,failed}));process.exitCode=failed?1:0;

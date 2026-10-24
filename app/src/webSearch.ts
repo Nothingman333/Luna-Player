@@ -12,6 +12,8 @@ export const ENGINES: Engine[] = [
   { id: "brave", name: "Brave Search", url: "https://search.brave.com/search?q=%s" },
   { id: "startpage", name: "Startpage", url: "https://www.startpage.com/do/search?q=%s" },
   { id: "kagi", name: "Kagi", url: "https://kagi.com/search?q=%s" },
+  { id: "ecosia", name: "Ecosia", url: "https://www.ecosia.org/search?q=%s" },
+  { id: "yandex", name: "Yandex", url: "https://yandex.com/search/?text=%s" },
 ];
 
 /** Short names for the film, music and book part of Luna, plus the usual ones. `{lang}` is the interface language. */
@@ -43,8 +45,6 @@ export function validTemplate(t: string): boolean {
 export function templateFor(choice: string | null | undefined): string {
   const c = String(choice ?? "");
   if (c.startsWith("custom:") && validTemplate(c.slice(7))) return c.slice(7).trim();
-  if(c==="yandex")return "https://yandex.com/search/?text=%s";
-  if(c==="ecosia")return "https://www.ecosia.org/search?q=%s";
   return (ENGINES.find((e) => e.id === c) ?? ENGINES[0]).url;
 }
 

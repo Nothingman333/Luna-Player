@@ -82,7 +82,7 @@ test('Explicit music Stop clears a suspended queue while Suspend retains it', ()
     return sf.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === name).getText().replace(/^export /, '');
   }).join('\n');
   const api = {};
-  new Function('exports', transpile(`let suspended = null, loadGeneration = 0, wantsPlayback = true, directFor = null, musicTime = 12; const P = { queue: [{src:'song'}], index:0, original:[], shuffle:false, from:'test' }; const changed = () => {}; ${source}; exports.stop = stopMusic; exports.suspend = suspendMusic; exports.snapshot = () => suspended; exports.P = P;` ))(api);
+  new Function('exports', transpile(`let suspended = null, loadGeneration = 0, wantsPlayback = true, directFor = null, musicTime = 12, selectionResume=null; const invalidateGapless=()=>{}, localSong=()=>false; const P = { queue: [{src:'song'}], index:0, original:[], shuffle:false, from:'test' }; const changed = () => {}; ${source}; exports.stop = stopMusic; exports.suspend = suspendMusic; exports.snapshot = () => suspended; exports.P = P;` ))(api);
   api.suspend(); assert.equal(api.snapshot().time, 12); assert.equal(api.P.index, -1);
   api.stop(); assert.equal(api.snapshot(), null);
 });

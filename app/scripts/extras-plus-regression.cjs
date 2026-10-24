@@ -1,16 +1,18 @@
 /* Pure model checks for the playback, sound, scrobble, podcast, RSVP, palette and user-command extras.
- * Each model file has no imports, so it is transpiled and loaded whole; no Windows UI automation. */
+ * Models and their local pure dependencies are transpiled together; no Windows UI automation. */
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict'), ts = require('typescript');
 const base = path.resolve(__dirname, '..');
 function load(file) {
   const source = fs.readFileSync(path.join(base, 'src', file), 'utf8');
-  assert.ok(!/^import\s/m.test(source), file + ' must stay import-free so it can be tested on its own');
   const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
   const module = { exports: {} };
-  new Function('module', 'exports', js)(module, module.exports);
+  new Function('module', 'exports', 'require', js)(module, module.exports, n => {
+    assert(n.startsWith('./'), 'Only local pure model imports are allowed');
+    return load(path.join(path.dirname(file), n + '.ts'));
+  });
   return module.exports;
 }
-const read = (file) => fs.readFileSync(path.join(base, 'src', file), 'utf8');
+const read = (file) => require('./production-source.cjs').read(path.join(base,'src',file));
 const P = load('playbackExtrasModel.ts'), S = load('scrobbleModel.ts'), D = load('podcastExtrasModel.ts');
 const R = load('rsvpModel.ts'), K = load('paletteModel.ts'), U = load('userCommandsModel.ts');
 const tests = [], test = (name, run) => tests.push({ name, run });
@@ -200,7 +202,7 @@ test('Discord presence: listening/watching, time left only while playing, long t
 });
 test('Source guard: wiring stays in place (runtime, palette, panels, settings, assistant)', () => {
   const app = read('App.tsx'), music = read('Music.tsx'), books = read('Books.tsx'), taste = read('Taste.tsx'), slash = read('Slash.ts'), screens = read('Screens.tsx');
-  assert.ok(app.includes('<PlaybackRuntime') && app.includes('<CommandPalette') && app.includes('<SoundPanel'), 'App mounts runtime, palette and sound panel');
+  assert.ok(app.includes('<PlaybackRuntime') && app.includes('<CommandPalette') && read('PlayerSettingsPanel.tsx').includes('<SoundPanel'), 'App mounts runtime and palette; the player gear shows the sound panel');
   assert.ok(music.includes('<PodcastExtras') && music.includes('<MusicSoundButton'), 'Now playing shows podcast extras and the sound button');
   assert.ok(books.includes('<RsvpReader'), 'the reader offers fast reading');
   assert.ok(taste.includes('expandUserCommand(') && taste.includes('compareModels('), 'assistant expands user commands and compares models');

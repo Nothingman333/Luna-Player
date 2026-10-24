@@ -15,6 +15,11 @@ mod tests {
         assert_eq!(super::with_url(&[], "-o"), vec!["--", "-o"]);
     }
     #[test]
+    fn caption_entities_decode_once() {
+        assert_eq!(super::vtt_text(" Tom &amp; Jerry &#39;n&#39; &quot;me&quot; "), "Tom & Jerry 'n' \"me\"");
+        assert_eq!(super::vtt_text("a &amp;lt; b"), "a &lt; b");
+    }
+    #[test]
     fn clock_reads_lengths() {
         assert_eq!(super::clock("5:08"), Some(308.0));
         assert_eq!(super::clock("1:02:03"), Some(3723.0));
@@ -95,7 +100,7 @@ pub fn transcript(ytdlp: &Path, url: &str) -> Result<String, String> {
         // auto captions carry word timings in <...> tags and repeat each line while it scrolls
         let mut clean = String::new(); let mut tag = false;
         for c in l.chars() { match c { '<' => tag = true, '>' => tag = false, _ if !tag => clean.push(c), _ => {} } }
-        let clean = clean.replace("&amp;", "&").replace("&nbsp;", " ").replace("&gt;", ">").replace("&lt;", "<").trim().to_string();
+        let clean = vtt_text(&clean);
         if clean.is_empty() || clean == last { continue; }
         text.push_str(&clean); text.push('\n');
         last = clean;
@@ -103,6 +108,13 @@ pub fn transcript(ytdlp: &Path, url: &str) -> Result<String, String> {
     }
     if text.trim().is_empty() { return Err(tr!("Bu videonun altyazısı yok", "This video has no subtitles")); }
     Ok(text)
+}
+
+/// A caption line's entities decoded once: "&amp;" last, so a caption that shows "&lt;" literally
+/// (written "&amp;lt;") is not decoded a second time into "<".
+fn vtt_text(s: &str) -> String {
+    s.replace("&nbsp;", " ").replace("&gt;", ">").replace("&lt;", "<").replace("&quot;", "\"").replace("&#39;", "'").replace("&apos;", "'")
+        .replace("&amp;", "&").trim().to_string()
 }
 
 fn hit(e: &Value) -> Option<Hit> {

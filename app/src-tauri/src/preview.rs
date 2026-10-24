@@ -107,7 +107,7 @@ impl Worker {
 
 /// JPEG bytes of the frame near `secs` in `file`.
 pub fn frame(mpv_exe: &Path, file: &str, secs: u32) -> Result<Vec<u8>, String> {
-    let mut guard = WORKER.lock().unwrap();
+    let mut guard = WORKER.lock().unwrap_or_else(|e| e.into_inner());
     let alive = guard.as_mut().is_some_and(|w| matches!(w.child.try_wait(), Ok(None)));
     if !alive {
         *guard = Some(spawn(mpv_exe)?);
@@ -127,14 +127,14 @@ pub fn frame(mpv_exe: &Path, file: &str, secs: u32) -> Result<Vec<u8>, String> {
 
 /// Closes the open video so it can be deleted or renamed.
 pub fn release() {
-    if let Some(w) = WORKER.lock().unwrap().as_mut() {
+    if let Some(w) = WORKER.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
         // stop unconditionally: a timed-out load may have opened the file without setting w.file
         w.file = None;
         let _ = w.send(json!(["stop"]));
     }
 }
 pub fn shutdown() {
-    if let Some(mut w) = WORKER.lock().unwrap().take() {
+    if let Some(mut w) = WORKER.lock().unwrap_or_else(|e| e.into_inner()).take() {
         let _ = w.child.kill();
         let _ = std::fs::remove_dir_all(&w.out);
     }

@@ -5,7 +5,7 @@
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict'), ts = require('typescript');
 const root = path.resolve(__dirname, '..'), read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
 const transpile = (s) => ts.transpileModule(s, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
-function load(file, imports = () => ({})) { const m = { exports: {} }; new Function('require', 'module', 'exports', transpile(read(file)))(imports, m, m.exports); return m.exports; }
+function load(file, imports = n => n.startsWith('./') ? load(path.join(path.dirname(file), n + '.ts')) : ({})) { const m = { exports: {} }; new Function('require', 'module', 'exports', transpile(read(file)))(imports, m, m.exports); return m.exports; }
 function fn(file, name) {
   const sf = ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let found; const visit = (n) => { if (!found && ts.isFunctionDeclaration(n) && n.name?.text === name) found = n; if (!found) ts.forEachChild(n, visit); }; visit(sf);
@@ -205,6 +205,11 @@ test('S26', 'native sync result carries a drawable activity preview and Whisper 
   assert(/p\.is_ascii\(\) && p\.len\(\) <= 600/.test(rs) && /"--prompt"/.test(read('src-tauri/src/shell_core.rs')) && /shell::whisper_args/.test(rs));
   assert(/pub fn activity_preview/.test(core));
   const bridge = read('src/studioBridge.ts'); assert(/prompt: a\.prompt \|\| null/.test(bridge));
+});
+
+test('S27', 'HTML entities decode once, keeping nested markup as visible text', () => {
+  assert.equal(M.plainText('&amp;lt;b&amp;gt; and Tom &amp; Jerry'), '&lt;b&gt; and Tom & Jerry');
+  assert.equal(M.plainText('a &lt;3 b &amp;amp; c &nbsp;d'), 'a <3 b &amp; c d');
 });
 
 (async () => {

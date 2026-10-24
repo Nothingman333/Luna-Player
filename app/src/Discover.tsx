@@ -6,7 +6,8 @@ import { useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { IMG, isFinished, Item, Recent, SearchHit, searchTmdb, store, tmdbGet, tmdbList } from "./library";
 import { I, Icon, openMenu, pct, titleAsks } from "./Screens";
-import { cwOf, DetailTarget, diaryGet, isSafe, loadDiary, loadTaste, modOn, SourceProps, TitleDetail, useContentWarnings, useTaste, youtubeTrailer } from "./Taste";
+import { cwOf, DetailTarget, diaryGet, isSafe, loadDiary, loadTaste, modOn, SourceProps, useContentWarnings, useTaste, youtubeTrailer } from "./Taste";
+import { TitleDetail } from "./LazyViews";
 import { catalogItems, catalogRows, useAddons } from "./Addons";
 import { matchKey } from "./textMatch";
 

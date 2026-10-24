@@ -75,7 +75,7 @@ export type BookOrder = "recent" | "title" | "author" | "progress" | "plan";
 export function libraryView(raw:unknown){
  const x=raw&&typeof raw==="object"&&!Array.isArray(raw)?raw as Record<string,unknown>:{};
  return {sort:(["recent","title","author","progress","plan"].includes(String(x.sort))?x.sort:"recent") as BookOrder,
- topic:typeof x.topic==="string"?x.topic:"",format:["epub","pdf","cbz"].includes(String(x.format))?String(x.format):"all",
+ topic:typeof x.topic==="string"?x.topic:"",format:["epub","pdf","cbz","mobi","azw3","fb2"].includes(String(x.format))?String(x.format):"all",
  covers:["with","without"].includes(String(x.covers))?String(x.covers):"all"};
 }
 export function cleanBookPosition(raw:unknown):{loc?:string|number;pct:number;at:number;chapter?:string}|null{

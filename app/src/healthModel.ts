@@ -24,5 +24,10 @@ export function looksLikeSample(path: string, size: number): boolean {
   return named && size > 0 && size < 150 * 1024 * 1024;
 }
 
-export const humanSize = (n: number) =>
-  n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : n >= 1e6 ? Math.round(n / 1e6) + " MB" : Math.max(1, Math.round(n / 1e3)) + " KB";
+export function humanSize(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "0 KB";
+  // rounded first, so 999.6 MB reads "1.0 GB" and 999.6 KB reads "1 MB" instead of "1000 MB" / "1000 KB"
+  if (n >= 1e9 || Math.round(n / 1e6) >= 1000) return (n / 1e9).toFixed(1) + " GB";
+  if (n >= 1e6 || Math.round(n / 1e3) >= 1000) return Math.round(n / 1e6) + " MB";
+  return Math.max(1, Math.round(n / 1e3)) + " KB";
+}

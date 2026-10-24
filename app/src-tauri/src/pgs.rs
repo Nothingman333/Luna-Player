@@ -492,15 +492,9 @@ fn decode(packets: &[Packet], out: &Path, cancelled:&dyn Fn()->bool) -> Result<T
 
 /// Loads (or builds and caches) the PGS track `track_number` of `file`.
 pub fn load(file: &str, track_number: u64, cache: &Path, progress: &dyn Fn(f32),cancelled:&dyn Fn()->bool) -> Result<Track, String> {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
     check_cancel(cancelled)?;
-    "bounded-pgs-v2".hash(&mut h);
-    file.hash(&mut h);
-    std::fs::metadata(file).ok().and_then(|m|m.modified().ok()).hash(&mut h);
-    std::fs::metadata(file).map(|m| m.len()).unwrap_or(0).hash(&mut h);
-    track_number.hash(&mut h);
-    let dir: PathBuf = cache.join(format!("{:016x}", h.finish()));
+    let key = crate::stable_cache::file_key("bounded-pgs-v3", file, &track_number.to_le_bytes());
+    let dir: PathBuf = cache.join(key);
     let index = dir.join("index.json");
     if let Ok(f)=File::open(&index){
         let mut s=String::new();
@@ -524,16 +518,16 @@ mod tests {
     static TEST_STATE:Mutex<()>=Mutex::new(());
     #[test]
     fn late_worker_cannot_replace_new_track(){
-        let _guard=TEST_STATE.lock().unwrap();
+        let _guard=TEST_STATE.lock().unwrap_or_else(|e| e.into_inner());
         let (old,_)=begin_load("old");let (tx,rx)=std::sync::mpsc::channel();
         let worker=std::thread::spawn(move||{rx.recv().unwrap();finish_load(old,"old".into(),Track::default(),||panic!("stale notification"))});
         let (new,_)=begin_load("new");assert!(finish_load(new,"new".into(),Track::default(),||{}));
         tx.send(()).unwrap();assert!(!worker.join().unwrap());
-        assert_eq!(LIVE.lock().unwrap().as_ref().unwrap().key,"new");clear(||{});
+        assert_eq!(LIVE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().unwrap().key,"new");clear(||{});
     }
     #[test]
     fn clear_invalidates_pending_and_cached_requests(){
-        let _guard=TEST_STATE.lock().unwrap();let (token,_)=begin_load("a");clear(||{});
+        let _guard=TEST_STATE.lock().unwrap_or_else(|e| e.into_inner());let (token,_)=begin_load("a");clear(||{});
         assert!(!finish_load(token,"a".into(),Track::default(),||panic!("stale ready")));
         let (first,_)=begin_load("a");assert!(finish_load(first,"a".into(),Track::default(),||{}));
         let (cached,yes)=begin_load("a");assert!(yes);assert!(!current(first));assert!(current(cached));clear(||{});
@@ -600,36 +594,36 @@ static CLOCK: Mutex<(f64, f64)> = Mutex::new((0.0, 0.0)); // time-pos, sub-delay
 // Generation and publication share one lock: clear cannot race between the check and install/event.
 static GENERATION:Mutex<u64>=Mutex::new(0);
 pub fn begin_load(key:&str)->(u64,bool){
-    let mut generation=GENERATION.lock().unwrap();*generation=generation.wrapping_add(1);
-    let mut live=LIVE.lock().unwrap();let cached=live.as_ref().is_some_and(|l|l.key==key);
+    let mut generation=GENERATION.lock().unwrap_or_else(|e| e.into_inner());*generation=generation.wrapping_add(1);
+    let mut live=LIVE.lock().unwrap_or_else(|e| e.into_inner());let cached=live.as_ref().is_some_and(|l|l.key==key);
     if !cached {*live=None;}(*generation,cached)
 }
-pub fn current(generation:u64)->bool{*GENERATION.lock().unwrap()==generation}
+pub fn current(generation:u64)->bool{*GENERATION.lock().unwrap_or_else(|e| e.into_inner())==generation}
 pub fn with_current(generation:u64,notify:impl FnOnce()){
-    let lock=GENERATION.lock().unwrap();if *lock==generation {notify();}
+    let lock=GENERATION.lock().unwrap_or_else(|e| e.into_inner());if *lock==generation {notify();}
 }
 pub fn finish_load(generation:u64,key:String,track:Track,notify:impl FnOnce())->bool{
-    let lock=GENERATION.lock().unwrap();if *lock!=generation{return false;}
-    *LIVE.lock().unwrap()=Some(Live{key,track,shown:None});notify();true
+    let lock=GENERATION.lock().unwrap_or_else(|e| e.into_inner());if *lock!=generation{return false;}
+    *LIVE.lock().unwrap_or_else(|e| e.into_inner())=Some(Live{key,track,shown:None});notify();true
 }
 pub fn clear(notify:impl FnOnce()){
-    let mut generation=GENERATION.lock().unwrap();*generation=generation.wrapping_add(1);
-    *LIVE.lock().unwrap()=None;notify();
+    let mut generation=GENERATION.lock().unwrap_or_else(|e| e.into_inner());*generation=generation.wrapping_add(1);
+    *LIVE.lock().unwrap_or_else(|e| e.into_inner())=None;notify();
 }
 
 pub fn set_time(t: f64) {
-    CLOCK.lock().unwrap().0 = t;
+    CLOCK.lock().unwrap_or_else(|e| e.into_inner()).0 = t;
 }
 
 pub fn set_delay(d: f64) {
-    CLOCK.lock().unwrap().1 = d;
+    CLOCK.lock().unwrap_or_else(|e| e.into_inner()).1 = d;
 }
 
 /// The cue to show now, if it differs from the one already shown: Some(None) = clear the screen.
 pub fn due() -> Option<Option<Cue>> {
-    let (t, delay) = *CLOCK.lock().unwrap();
+    let (t, delay) = *CLOCK.lock().unwrap_or_else(|e| e.into_inner());
     let ms = (t - delay) * 1000.0;
-    let mut g = LIVE.lock().unwrap();
+    let mut g = LIVE.lock().unwrap_or_else(|e| e.into_inner());
     let live = g.as_mut()?;
     let cues = &live.track.cues;
     // last cue starting at or before now
@@ -643,7 +637,7 @@ pub fn due() -> Option<Option<Cue>> {
 }
 
 pub fn reset_shown() {
-    if let Some(l) = LIVE.lock().unwrap().as_mut() {
+    if let Some(l) = LIVE.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
         l.shown = None;
     }
 }

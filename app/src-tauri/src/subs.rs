@@ -35,6 +35,8 @@ pub struct Query {
     pub year: Option<u32>,
     pub season: Option<u32>,
     pub episode: Option<u32>,
+    #[serde(default)]
+    pub manual: bool,
 }
 
 #[derive(Serialize)]
@@ -73,6 +75,13 @@ fn query_from_name(path: &Path) -> String {
 
 /// How many times a request is tried before its error is shown (OpenSubtitles fails now and then and works on the next try).
 const TRIES: u32 = 4;
+/// One HTTP client for OpenSubtitles with a time limit: without one a stalled request kept the
+/// subtitle search spinning forever (and every retry with it).
+fn client() -> reqwest::Client {
+    reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).build().unwrap_or_default()
+}
+/// A subtitle file is a few hundred KB; a link that keeps streaming is not one.
+const MAX_SUB_BYTES: usize = 20 * 1024 * 1024;
 /// A failure worth another try (the network, the server, an error page), or one that won't change (key, daily limit).
 enum Fail {
     Again(String),
@@ -143,12 +152,19 @@ fn to_hit(v: &Value) -> Option<Hit> {
 /// Hash matches first (they are in sync with this exact file), then by name.
 pub async fn search(video: &str, key: &str, langs: &str, q: Query) -> Result<Vec<Hit>, String> {
     let path = Path::new(video);
-    let http = reqwest::Client::new();
+    let http = client();
     let mut hits: Vec<Hit> = Vec::new();
+    // "tr, en" or "TR,en" typed in Settings: the API wants plain lower-case codes, and the results are
+    // ordered by the user's languages below
+    let order: Vec<String> = langs.split(',').map(|l| l.trim().to_lowercase()).filter(|l| !l.is_empty()).collect();
+    let joined = order.join(",");
+    let langs = joined.as_str();
 
-    if let Ok(hash) = movie_hash(path) {
-        for v in request(&http, key, &[("moviehash", hash), ("languages", langs.into())]).await? {
-            hits.extend(to_hit(&v));
+    if !q.manual {
+        if let Ok(hash) = movie_hash(path) {
+            for v in request(&http, key, &[("moviehash", hash), ("languages", langs.into())]).await? {
+                hits.extend(to_hit(&v));
+            }
         }
     }
     let mut params = vec![
@@ -176,9 +192,8 @@ pub async fn search(video: &str, key: &str, langs: &str, q: Query) -> Result<Vec
         Err(_) => {}
     }
 
-    let order: Vec<&str> = langs.split(',').collect();
     hits.sort_by_key(|h| {
-        let lang = order.iter().position(|l| *l == h.language).unwrap_or(99);
+        let lang = order.iter().position(|l| *l == h.language.to_lowercase()).unwrap_or(99);
         (!h.hash_match, lang, h.machine_translated || h.ai_translated, -h.downloads)
     });
     Ok(hits)
@@ -191,7 +206,7 @@ fn looks_like_html(b: &[u8]) -> bool {
 }
 
 pub async fn download(video: &str, key: &str, hit_id: i64, language: &str, cache: PathBuf) -> Result<String, String> {
-    let http = reqwest::Client::new();
+    let http = client();
     let mut last = Fail::Again(String::new());
     let mut bytes = None;
     for attempt in 0..TRIES {
@@ -230,16 +245,14 @@ async fn fetch_once(http: &reqwest::Client, key: &str, hit_id: i64) -> Result<Ve
             _ => Fail::Again(dl["message"].as_str().map(str::to_string).unwrap_or_else(|| tr!("İndirme reddedildi", "Download refused"))),
         });
     };
-    let bytes = http
+    let res = http
         .get(link)
         .send()
         .await
         .map_err(|e| Fail::Again(e.to_string()))?
         .error_for_status()
-        .map_err(|e| Fail::Again(tr!("Altyazı indirilemedi: {}", "Couldn't download the subtitle: {}", e)))?
-        .bytes()
-        .await
-        .map_err(|e| Fail::Again(e.to_string()))?;
+        .map_err(|e| Fail::Again(tr!("Altyazı indirilemedi: {}", "Couldn't download the subtitle: {}", e)))?;
+    let bytes = crate::read_capped(res, MAX_SUB_BYTES).await.map_err(Fail::Stop)?;
     // an error page served with a success code is still not a subtitle
     if looks_like_html(&bytes) {
         return Err(Fail::Again(tr!("Altyazı yerine bir hata sayfası geldi", "Got an error page instead of a subtitle")));
@@ -285,14 +298,9 @@ pub fn save_named(video: &str, language: &str, ext: &str, cache: PathBuf, bytes:
     }
     std::fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
     // the cache is shared by every video, so the name carries which video it belongs to
-    let id = {
-        use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        video.to_lowercase().hash(&mut h);
-        h.finish()
-    };
+    let id = crate::stable_cache::key(&[b"subtitle", video.to_lowercase().as_bytes()]);
     let safe: String = name.chars().map(|c| if r#"\/:*?"<>|"#.contains(c) || c.is_control() { '_' } else { c }).collect();
-    let p = cache.join(format!("{id:016x}-{safe}"));
+    let p = cache.join(format!("{id}-{safe}"));
     write_new(&p).map_err(|e| e.to_string())?;
     Ok(p.to_string_lossy().into_owned())
 }
@@ -362,5 +370,16 @@ mod tests {
         assert!(h(b""));
         assert!(!h(b"1\r\n00:00:01,000 --> 00:00:02,000\r\nHello\r\n"));
         assert!(!h("\u{feff}1\n00:00:01,000 --> 00:00:02,000\nMerhaba\n".as_bytes()));
+    }
+}
+
+#[cfg(test)]
+mod manual_search_tests {
+    #[test]
+    fn manual_search_is_opt_in() {
+        let automatic: super::Query = serde_json::from_str(r#"{"title":"Avatar"}"#).unwrap();
+        assert!(!automatic.manual);
+        let manual: super::Query = serde_json::from_str(r#"{"title":"Avatar","manual":true}"#).unwrap();
+        assert!(manual.manual);
     }
 }

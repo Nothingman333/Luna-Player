@@ -1,3 +1,4 @@
+import { appStorage as localStorage } from "./appStorage";
 import {makeResolver,validTemplate} from "./webSearch";
 import { SitePreferencesPanel, RecoveryPanel, PageLibrarySignal } from "./BrowserDaily";
 import { cleanSitePreferences, siteOrigin, recoveryTabs } from "./everydayModel";
@@ -10,10 +11,10 @@ import { BrowserReader } from "./BrowserReader";
 import { CommandPalette } from "./CommandPalette";
 import type { PaletteCommand } from "./CommandPalette";
 import { pinTab, stepTab, dropTab } from "./browserStartModel";
-import { cleanZoomMap, rememberZoom, zoomFor } from "./browserZoomMemory";
+import { cleanZoomMap, rememberZoom, zoomFor, userZoomChange } from "./browserZoomMemory";
 import {BrowserManager} from "./BrowserManager";
 import {copyAssistantText} from "./AssistantTools";
-import {moveWebTab,cleanWebTabs,upsertWebBookmark,missingWebTabs} from "./browserWorkspaceModel";
+import {cleanWebTabs,upsertWebBookmark,missingWebTabs} from "./browserWorkspaceModel";
 import { BrowserWorkspace } from "./BrowserWorkspace";
 import type { SavedWebTab } from "./browserWorkspaceModel";
 import { localList, validReading } from "./extrasModel";
@@ -31,7 +32,7 @@ import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { browserAddress, cleanBrowserPage, friendlyBrowserError } from "./browserModel";
 import type { BrowserPage, WebTab } from "./browserModel";
-import { registerBrowserReader, registerBrowserTranslator, TRANSLATION_LANGUAGES, translateRows, translationBatches } from "./browserTranslation";
+import { registerBrowserReader, registerBrowserTranslator, TRANSLATION_LANGUAGES, selectionTranslatePrompt, translateRows, translationBatches } from "./browserTranslation";
 import type { TranslationRow, TranslationSummary } from "./browserTranslation";
 import { aiReady } from "./ai";
 import "./Browser.css";
@@ -44,7 +45,8 @@ import { browserRows, mergeReadingEntry } from "./browserRecords";
 import { ClearDataPanel, FindBar, HistoryPanel, ShortcutsPanel, SiteAvatar, SuggestList, WebMenu } from "./BrowserPanels";
 import type { TabMenuItem } from "./BrowserPanels";
 import { BrowserStart } from "./BrowserStart";
-import { clearVisitsSince, forgetFailedVisit, HIDDEN_SITES_KEY, HISTORY_KEY, HISTORY_PAUSED_KEY, readSession, readVisits, recordVisit, removeVisit, retitleVisit, SESSION_KEY, sessionTabs, topSites, webSuggestions } from "./browserHistoryModel";
+import { applySearchEngine } from "./searchEngine";
+import { clearVisitsSince, forgetFailedVisit, HIDDEN_SITES_KEY, HISTORY_KEY, HISTORY_PAUSED_KEY, readSession, readVisits, recordVisit, removeSite, removeVisit, retitleVisit, SESSION_KEY, sessionTabs, topSites, webSuggestions } from "./browserHistoryModel";
 import type { Suggestion, WebVisit } from "./browserHistoryModel";
 import { ENGINE_KEY, resolveWebInput, searchEngine, searchedWords } from "./browserSearchModel";
 import type { SearchEngineId } from "./browserSearchModel";
@@ -63,7 +65,7 @@ function shortcutName(e: KeyboardEvent): string {
   return "";
 }
 /** One line into luna-debug.log (Luna's data folder): the page layer, menus, downloads and errors. */
-const dlog = (...parts: unknown[]) => { if (isTauri()) void native("debug_log", { lines: [parts.map(p => typeof p === "string" ? p : JSON.stringify(p)).join(" ")] }).catch(() => {}); };
+const dlog = (...parts: unknown[]) => { if (isTauri()) void invoke("debug_log", { lines: [parts.map(p => typeof p === "string" ? p : JSON.stringify(p)).join(" ")] }).catch(() => {}); };
 type FindResult = { count: number; index: number; capped: boolean };
 // One native mutation at a time, including cleanup after React StrictMode's effect replay.
 let operations = Promise.resolve();
@@ -97,6 +99,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [pinned, setPinned] = useState<Set<number>>(() => new Set());
   const pinnedRef = useRef(pinned); pinnedRef.current = pinned;
+  const zoomEcho = useRef(new Map<number,{zoom:number;url:string|undefined}>());
   const zoomMemory = useRef((() => { try { return cleanZoomMap(JSON.parse(localStorage.getItem("lunaWebSiteZoom") || "null")); } catch { return cleanZoomMap(null); } })());
   const [sitePrefs,setSitePrefs]=useState(()=>{try{return cleanSitePreferences(JSON.parse(store.get("lunaWebSitePreferences")||"{}"));}catch{return cleanSitePreferences(null);}});
   const prefsRef=useRef(sitePrefs);prefsRef.current=sitePrefs;
@@ -205,9 +208,10 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
   function setPageZoom(factor: number) {
     if (selected === null) return;
     const id = selected, url = tabsRef.current.find(t => t.id === id)?.url;
+    zoomEcho.current.set(id,{zoom:factor,url});
     void native("browser_action", { id, action: "zoom", zoom: factor })
       .then(() => { if (alive.current && known.current.has(id)) { setTabNative(m => patchNative(m, id, { zoom: factor })); if (url) { zoomMemory.current = rememberZoom(zoomMemory.current, url, factor); try { localStorage.setItem("lunaWebSiteZoom", JSON.stringify(zoomMemory.current)); } catch {} } } })
-      .catch(showError);
+      .catch(error=>{zoomEcho.current.delete(id);showError(error);});
   }
   function zoomBy(direction: 1 | -1) {
     if (selected === null) return;
@@ -245,7 +249,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
     const tab=tabsRef.current.find(t=>t.id===id);
     try {
       await native("browser_action", { id, action: "close" }, allowed);
-      known.current.delete(id); revisions.current.delete(id); committed.current.delete(id);if(pendingScroll.current?.id===id)pendingScroll.current=null;
+      known.current.delete(id); zoomEcho.current.delete(id); revisions.current.delete(id); committed.current.delete(id);if(pendingScroll.current?.id===id)pendingScroll.current=null;
       titles.current.delete(id); loadingNow.current.delete(id); setMutedTabs(m => m.filter(x => x !== id));
       setTabNative(m => dropNative(m, id)); stopping.current.delete(id); setPinned(old => new Set([...old].filter(x => x !== id)));setFullTabs(old=>new Set([...old].filter(x=>x!==id)));tabMuteChoice.current.delete(id);
       // Like other browsers: the neighbour on the right takes over, else the one on the left.
@@ -449,7 +453,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
     }else{
       const tab=tabsRef.current.find(t=>t.id===context.id);const page:BrowserPage={title:tab?.title||context.page,url:context.page,text:context.text,selection:context.text,truncated:false,capturedAt:Date.now()};
       selectedText.current={id:context.id,revision:context.revision,page};onPage(page);
-      askAssistant(kind==="explain"?label("Yalnız seçtiğim metni açıkla.","Explain only the selected text."):label("Yalnız seçtiğim metni Türkçeye çevir.","Translate only the selected text into English."));
+      askAssistant(kind==="explain"?label("Yalnız seçtiğim metni açıkla.","Explain only the selected text."):selectionTranslatePrompt(targetLanguage));
     }setPageMenu(null);
   }
   function pageMenuItems():TabMenuItem[]{
@@ -489,7 +493,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
     if (next !== historyRef.current) commitRef.current(next);
   }
   const forgetRef = useRef(forgetFailed); forgetRef.current = forgetFailed;
-  function chooseEngine(id: SearchEngineId) { setEngineId(id); store.set(ENGINE_KEY, id);store.set("webSearch",id==="duckduckgo"?"ddg":id); }
+  function chooseEngine(id: SearchEngineId) { setEngineId(id); store.set(ENGINE_KEY, id);const saved=id==="duckduckgo"?"ddg":id;store.set("webSearch",saved);applySearchEngine(saved); }
   function setPaused(paused: boolean) { setHistoryPaused(paused); store.set(HISTORY_PAUSED_KEY, paused ? "1" : "0"); }
   function hideSite(host: string) { const next = [...hiddenSites.filter(h => h !== host), host].slice(-100); setHiddenSites(next); store.set(HIDDEN_SITES_KEY, JSON.stringify(next)); }
   useEffect(() => {
@@ -695,7 +699,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
         const list = tabsRef.current, id = chosen.current; if (!list.length) return false;
         const step = name.endsWith("pageup") ? -1 : 1;
         if (name.includes("shift")) { if (id !== null) setTabs(rows => stepTab(rows, id, step, pinnedRef.current)); }
-        else { const at = list.findIndex(t => t.id === id); chooseTab(list[(at + step + list.length) % list.length].id); }
+        else { const at = list.findIndex(t => t.id === id); chooseTab(list[((at<0?(step>0?-1:0):at) + step + list.length) % list.length].id); }
         return true;
       }
       case "f1": case "ctrl+/": case "ctrl+shift+/": case "ctrl+shift+?": setToolsOpen(false); setKeysOpen(true); return true;
@@ -736,6 +740,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
         const origin=siteOrigin(e.value),pref=prefsRef.current[origin],choice=tabMuteChoice.current.get(e.id);const muted=choice?.origin===origin?choice.muted:pref?.muted??false;void native("browser_action",{id:e.id,action:muted?"mute":"unmute"},()=>alive.current&&known.current.has(e.id)&&committed.current.get(e.id)===e.value).then(()=>{if(alive.current)setMutedTabs(old=>muted?[...new Set([...old,e.id])]:old.filter(id=>id!==e.id));}).catch(()=>{});
         loadingNow.current.delete(e.id); rememberRef.current(e.id, e.value);
         const want = zoomFor(zoomMemory.current, e.value);
+        zoomEcho.current.set(e.id,{zoom:want,url:e.value});
         void native("browser_action", { id: e.id, action: "zoom", zoom: want }, () => alive.current && known.current.has(e.id) && committed.current.get(e.id) === e.value).then(() => { if (alive.current && committed.current.get(e.id) === e.value) setTabNative(m => patchNative(m, e.id, { zoom: want })); }).catch(() => {});
       }
       if (e.kind === "navigate" || e.kind === "loading") {
@@ -749,17 +754,17 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
       if (e.kind !== "title" && e.kind !== "history") dlog("event", e.id, e.kind);
       if (e.kind === "download-rejected") {showError(e.value);return;}
       if (e.kind === "download-start") {const back=committed.current.get(e.id);setTabs(ts=>ts.map(t=>t.id===e.id?{...t,url:back??t.url,loading:false}:t));setBrowserNotice(label("İndirme başladı. Araçlar › İndirmeler bölümünden yönetebilirsin.","Download started. Manage it in Tools › Downloads."));return;}
-      if (e.kind === "download-blocked") {
-        // The download link was announced as a navigation, but the page itself never changed.
-        const back = committed.current.get(e.id);
-        setTabs(ts => ts.map(t => t.id !== e.id ? t : { ...t, url: back ?? t.url, loading: false }));
-        if (chosen.current === e.id) showError(label("Web bölümünde dosya indirme kapalı. İndirmek için sayfayı dış tarayıcıda açabilirsin.", "Downloads are off in Luna Web. Open the page in your browser to download."));
-        return;
-      }
       if (e.kind === "blocked") { if (chosen.current === e.id) showError(label("Bu bağlantı güvenli bir web sayfası değil; açılmadı.", "This link is not a regular web page, so it was not opened.")); return; }
       if (e.kind === "history") { const h = parseHistory(e.value); if (h) setTabNative(m => patchNative(m, e.id, h)); return; }
       if (e.kind === "audio") { const audio = parseAudio(e.value); if (audio !== null) setTabNative(m => patchNative(m, e.id, { audio })); return; }
-      if (e.kind === "zoom") { const zoom = parseZoom(e.value); if (zoom !== null) setTabNative(m => patchNative(m, e.id, { zoom })); return; }
+      if (e.kind === "zoom") {
+        const zoom=parseZoom(e.value);if(zoom===null)return;
+        setTabNative(m=>patchNative(m,e.id,{zoom}));
+        const echo=zoomEcho.current.get(e.id),url=committed.current.get(e.id);zoomEcho.current.delete(e.id);
+        if(url&&!loadingNow.current.has(e.id)&&userZoomChange(echo?.url===url?echo.zoom:undefined,zoom)){
+          const next=rememberZoom(zoomMemory.current,url,zoom);if(next!==zoomMemory.current){zoomMemory.current=next;try{localStorage.setItem("lunaWebSiteZoom",JSON.stringify(next));}catch{}}
+        }return;
+      }
       if (e.kind === "permission") { if (chosen.current === e.id) setBrowserNotice(permissionNotice(e.value, lang() === "tr")); return; }
       if (e.kind === "nav-done") {
         // A late answer of an older navigation carries another address: it must not touch the page in use.
@@ -884,7 +889,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
   const insecure = !!current && current.url.startsWith("http:") && !/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(current.url);
   const showPretty = !!current && focusSource !== "bar" && address === current.url, searchWords = current ? searchedWords(current.url) : null, pretty = current ? prettyAddress(current.url) : null;
   return <section className={"browser-shell" + (!current ? " is-start" : "") + (cinema?" is-cinema":"")} hidden={!active} aria-label="Luna Web">
-    {workspaceOpen&&<BrowserWorkspace tabs={tabs} selected={selected} select={chooseTab} move={(id,direction)=>setTabs(rows=>moveWebTab(rows,id,direction))} closeTab={closeTab} closed={closedTabs} reopen={reopenClosed} add={add} close={()=>setWorkspaceOpen(false)} bookmarks={bookmarks} saveBookmarks={rows=>{localStorage.setItem("lunaWebBookmarks",JSON.stringify(rows));setBookmarks(rows);}}/>}
+    {workspaceOpen&&<BrowserWorkspace tabs={tabs} selected={selected} select={chooseTab} move={(id,direction)=>setTabs(rows=>stepTab(rows,id,direction,pinnedRef.current))} closeTab={closeTab} closed={closedTabs} reopen={reopenClosed} add={add} close={()=>setWorkspaceOpen(false)} bookmarks={bookmarks} saveBookmarks={rows=>{localStorage.setItem("lunaWebBookmarks",JSON.stringify(rows));setBookmarks(rows);}}/>}
     {cinema&&<div className="browser-cinema-bar"><span>{current?.title}</span><button className="chip" onClick={()=>{setFocusMode(false);if(fullscreen&&current)void native("browser_action",{id:current.id,action:"exit-fullscreen"}).catch(showError);}}>{label("İzleme görünümünden çık","Exit watch view")}</button></div>}
     <div className="browser-chrome">
       <div className="browser-tabstrip">
@@ -967,7 +972,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
     {menu && tabs.some(t => t.id === menu.id) && <WebMenu x={menu.x} y={menu.y} items={tabMenuItems(menu.id)} close={() => setMenu(null)}/>}
     {historyOpen && <HistoryPanel rows={history} paused={historyPaused} setPaused={setPaused} close={() => setHistoryOpen(false)}
       open={(url, newTab) => { setHistoryOpen(false); if (newTab) void add(url); else void action("navigate", url); }}
-      remove={url => commitHistory(removeVisit(historyRef.current, url))} clearSince={since => commitHistory(clearVisitsSince(historyRef.current, since))}/>}
+      remove={url => commitHistory(removeVisit(historyRef.current, url))} removeSite={host => commitHistory(removeSite(historyRef.current, host))} clearSince={since => commitHistory(clearVisitsSince(historyRef.current, since))}/>}
     {keysOpen && <ShortcutsPanel close={() => setKeysOpen(false)}/>}
     {clearOpen && <ClearDataPanel canClearSite={tabs.length > 0} clear={clearData} close={() => setClearOpen(false)}/>}
   </section>;

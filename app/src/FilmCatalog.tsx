@@ -11,6 +11,8 @@ import type { MatchReason } from "./libraryTools";
 import { buildGroups, catalogKind, formatRemaining, pickSurprise, scanState, selectCatalog, surprisePool, viewStorageKey } from "./filmCatalogModel";
 import type { CatalogGroup, CatalogParams, ResumeInfo } from "./filmCatalogModel";
 import "./FilmCatalog.css";
+import { LibrarySavedViews } from "./LibrarySavedViews";
+import { LibraryComparison, useLibraryCompare } from "./LibraryCompare";
 
 /** What a catalog card is told besides the record: everything is worked out once per search, not once per card. */
 export type PosterProps = {
@@ -65,13 +67,16 @@ export function FilmCatalogView({ title, items: rawItems, query, a, Poster }: {
   const genre = genres.includes(view.genre) ? view.genre : "";
   const decade = decades.includes(view.decade) ? view.decade : "";
   const stats = useMemo(() => libraryStats(items), [items]);
-  const libTitles = useMemo(() => buildGroups(items).length, [items]);
+  const allGroups = useMemo(() => buildGroups(items), [items]);
+  const libTitles = allGroups.length;
+  const compare=useLibraryCompare(kind);
+  const [comparing,setComparing]=useState(false);
 
   const deferred = useDeferredValue(query);
   const q = deferred.trim();
   const params: CatalogParams = { query: deferred, sort, filter, genre, decade, minRating: view.minRating, runtime: view.runtime, watch: view.watch, locale };
   const ctx = { recent: recentRows, finished: isFinished };
-  const result = useMemo(() => selectCatalog(items, params, ctx), // eslint-disable-line react-hooks/exhaustive-deps
+  const result = useMemo(() => selectCatalog(items, params, ctx),
     [items, deferred, sort, filter, genre, decade, view.minRating, view.runtime, view.watch, locale, recentRows, finishedRaw, stamp]);
   const activeFilters = filter !== "all" || !!genre || !!decade || view.minRating !== 0 || !!view.runtime || view.watch !== "all";
   const resetFilters = () => updateView({ filter: "all", genre: "", decade: "", minRating: 0, runtime: "", watch: "all", sort: "az" });
@@ -86,18 +91,18 @@ export function FilmCatalogView({ title, items: rawItems, query, a, Poster }: {
       search: q && activeFilters ? selectCatalog(items, { ...params, query: "" }, ctx).titles : null,
       filters: activeFilters ? selectCatalog(items, { ...params, ...off }, ctx).titles : null,
     };
-  }, [empty, items, deferred, sort, filter, genre, decade, view.minRating, view.runtime, view.watch, locale, recentRows, finishedRaw, stamp]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [empty, items, deferred, sort, filter, genre, decade, view.minRating, view.runtime, view.watch, locale, recentRows, finishedRaw, stamp]);
 
   // the cards act through the latest actions, but only re-render when something they show changes
   const aRef = useRef(a); aRef.current = a;
   const stableA = useMemo<Actions>(() => ({
     play: (p, s) => aRef.current.play(p, s), details: (k) => aRef.current.details(k), menu: (e, t) => aRef.current.menu(e, t),
     rematch: a.rematch ? (t) => aRef.current.rematch?.(t) : undefined, missing: a.missing,
-  }), [a.missing, !!a.rematch]); // eslint-disable-line react-hooks/exhaustive-deps
+  }), [a.missing, !!a.rematch]);
 
   // surprise pick: only from what the current filters show, and only films whose file is really there
   const unusable = (p: string) => a.missing.has(p) || isRemote(p) || isUrl(p);
-  const pool = useMemo(() => surprisePool(result.groups, unusable), [result.groups, a.missing, stamp]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pool = useMemo(() => surprisePool(result.groups, unusable), [result.groups, a.missing, stamp]);
   const [pick, setPick] = useState<string | null>(null);
   const picked = pick ? result.groups.find((g) => g.id === pick) ?? null : null;
   const roll = () => { const g = pickSurprise(pool.pool, pick); setPick(g ? g.id : null); };
@@ -134,12 +139,15 @@ export function FilmCatalogView({ title, items: rawItems, query, a, Poster }: {
           {view.watch !== "all" && <button className="chip" onClick={() => updateView({ watch: "all" })}>{watchLabel} ×</button>}
           {filter !== "all" && <button className="chip" onClick={() => updateView({ filter: "all" })}>{filter === "versions" ? extraText("Çoklu sürüm", "Multiple versions") : extraText("Eşleşmemiş", "Unmatched")} ×</button>}
         </div>}
+        <div className="library-workbench"><LibrarySavedViews key={kind} kind={kind} view={view} apply={updateView} genres={genres} decades={decades}/><button type="button" className={"chip"+(comparing?" on":"")} aria-pressed={comparing} onClick={()=>setComparing(v=>!v)}>{comparing?extraText("Seçimi bitir","Finish selecting"):extraText("Karşılaştırmak için seç","Select to compare")}</button></div>
+        {compare.error&&<div className="library-data-warning" role="status">{compare.error}{compare.damaged&&<button type="button" className="chip" onClick={compare.reset}>{extraText("Seçimi yedekle ve sıfırla","Back up and reset selection")}</button>}</div>}
+        <LibraryComparison ids={compare.ids} groups={allGroups} remove={compare.toggle} clear={compare.clear} onDetails={a.details}/>
         {scanning && <p className="library-scan-note muted small" role="status"><span className="pulse">{extraText("Klasörler taranıyor…", "Scanning folders…")}</span> {extraText("Mevcut kayıtlar ve filtreler yerinde; tarama bitince liste güncellenir.", "Existing entries and filters stay; the list updates when the scan finishes.")}</p>}
         {rawCount > items.length && <p className="library-data-warning" role="status">{extraText(`${rawCount - items.length} eksik veya hasarlı kayıt görüntülenemedi. Kaynak kayıtlar korundu; yeniden taramayı deneyebilirsin.`, `${rawCount - items.length} incomplete or damaged entries could not be displayed. Source records were kept; try rescanning.`)}</p>}
         {saveError && <p className="muted small" role="status">{saveError}</p>}
         {picked && <SurprisePanel group={picked} skipped={pool.skippedWatched} series={series} a={a} usable={(p) => !unusable(p)} onAgain={roll} onClose={() => setPick(null)} />}
         {result.list.length ? <div className={"grid library-results" + (view.compact ? " is-compact" : "")}>{result.groups.flatMap((g) => g.members.map((it) => (
-          <Poster key={it.key} it={it} a={stableA} copyCount={result.copies.get(it.key)} episodes={g.episodes} resume={g.resume} reason={g.reason} watched={g.state === "watched"} stamp={stamp} />
+          <div className="library-comparable" key={it.key}><Poster it={it} a={stableA} copyCount={result.copies.get(it.key)} episodes={g.episodes} resume={g.resume} reason={g.reason} watched={g.state === "watched"} stamp={stamp} />{comparing&&<label className="library-compare-pick"><input type="checkbox" aria-label={extraText((it.meta?.title||it.parsed.title)+" eserini karşılaştır", "Compare "+(it.meta?.title||it.parsed.title))} checked={compare.ids.includes(g.id)} disabled={!compare.ids.includes(g.id)&&compare.ids.length>=3} onChange={()=>compare.toggle(g.id)}/><span>{compare.ids.includes(g.id)?extraText("Karşılaştırmada","Selected for comparison"):extraText("Karşılaştır","Compare")}</span></label>}</div>
         )))}</div>
           : <EmptyCatalog series={series} empty={items.length === 0} scanning={scanning} query={q} filtersOn={activeFilters} without={without} onClearSearch={clearSearch} onClearFilters={resetFilters} onClearAll={() => { resetFilters(); clearSearch(); }} />}
       </section>

@@ -1,3 +1,6 @@
+import {TastePanel} from "./TastePanel";
+import {SimilarTitles} from "./SimilarTitles";
+import {ExtraModal,extraText} from "./Extras";
 import {savedFilmAnalysis} from "./filmAnalysisStorage";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "./nativeCore";
@@ -56,7 +59,7 @@ function ReviewLine({ r, reading, order = 0, label }: { r: RunReview; reading: b
   const [open, setOpen] = useState(false), [shown, setShown] = useState(!r.spoiler);
   const read = r.read;
   const long = r.text.length > LONG;
-  return <article className={"la-rv" + (reading ? " -reading" : "") + (read ? " -t-" + itemClass(read.tone) : "")} style={reading ? { ["--i" as any]: order } : undefined}>
+  return <article className={"la-rv" + (!r.text.trim() ? " -rating-only" : "") + (reading ? " -reading" : "") + (read ? " -t-" + itemClass(read.tone) : "")} style={reading ? { ["--i" as any]: order } : undefined}>
     <div className="la-rv-face" aria-hidden>{(r.author || "?")[0].toUpperCase()}</div>
     <div className="la-rv-main">
       <div className="la-rv-top">
@@ -69,9 +72,9 @@ function ReviewLine({ r, reading, order = 0, label }: { r: RunReview; reading: b
       </div>
       {!shown
         ? <button className="la-spoiler" onClick={() => setShown(true)}>{tt("Spoiler içeriyor · göster")}</button>
-        : <p className={"la-rv-text" + (long && !open ? " -cut" : "")}>{r.text}</p>}
+        : <p className={"la-rv-text" + (long && !open ? " -cut" : "")}>{r.text.trim() || tt("Yalnızca yıldız puanı verilmiş.")}</p>}
       {shown && long && <button className="la-more" onClick={() => setOpen((x) => !x)}>{open ? tt("Daha az göster") : tt("Devamını oku")}</button>}
-      {read?.gist && <p className="la-rv-gist">{read.gist}</p>}
+      {shown && read?.gist && <p className="la-rv-gist">{read.gist}</p>}
     </div>
   </article>;
 }
@@ -125,15 +128,54 @@ export function ReviewAiCard({ film, profile, mood, setMood, label, onReviews, o
   const [step, setStep] = useState<[number, number]>([0, 0]);
   const [showAll, setShowAll] = useState(false);
   const [filter, setFilter] = useState<ItemTone | "all">("all");
+  const [preferences,setPreferences]=useState(false);
+  const [collapsed,setCollapsed]=useState(false);
   const [opts, setOpts] = useState(false);
+  const [optsPage,setOptsPage]=useState<"menu"|"settings">("menu");
   const [, redraw] = useState(0);
+  useEffect(()=>{const update=()=>redraw(n=>n+1);window.addEventListener("film-decision-changed",update);return()=>window.removeEventListener("film-decision-changed",update);},[]);
   const optsRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!opts) return;
     const away = (e: MouseEvent) => { if (!optsRef.current?.contains(e.target as Node)) setOpts(false); };
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpts(false); };
-    document.addEventListener("mousedown", away); document.addEventListener("keydown", esc);
-    return () => { document.removeEventListener("mousedown", away); document.removeEventListener("keydown", esc); };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault(); e.stopPropagation(); setOpts(false);
+      optsRef.current?.querySelector<HTMLButtonElement>(".la-gear")?.focus({ preventScroll: true });
+    };
+    document.addEventListener("mousedown", away); document.addEventListener("keydown", esc, true);
+    return () => { document.removeEventListener("mousedown", away); document.removeEventListener("keydown", esc, true); };
+  }, [opts]);
+  useLayoutEffect(() => {
+    if (!opts) return;
+    const anchor = optsRef.current?.querySelector<HTMLButtonElement>(".la-gear");
+    const panel = optsRef.current?.querySelector<HTMLElement>(".la-opts");
+    if (!anchor || !panel) return;
+    const fit = () => {
+      const box = anchor.getBoundingClientRect(), edge = 12, gap = 8;
+      const origin = optsRef.current!.getBoundingClientRect();
+      let left = 0, right = innerWidth, top = 0, bottom = innerHeight;
+      for (let parent = optsRef.current!.parentElement; parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent), rect = parent.getBoundingClientRect();
+        if (/auto|scroll|hidden|clip/.test(style.overflowY)) { top = Math.max(top, rect.top); bottom = Math.min(bottom, rect.bottom); }
+        if (/auto|scroll|hidden|clip/.test(style.overflowX)) { left = Math.max(left, rect.left); right = Math.min(right, rect.right); }
+      }
+      const below = Math.max(0, bottom - box.bottom - gap - edge);
+      const above = Math.max(0, box.top - gap - top - edge);
+      const upward = below < Math.min(panel.scrollHeight, 320) && above > below;
+      const available = upward ? above : below;
+      const maxHeight = Math.min(560, Math.max(80, available), Math.max(80, bottom - top - edge * 2));
+      panel.style.width = Math.max(120, Math.min(340, right - left - edge * 2)) + "px";
+      panel.style.maxHeight = maxHeight + "px";
+      const height = panel.offsetHeight;
+      panel.style.left = Math.max(left + edge, Math.min(box.right - panel.offsetWidth, right - panel.offsetWidth - edge)) - origin.left + "px";
+      panel.style.top = Math.max(top + edge, Math.min(upward ? box.top - gap - height : box.bottom + gap, bottom - height - edge)) - origin.top + "px";
+      panel.style.right = "auto";
+    };
+    fit();
+    panel.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
+    window.addEventListener("resize", fit); window.addEventListener("scroll", fit, true);
+    return () => { window.removeEventListener("resize", fit); window.removeEventListener("scroll", fit, true); };
   }, [opts]);
   const queue = useRef<LbReview[]>([]);
   const ticket = useRef(0);
@@ -238,36 +280,41 @@ export function ReviewAiCard({ film, profile, mood, setMood, label, onReviews, o
   const topicName = (t: Topic) => (t === "general" ? tt("Genel") : label(t));
   const moods: [Mood, string][] = [["any", tt("Genel")], ["easy", tt("Tempo")], ["deep", tt("Hikâye ve karakter")], ["visual", tt("Görsellik")]];
 
-  return <div className="la-ai">
+  return <div className="la-ai" aria-busy={busy}>
     <div className="la-head">
-      <h2>{tt("Luna Analiz")}</h2>
+      <h2>{tt("Luna Analiz")}</h2><button className="chip" aria-expanded={!collapsed} aria-label={extraText("Luna Analiz’i küçült veya aç","Collapse or expand Luna Analysis")} onClick={()=>setCollapsed(x=>!x)}>{collapsed?"▾":"▴"}</button>
       <span className="la-src">{site} · {reviewAiName(cfg)}</span>
       <span className="grow" />
       <div className="la-opts-wrap" ref={optsRef}>
-        <button className={"la-gear" + (opts ? " on" : "")} aria-label={tt("Analiz ayarları")} title={tt("Analiz ayarları")} aria-expanded={opts} onClick={() => setOpts((x) => !x)}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>
+        <button className={"la-gear" + (opts ? " on" : "")} aria-label={extraText("Analiz seçenekleri","Analysis options")} title={extraText("Analiz seçenekleri","Analysis options")} aria-expanded={opts} onClick={() => {setOptsPage("menu");setOpts((x) => !x);}}>
+          <span aria-hidden="true">•••</span>
         </button>
         {opts && <div className="la-opts" role="dialog" aria-label={tt("Analiz ayarları")}>
-          <h4>{tt("Analiz ayarları")}</h4>
+          {optsPage==="menu"?<div className="analysis-options-menu"><button className="analysis-menu-row" onClick={()=>setOptsPage("settings")}>{tt("Analiz ayarları")}<span aria-hidden="true">›</span></button>
+          {!book&&<button className="analysis-menu-row" onClick={()=>{setOpts(false);window.dispatchEvent(new Event("luna-local-reviews"));}}>{extraText("Yorumları internetsiz tara","Scan reviews offline")}</button>}
+          </div>:<><button className="analysis-menu-back" onClick={()=>setOptsPage("menu")}>‹ {tt("Analiz ayarları")}</button>
           <div className="la-opt">
             <div><b>{tt("Okunacak yorum")}</b><span>{tt("{0} yorum · daha çok yorum daha uzun sürer", cfg.count)}</span></div>
-            <div className="la-steps">{[10, 20, 30, 50, 75, 100].map((n) => <button key={n} className={"seg" + (cfg.count === n ? " on" : "")} onClick={() => { store.set("reviewAiCount", String(n)); redraw((x) => x + 1); }}>{n}</button>)}</div>
+            <div className="la-steps">{[10, 20, 30, 50, 75, 100].map((n) => <button key={n} className={"seg" + (cfg.count === n ? " on" : "")} aria-pressed={cfg.count === n} onClick={() => { store.set("reviewAiCount", String(n)); redraw((x) => x + 1); }}>{n}</button>)}</div>
           </div>
           {!book && <div className="la-opt -row">
             <div><b>{tt("Spoiler'lı yorumlar")}</b><span>{cfg.spoilers ? tt("Okunur; listede gizli durur") : tt("Hiç okunmaz, analize girmez")}</span></div>
             <Switch on={cfg.spoilers} label={tt("Spoiler'lı yorumlar")} onChange={(on) => { store.set("reviewAiSpoilers", on ? "1" : "0"); redraw((x) => x + 1); }} />
           </div>}
           <button className="la-link" onClick={() => { setOpts(false); goPlace("settings"); }}>{tt("Yapay zekâ ve ek talimat: Ayarlar ›")}</button>
+          </>}
         </div>}
       </div>
       {/* settings, then Stop beside the running button and as big as it */}
       {busy && <button className="la-stop" onClick={() => { ticket.current++; setPhase(""); setStatus(""); setReading(null); }}>{tt("Durdur")}</button>}
-      <button className="la-go" disabled={busy || !inApp} onClick={start}>{busy ? tt("Okunuyor…") : run ? tt("Yeniden analiz et") : tt("{0} yorumu oku ve analiz et", cfg.count)}</button>
+      <button className="la-go" disabled={busy || !inApp} onClick={()=>setPreferences(true)}>{busy ? <><span className="spinner" aria-hidden="true" /> {tt("Okunuyor…")}</> : run ? tt("Yeniden analiz et") : tt("{0} yorumu oku ve analiz et", cfg.count)}</button>
     </div>
+    {preferences&&<ExtraModal title={extraText("Zevk tercihlerim","Taste preferences")} close={()=>setPreferences(false)} className="workspace-modal analysis-preferences"><section className="la"><TastePanel kind={book?"book":"film"} open/><div className="modal-actions"><button className="primary" onClick={()=>{setPreferences(false);void start();}}>{extraText("Analize başla","Start analysis")}</button></div></section></ExtraModal>}
+    <div hidden={collapsed}>
     <p className="la-lead">{book ? tt("1000Kitap'taki en beğenilen {0} incelemeyi tek tek okur; okurların ortak düşüncelerini, tartıştıkları noktaları ve kitabın sana uygunluğunu çıkarır.", cfg.count) : tt("Letterboxd'daki en popüler {0} yorumu tek tek okur; ortak düşünceleri, tartışılan noktaları ve senin zevkine ne kadar uyduğunu çıkarır.", cfg.count)}</p>
-    {!book && <div className="la-moods" role="group" aria-label={tt("Bugün ne istersin?")}>
-      <span>{tt("Bugün ne istersin?")}</span>
-      {moods.map(([m, n]) => <button key={m} className={"seg" + (mood === m ? " on" : "")} onClick={() => setMood(m)}>{n}</button>)}
+    {!book && <div className="la-moods" role="group" aria-label={tt("Analizde neye odaklanalım?")}>
+      <span>{tt("Analizde neye odaklanalım?")}</span>
+      {moods.map(([m, n]) => <button key={m} className={"seg" + (mood === m ? " on" : "")} aria-pressed={mood === m} onClick={() => setMood(m)}>{n}</button>)}
     </div>}
 
     {busy && <div className="la-live">
@@ -278,15 +325,14 @@ export function ReviewAiCard({ film, profile, mood, setMood, label, onReviews, o
     {error && <p className="la-error" role="alert">{error}</p>}
 
     {v && run && !busy && <div className="la-result">
-      <div className="la-scores">
+      <div className="la-score-header"><div className="la-scores">
         {mine && <div className="la-score -main"><span>{tt("Senin için")}</span><strong>{num(mine.score)}</strong>{Math.abs(mine.diff) >= 0.1 && <em className={mine.diff > 0 ? "-up" : "-down"}>{mine.diff > 0 ? "+" : ""}{num(mine.diff)}</em>}</div>}
         {v.score != null && <div className="la-score"><span>{tt("Luna Analiz")}</span><strong>{num(v.score)}</strong></div>}
         {run.community != null && <div className="la-score"><span>{tt("Yorumların tonu")}</span><strong>{num(run.community)}</strong></div>}
         {tmdb != null && <div className="la-score"><span>TMDB</span><strong>{num(tmdb)}</strong></div>}
         {run.stars != null && <div className="la-score"><span>Letterboxd</span><strong>{num(run.stars)}<small>★</small></strong></div>}
         {run.siteScore != null && <div className="la-score"><span>1000Kitap</span><strong>{num(run.siteScore)}</strong>{run.readers ? <em className="-plain">{tt("{0} okur", run.readers.toLocaleString(locale()))}</em> : null}</div>}
-        <span className={"la-verdict -" + v.lean}>{toneLabel(v.lean)}</span>
-      </div>
+      </div><span className={"la-verdict -" + v.lean}>{toneLabel(v.lean)}</span></div>
       <p className="la-muted la-basis">{tt("Bu özet, okunan {0} yorumdan yapay zekâyla çıkarıldı. Puanlar ve yüzdeler yaklaşık bir okumadır; doğruluk garantisi vermez ve gerçek bir topluluk anketi değildir.", run.count)}</p>
       {mine && (mine.notes.length > 0 || learned) && <p className="la-why">
         {mine.notes.map((n) => n.kind === "strong" ? tt("{0} çok güçlü, senin için önemli", label(n.aspect)) : n.kind === "weak" ? tt("{0} zayıf, senin için önemli", label(n.aspect)) : tt("{0} eleştiriliyor, uyarılmak istemiştin", label(n.aspect))).join(" · ")}
@@ -327,19 +373,21 @@ export function ReviewAiCard({ film, profile, mood, setMood, label, onReviews, o
         {v.themes.length > 0 && <div><span>{tt("Temalar")}</span><p>{v.themes.map((x) => <i key={x.name}>{x.name} <b>%{x.share}</b></i>)}</p></div>}
         {v.emotions.length > 0 && <div><span>{tt("Bıraktığı duygu")}</span><p>{v.emotions.map((x) => <i key={x.name}>{x.name} <b>%{x.share}</b></i>)}</p></div>}
       </div>}
-      {(v.audience.length > 0 || v.similar.length > 0) && <div className="la-cols">
+      {(v.audience.length > 0 || v.similar.length > 0 || (!book&&!!film.id)) && <div className="la-cols">
         {v.audience.length > 0 && <div><h3>{tt("Kimler için")}</h3><ul className="la-list">{v.audience.map((x) => <li key={x}>{x}</li>)}</ul></div>}
-        {v.similar.length > 0 && <div><h3>{tt("Benzerleri")}</h3><ul className="la-list">{v.similar.map((x) => <li key={x.title}><button className="la-title" title={tt("{0} · ayrıntıları aç", x.title)} onClick={() => book ? askAssistant(tt("“{0}” kitabı hakkında bilgi ver; neden “{1}” ile birlikte anılıyor?", x.title, film.title)) : window.dispatchEvent(new CustomEvent("luna-open-title", { detail: { title: x.title, year: x.year ? String(x.year) : undefined, kind: film.kind === "tv" ? "tv" : "movie" } }))}>{x.title}{x.year ? ` (${x.year})` : ""} ↗</button>{x.why ? " — " + x.why : ""}</li>)}</ul></div>}
+        {book && v.similar.length > 0 && <div><h3>{tt("Benzerleri")}</h3><ul className="la-list">{v.similar.map((x) => <li key={x.title}><button className="la-title" title={tt("{0} · ayrıntıları aç", x.title)} onClick={() => book ? askAssistant(tt("“{0}” kitabı hakkında bilgi ver; neden “{1}” ile birlikte anılıyor?", x.title, film.title)) : window.dispatchEvent(new CustomEvent("luna-open-title", { detail: { title: x.title, year: x.year ? String(x.year) : undefined, kind: film.kind === "tv" ? "tv" : "movie" } }))}>{x.title}{x.year ? ` (${x.year})` : ""} ↗</button>{x.why ? " — " + x.why : ""}</li>)}</ul></div>}
+        {!book?<SimilarTitles key={key+String(run.at)} film={film} initial={v.similar}/>:null}
       </div>}
 
       {run.reviews.length > 0 && <div className="la-block">
         <div className="la-read-head">
           <button className="la-toggle" aria-expanded={showAll} onClick={() => setShowAll((x) => !x)}><h3>{tt("Okunan yorumlar")} <span>{run.reviews.length}</span></h3><span className="la-chev">{showAll ? "▴" : "▾"}</span></button>
-          {showAll && <div className="la-filter">{(["all", "positive", "mixed", "negative", "neutral"] as const).map((f) => <button key={f} className={"seg" + (filter === f ? " on" : "")} onClick={() => setFilter(f)}>{f === "all" ? tt("Hepsi") : itemLabel(f)}{f !== "all" && ` ${run.counts[f]}`}</button>)}</div>}
+          {showAll && <div className="la-filter">{(["all", "positive", "mixed", "negative", "neutral"] as const).map((f) => <button key={f} className={"seg" + (filter === f ? " on" : "")} aria-pressed={filter === f} onClick={() => setFilter(f)}>{f === "all" ? tt("Hepsi") : itemLabel(f)}{f !== "all" && ` ${run.counts[f]}`}</button>)}</div>}
         </div>
-        {showAll && <Feed list={shown.map(([r]) => r)} reading={null} follow={false} label={label} done />}
+        {showAll && (shown.length ? <Feed list={shown.map(([r]) => r)} reading={null} follow={false} label={label} done /> : <div className="la-feed-empty" role="status">{tt("Bu filtreye uyan yorum yok.")}</div>)}
       </div>}
       <p className="la-foot">{new Date(run.at).toLocaleString(locale())} · {run.model} · <button className="la-link" onClick={() => openUrl(run.url).catch(() => {})}>{book ? tt("1000Kitap'ta aç") : tt("Letterboxd'da aç")} ↗</button> · {tt("Yapay zekâ yanılabilir; yorumların kendisi yukarıda.")}</p>
     </div>}
+    </div>
   </div>;
 }

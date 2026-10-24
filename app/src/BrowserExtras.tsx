@@ -1,3 +1,4 @@
+import { appStorage as localStorage } from "./appStorage";
 import {browserRows,mergeReadingEntry,mergePageNote,validPageNote} from "./browserRecords";
 import {useEffect,useRef,useState} from "react";
 import {exportExtra,extraText,putExtra} from "./Extras";

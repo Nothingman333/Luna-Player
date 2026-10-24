@@ -1,13 +1,13 @@
 /* Behavior tests for the second package. NEXT_BASELINE points at the app folder after package 1. */
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),ts=require('typescript');
 const actual=path.resolve(__dirname,'..'),root=process.env.NEXT_BASELINE?path.resolve(process.env.NEXT_BASELINE):actual;
-const baseline=root!==actual,read=f=>fs.readFileSync(path.join(root,f),'utf8');
+const baseline=root!==actual,read=f=>require('./production-source.cjs').read(path.join(root,f));
 const transpile=s=>ts.transpileModule(s,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
 function node(f,predicate,scope){const sf=ts.createSourceFile(f,read(f),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let found;function visit(n){let valid=!scope;for(let p=n.parent;p;p=p.parent)if(ts.isFunctionDeclaration(p)&&p.name?.text===scope)valid=true;if(!found&&valid&&predicate(n))found=n;if(!found)ts.forEachChild(n,visit);}visit(sf);assert(found,f+':'+scope);return found;}
 const fn=(f,name)=>node(f,n=>ts.isFunctionDeclaration(n)&&n.name?.text===name).getText().replace(/^export /,'');
 const variable=(f,name,scope)=>node(f,n=>ts.isVariableDeclaration(n)&&n.name.getText()===name,scope).initializer.getText();
 const compile=(s,env={})=>new Function(...Object.keys(env),transpile('const result='+s+';')+';return result;')(...Object.values(env));
-function load(file,env={},imports=()=>({})){const m={exports:{}};new Function('require','module','exports',...Object.keys(env),transpile(read(file)))(imports,m,m.exports,...Object.values(env));return m.exports;}
+function load(file,env={},imports=()=>({})){const m={exports:{}};new Function('require','module','exports',...Object.keys(env),transpile(fs.readFileSync(path.join(root,file),'utf8')))(dep=>dep==="./secretKeys"?load("src/secretKeys.ts"):dep==="./appStorage"?{appStorage:env.localStorage??global.localStorage}:imports(dep),m,m.exports,...Object.values(env));return m.exports;}
 const noop=()=>{},flush=async()=>{for(let n=0;n<40;n++)await Promise.resolve();},tt=(s,...args)=>s.replace(/\{(\d+)\}/g,(_,i)=>args[i]??'');
 const tests=[];const test=(id,name,run)=>tests.push({id,name,run});
 function music(){
@@ -17,7 +17,7 @@ function music(){
  const reg=node('src/Music.tsx',n=>ts.isCallExpression(n)&&n.expression.getText()==='listen'&&n.arguments[0]?.getText()==='"mpv"').getText();
  const prelude='let suspended=null;let directFor=null,failedInRow=0,loadGeneration=0,wantsPlayback=true;const musicPaths=new Set();';
  const api=compile('(()=>{'+prelude+names.map(n=>fn('src/Music.tsx',n)).join('\n')+';'+reg+';return {loadCurrent,stopMusic,playQueue,pause:'+(baseline?'p=>{P.paused=p;setProp("pause",p);}':'pauseMusic')+',directFor:()=>directFor};})()',{
-  P,direct,resolving,findFailed,changed:noop,setProp:(...a)=>properties.push(a),mpv:(...a)=>commands.push(a),store:{get:()=>null,set:()=>true,json:(_,f)=>f},Date,URL,TextEncoder,
+  P,direct,resolving,findFailed,selectionResume:null,invalidateGapless:noop,prepareGapless:async()=>{},localSong:()=>false,gaplessAddress:q=>q.src,gaplessPlan:null,recordCurrent:noop,changed:noop,setProp:(...a)=>properties.push(a),mpv:(...a)=>commands.push(a),store:{get:()=>null,set:()=>true,json:(_,f)=>f},Date,URL,TextEncoder,
   audioResume:load("src/musicWorkspaceModel.ts",{},n=>({})).audioResume,addHistory:noop,countPlay:noop,nextUp:noop,listen:(_,f)=>listener=f,setTimeout:(f,ms)=>{if(ms!==4000)timers.push(f);},invoke:()=>new Promise(r=>finish=r)
  });
  return{P,api,direct,commands,properties,timers,event:p=>listener({payload:p}),finish:()=>finish({url:'https://audio.test/?expire=9999999999'})};

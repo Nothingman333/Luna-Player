@@ -1,0 +1,366 @@
+[
+  {
+    "version": "after",
+    "width": 1280,
+    "font": "\"IBM Plex Sans\", system-ui, sans-serif",
+    "scheme": "dark",
+    "shelfDisplay": "flex",
+    "topicFont": "13px",
+    "primaryHeadings": [
+      {
+        "text": "Ses ve zamanlayıcı",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "SponsorBlock",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "ListenBrainz",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "Last.fm",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "Trakt ",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "Discord",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "Kendi asistan komutların",
+        "font": "13px",
+        "weight": "600"
+      }
+    ],
+    "diagnosticLabel": "row",
+    "debugInCard": true,
+    "debugZ": "25000",
+    "webCards": [
+      {
+        "width": 261,
+        "height": 135,
+        "scrollWidth": 337,
+        "clientWidth": 259,
+        "textClipped": false
+      },
+      {
+        "width": 261,
+        "height": 135,
+        "scrollWidth": 337,
+        "clientWidth": 259,
+        "textClipped": false
+      },
+      {
+        "width": 261,
+        "height": 135,
+        "scrollWidth": 337,
+        "clientWidth": 259,
+        "textClipped": false
+      },
+      {
+        "width": 261,
+        "height": 135,
+        "scrollWidth": 337,
+        "clientWidth": 259,
+        "textClipped": false
+      }
+    ],
+    "context": {
+      "whiteSpace": "normal",
+      "overflow": "visible",
+      "textOverflow": "clip",
+      "height": 17,
+      "scrollHeight": 17
+    },
+    "newChat": {
+      "background": "linear-gradient(135deg, rgb(201, 184, 255), rgb(167, 139, 250))",
+      "accent": "#a78bfa",
+      "soft": "#c9b8ff"
+    },
+    "errors": []
+  },
+  {
+    "version": "after",
+    "width": 640,
+    "font": "\"IBM Plex Sans\", system-ui, sans-serif",
+    "scheme": "dark",
+    "shelfDisplay": "flex",
+    "topicFont": "13px",
+    "primaryHeadings": [
+      {
+        "text": "Ses ve zamanlayıcı",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "SponsorBlock",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "ListenBrainz",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "Last.fm",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "Trakt ",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "Discord",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "Kendi asistan komutların",
+        "font": "13px",
+        "weight": "600"
+      }
+    ],
+    "diagnosticLabel": "row",
+    "debugInCard": true,
+    "debugZ": "25000",
+    "webCards": [
+      {
+        "width": 294,
+        "height": 125,
+        "scrollWidth": 380,
+        "clientWidth": 292,
+        "textClipped": false
+      },
+      {
+        "width": 294,
+        "height": 125,
+        "scrollWidth": 380,
+        "clientWidth": 292,
+        "textClipped": false
+      },
+      {
+        "width": 294,
+        "height": 125,
+        "scrollWidth": 380,
+        "clientWidth": 292,
+        "textClipped": false
+      },
+      {
+        "width": 294,
+        "height": 125,
+        "scrollWidth": 380,
+        "clientWidth": 292,
+        "textClipped": false
+      }
+    ],
+    "context": {
+      "whiteSpace": "normal",
+      "overflow": "visible",
+      "textOverflow": "clip",
+      "height": 17,
+      "scrollHeight": 17
+    },
+    "newChat": {
+      "background": "linear-gradient(135deg, rgb(201, 184, 255), rgb(167, 139, 250))",
+      "accent": "#a78bfa",
+      "soft": "#c9b8ff"
+    },
+    "errors": []
+  },
+  {
+    "version": "after",
+    "width": 800,
+    "font": "\"IBM Plex Sans\", system-ui, sans-serif",
+    "scheme": "dark",
+    "shelfDisplay": "flex",
+    "topicFont": "13px",
+    "primaryHeadings": [
+      {
+        "text": "Ses ve zamanlayıcı",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "SponsorBlock",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "ListenBrainz",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "Last.fm",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "Trakt ",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "Discord",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "Kendi asistan komutların",
+        "font": "13px",
+        "weight": "600"
+      }
+    ],
+    "diagnosticLabel": "row",
+    "debugInCard": true,
+    "debugZ": "25000",
+    "webCards": [
+      {
+        "width": 179,
+        "height": 135,
+        "scrollWidth": 230,
+        "clientWidth": 177,
+        "textClipped": false
+      },
+      {
+        "width": 179,
+        "height": 135,
+        "scrollWidth": 230,
+        "clientWidth": 177,
+        "textClipped": false
+      },
+      {
+        "width": 179,
+        "height": 135,
+        "scrollWidth": 230,
+        "clientWidth": 177,
+        "textClipped": false
+      },
+      {
+        "width": 179,
+        "height": 135,
+        "scrollWidth": 230,
+        "clientWidth": 177,
+        "textClipped": false
+      }
+    ],
+    "context": {
+      "whiteSpace": "normal",
+      "overflow": "visible",
+      "textOverflow": "clip",
+      "height": 17,
+      "scrollHeight": 17
+    },
+    "newChat": {
+      "background": "linear-gradient(135deg, rgb(201, 184, 255), rgb(167, 139, 250))",
+      "accent": "#a78bfa",
+      "soft": "#c9b8ff"
+    },
+    "errors": []
+  },
+  {
+    "version": "after",
+    "width": 1920,
+    "font": "\"IBM Plex Sans\", system-ui, sans-serif",
+    "scheme": "dark",
+    "shelfDisplay": "flex",
+    "topicFont": "13px",
+    "primaryHeadings": [
+      {
+        "text": "Ses ve zamanlayıcı",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "SponsorBlock",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "ListenBrainz",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "Last.fm",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "Trakt ",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "Discord",
+        "font": "13px",
+        "weight": "600"
+      },
+      {
+        "text": "Kendi asistan komutların",
+        "font": "13px",
+        "weight": "600"
+      }
+    ],
+    "diagnosticLabel": "row",
+    "debugInCard": true,
+    "debugZ": "25000",
+    "webCards": [
+      {
+        "width": 281,
+        "height": 157,
+        "scrollWidth": 363,
+        "clientWidth": 279,
+        "textClipped": false
+      },
+      {
+        "width": 281,
+        "height": 157,
+        "scrollWidth": 363,
+        "clientWidth": 279,
+        "textClipped": false
+      },
+      {
+        "width": 281,
+        "height": 157,
+        "scrollWidth": 363,
+        "clientWidth": 279,
+        "textClipped": false
+      },
+      {
+        "width": 281,
+        "height": 157,
+        "scrollWidth": 363,
+        "clientWidth": 279,
+        "textClipped": false
+      }
+    ],
+    "context": {
+      "whiteSpace": "normal",
+      "overflow": "visible",
+      "textOverflow": "clip",
+      "height": 17,
+      "scrollHeight": 17
+    },
+    "newChat": {
+      "background": "linear-gradient(135deg, rgb(201, 184, 255), rgb(167, 139, 250))",
+      "accent": "#a78bfa",
+      "soft": "#c9b8ff"
+    },
+    "errors": []
+  }
+]

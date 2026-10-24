@@ -1,16 +1,22 @@
+import {airedEpisodeCount} from "./tvEpisodeSummary";
+import {storageRelink,writeDelta} from "./extrasModel";
+import {hybridName} from "./filenameModel";
+import type {ReleaseDetails} from "./filenameModel";
+import { appStorage as localStorage } from "./appStorage";
 import {cleanOverrides,applyMediaOverride} from "./assistantWorkspaceModel";
 import { scanChanges } from "./everydayModel";
 import type { ScanSummary } from "./everydayModel";
 import { naturalPath } from "./playbackModel";
 import { locale, DEC } from "./i18n";
 import { convertFileSrc, invoke } from "./nativeCore";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 // ---------- small persistent store ----------
 /** API keys: kept by Windows (Credential Manager), held here in memory, never in localStorage, the
  *  state file or a backup. */
 /** (aiProfileKey1…8: the keys of the API profiles, see ai.ts) */
-export const SECRET_KEYS = ["geminiKey", "tmdbKey", "osKey", "openaiKey", "claudeKey", "customAiKey", "listenbrainzToken", "lastfmKey", "lastfmSecret", "lastfmSession", "traktSecret", "traktToken", "traktRefresh", ...Array.from({ length: 8 }, (_, i) => "aiProfileKey" + (i + 1))];
+import { SECRET_KEYS } from "./secretKeys";
+export { SECRET_KEYS } from "./secretKeys";
 const secrets = new Map<string, string>();
 const secretWrites = new Map<string, Promise<void>>();
 function queueSecret(key: string, value: string) {
@@ -46,7 +52,7 @@ export async function loadSecrets() {
       // only once Windows has it is the plain copy removed
       try { await invoke("secret_set", { name: k, value: old }); } catch { continue; }
     }
-    try { localStorage.removeItem(k); } catch {}
+    try { localStorage.removeItem(k); globalThis.localStorage?.removeItem(k); } catch {}
   }
 }
 const isSecret = (k: string) => SECRET_KEYS.includes(k);
@@ -86,18 +92,20 @@ export type Recent = { path: string; title: string; time: number; duration: numb
 export const loadRecent = (): Recent[] => {const raw=store.json<unknown>("recent",[]);return Array.isArray(raw)?raw.filter((x):x is Recent=>!!x&&typeof x.path==="string"&&typeof x.title==="string"&&Number.isFinite(x.time)&&x.time>=0&&Number.isFinite(x.duration)&&x.duration>=0):[];};
 
 // ---------- file name parsing ----------
-export type Parsed = { kind: "movie" | "tv"; title: string; year?: number; season?: number; episode?: number };
+export type Parsed = { release?: ReleaseDetails; kind: "movie" | "tv"; title: string; year?: number; season?: number; episode?: number };
 
 // (a bare "web" isn't here: "The Web (1947)" is a title; WEB releases carry 1080p / WEB-DL anyway)
 const JUNK = /\b(2160p|1080p|720p|480p|4k|uhd|bluray|blu-ray|brrip|bdrip|web-?dl|webrip|hdtv|dvdrip|hdrip|x264|x265|h\.?264|h\.?265|hevc|10bit|aac|ac3|dts|remux|proper|repack|extended|unrated|türkçe|turkce|dublaj|altyazili|altyazılı)\b.*$/i;
 
 // [groups] go; (brackets) only when they hold a year or release tags: "(500) Days of Summer" keeps its "(500)"
 // …but when nothing with a letter is left without them, the brackets are the title: "[REC] (2007)", "[REC] 2"
-const tidy = (s: string, dropGroups: boolean) =>
+// Scan the tail once; an unanchored /[-\s]+$/ repeatedly retries long separators before a title.
+const trimTitleTail = (s: string) => { let end = s.length; while (end > 0 && /[-\s]/.test(s[end - 1])) end--; return s.slice(0, end); };
+const tidyRaw = (s: string, dropGroups: boolean) =>
   s.replace(/[._]/g, " ").replace(/\[[^\]]*\]/g, (m) => (dropGroups ? " " : m))
     .replace(/\(([^)]*)\)/g, (m, inner: string) => (/^\s*(19|20)\d{2}\s*$/.test(inner) || JUNK.test(inner) || !inner.trim() ? " " : m))
-    .replace(JUNK, "")
-    .replace(/[-\s]+$/, "").replace(/\s+/g, " ").trim();
+    .replace(JUNK, "");
+const tidy = (s: string, dropGroups: boolean) => trimTitleTail(tidyRaw(s, dropGroups)).replace(/\s+/g, " ").trim();
 const clean = (s: string) => {
   const t = tidy(s, true);
   return /\p{L}/u.test(t) ? t : tidy(s, false) || t;
@@ -122,9 +130,12 @@ const base = (p: string) => (urlFileName(p) ?? p.split(/[\\/]/).pop()!).replace(
 const parentDir = (p: string, up = 1) => p.split(/[\\/]/).slice(0, -up).pop() ?? "";
 
 export function parseName(path: string): Parsed {
-  const name = base(path);
-  const ep = name.match(/^(.*?)[\s._-]*[Ss](\d{1,2})[\s._-]*[Ee](\d{1,3})/) ??
-    name.match(/^(.*?)[\s._-]+(\d{1,2})x(\d{2,3})\b/);
+  const name = (path.startsWith("luna-source://")?store.get("srcName:"+path):null)??base(path);
+  // Locate the marker first, then slice its title prefix. A lazy prefix plus a separator run
+  // retried the same long filename quadratically when there was no episode marker.
+  const marker = /[Ss](\d{1,2})[\s._-]*[Ee](\d{1,3})/.exec(name) ??
+    /(?<=[\s._-])(\d{1,2})x(\d{2,3})\b/.exec(name);
+  const ep = marker ? [marker[0], name.slice(0, marker.index), marker[1], marker[2]] : null;
   if (ep) {
     // "Show.2005.S01E01" and "Show.2018.S01E01" are two shows: the year is kept apart
     const shown = clean(ep[1]);
@@ -141,8 +152,11 @@ export function parseName(path: string): Parsed {
   // "1920x1080" is a resolution, not a year: remove it before looking for the year
   const scrubbed = name.replace(/\b\d{3,4}\s*[x×]\s*\d{3,4}\b/gi, " ");
   let y: { at: number; year: number } | null = null;
-  for (const m of scrubbed.matchAll(/[\s._([-]+((?:19|20)\d{2})(?![\dx×])/g))
-    if (+m[1] <= maxYear && clean(scrubbed.slice(0, m.index))) y = { at: m.index!, year: +m[1] };
+  for (const m of scrubbed.matchAll(/(?<=[\s._(\[-])((?:19|20)\d{2})(?![\dx×])/g)) {
+    let at = m.index!;
+    while (at > 0 && /[\s._(\[-]/.test(scrubbed[at - 1])) at--;
+    if (+m[1] <= maxYear && clean(scrubbed.slice(0, at))) y = { at, year: +m[1] };
+  }
   if (y) return { kind: "movie", title: clean(scrubbed.slice(0, y.at)), year: y.year };
   return { kind: "movie", title: clean(scrubbed) || clean(parentDir(path)) };
 }
@@ -179,7 +193,7 @@ export const customMeta = (title: string, kind: "movie" | "tv"): Meta => ({
   id: 0, kind, title, year: "", overview: "", poster: null, backdrop: null, rating: 0, genres: [], cast: [],
 });
 export type Meta = {
-  locked?: boolean; provenance?: "tmdb" | "manual"; editedAt?: number;
+  locked?: boolean; provenance?: "tmdb" | "manual" | "nfo"; editedAt?: number;
   id: number;
   kind: "movie" | "tv";
   title: string;
@@ -191,17 +205,21 @@ export type Meta = {
   genres: string[];
   runtime?: number;
   seasons?: number;
+  episodes?: number;
+  airedEpisodes?: number;
   cast: Person[];
 };
 export type Episode = { episode: number; name: string; overview: string; still: string | null; runtime: number | null };
 
 async function tmdb(path: string, params: Record<string, string> = {}) {
-  const key = store.get("tmdbKey") ?? "";
+  // a key pasted with a space or a line break at its end was refused as invalid
+  const key = (store.get("tmdbKey") ?? "").trim();
   const url = new URL("https://api.themoviedb.org/3" + path);
   const bearer = key.length > 40; // v4 read token vs v3 api key
   if (!bearer) url.searchParams.set("api_key", key);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  const r = await fetch(url, { headers: bearer ? { Authorization: "Bearer " + key } : {} });
+  // without a limit a stalled connection kept the details page and the library scan waiting for good
+  const r = await fetch(url, { headers: bearer ? { Authorization: "Bearer " + key } : {}, signal: AbortSignal.timeout(20000) });
   if (!r.ok) throw new Error("TMDB " + r.status);
   return r.json();
 }
@@ -284,7 +302,8 @@ export async function details(kind: "movie" | "tv", id: number): Promise<Meta> {
   // Turkish credits sometimes carry names in the original script (e.g. Japanese); English is always Latin.
   d.credits = await tmdb(`/${kind}/${id}/credits`, { language: "en-US" }).catch(() => ({ cast: [] }));
   let overview: string = d.overview;
-  if (!overview) overview = (await tmdb(`/${kind}/${id}`, { language: "en-US" })).overview ?? "";
+  // the English text is only a fallback: its failure must not lose the whole title
+  if (!overview) overview = (await tmdb(`/${kind}/${id}`, { language: "en-US" }).catch(() => null))?.overview ?? "";
   return {
     id: d.id,
     kind,
@@ -297,6 +316,8 @@ export async function details(kind: "movie" | "tv", id: number): Promise<Meta> {
     genres: (d.genres ?? []).map((g: any) => g.name),
     runtime: d.runtime ?? undefined,
     seasons: d.number_of_seasons ?? undefined,
+    episodes: d.number_of_episodes ?? undefined,
+    airedEpisodes: kind === "tv" ? airedEpisodeCount(d) : undefined,
     cast: (d.credits?.cast ?? []).slice(0, 12).map((c: any) => ({
       id: c.id, name: c.name, character: c.character ?? "", profile: c.profile_path,
     })),
@@ -308,7 +329,8 @@ export const seasonKey = (tvId: number, season: number) => `season:${locale()}:$
 export async function seasonEpisodes(tvId: number, season: number): Promise<Episode[]> {
   const k = seasonKey(tvId, season);
   const cached = store.json<Episode[] | null>(k, null);
-  if (Array.isArray(cached)&&cached.every(e=>e&&Number.isInteger(e.episode)&&typeof e.name==="string")) return cached;
+  // an empty list is never trusted: a season announced but not listed yet used to stay empty for ever
+  if (Array.isArray(cached)&&cached.length>0&&cached.every(e=>e&&Number.isInteger(e.episode)&&typeof e.name==="string")) return cached;
   if (!store.get("tmdbKey")) return [];
   try {
     const d = await tmdb(`/tv/${tvId}/season/${season}`, { language: locale() });
@@ -316,7 +338,7 @@ export async function seasonEpisodes(tvId: number, season: number): Promise<Epis
       episode: e.episode_number, name: e.name, overview: e.overview,
       still: e.still_path, runtime: e.runtime,
     }));
-    store.set(k, JSON.stringify(eps));
+    if (eps.length) store.set(k, JSON.stringify(eps));
     return eps;
   } catch {
     return [];
@@ -388,9 +410,13 @@ async function checkSidecarSubs(paths: string[]) {
 /** Renames a video on disk (its own subtitles go along) and moves everything Luna kept for it
  *  (where you stopped, quality, finished…) to the new name. Returns the new path. */
 export async function renameVideo(path: string, name: string): Promise<string> {
+  const plan=await invoke<[string,string][]>("rename_video_plan",{path,name});
+  const before=Object.fromEntries(Object.keys(localStorage).filter(k=>!SECRET_KEYS.includes(k)&&k!=="bulkRenameUndo").map(k=>[k,localStorage.getItem(k)??""]));
+  const delta=storageRelink(before,plan.map(([from,to])=>({from,to})));
   const to = await invoke<string>("rename_video", { path, name });
   if (to === path) return to;
   const wasPinned = loadPinned().includes(path);
+  writeDelta(localStorage,delta);finishedCache=null;sideSubs=null;
   relinkFile(path, to);
   if (!wasPinned) store.set("pinned", JSON.stringify(loadPinned().filter((x) => x !== to)));
   if (sideSubs?.[path]) { sideSubs[to] = sideSubs[path]; delete sideSubs[path]; store.set("sideSubs", JSON.stringify(sideSubs)); }
@@ -494,7 +520,7 @@ export function useLibrary(opened: string[] = []) {
     const series = folders.filter((f) => kinds[f] === "tv").map((f) => [f, normDir(f)] as const);
     for (const path of [...new Set([...files, ...pinned, ...opened])]) {
       const inSeries = series.find(([, n]) => normDir(path).startsWith(n + "/"));
-      const detected = inSeries ? parseInSeries(path, inSeries[0]) : parseName(path);
+      const detected = hybridName(path, inSeries ? parseInSeries(path, inSeries[0]) : parseName(path));
       const parsed = overrides[path] ? applyMediaOverride(detected,overrides[path]) : detected;
       const key = groupKey(parsed);
       if(overrides[path])explicitKeys.add(key);
@@ -525,6 +551,34 @@ export function useLibrary(opened: string[] = []) {
       .catch(() => {});
     return () => { alive = false; };
   }, [items, tick]);
+
+  // A sidecar's explicit TMDB identity wins over automatic filename matching; manual locks win over it.
+  const nfoSeen = useRef(new Set<string>());
+  useEffect(() => {
+    if (!store.get("tmdbKey")) return;
+    let alive = true;
+    void (async () => {
+      for (const item of items) {
+        const file=item.files.find(f=>!isUrl(f.path))?.path;
+        if(!file||item.meta?.locked)continue;
+        const stamp=tick+":"+item.key+":"+file;
+        if(nfoSeen.current.has(stamp))continue;
+        try {
+          const id=await invoke<number|null>("nfo_match",{file,kind:item.parsed.kind});
+          if(!alive)return;if(!id){nfoSeen.current.add(stamp);continue;}
+          const info=await details(item.parsed.kind,id);
+          if(!alive)return;
+          nfoSeen.current.add(stamp);
+          setMeta(current=>{
+            if(current[item.key]?.locked)return current;
+            const next={...current,[item.key]:{...info,locked:true,provenance:"nfo" as const}};
+            store.set("meta",JSON.stringify(next));return next;
+          });
+        } catch { nfoSeen.current.delete(stamp); }
+      }
+    })();
+    return ()=>{alive=false;};
+  }, [items,tick]);
 
   // Fetch missing metadata, a few at a time.
   useEffect(() => {

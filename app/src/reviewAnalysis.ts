@@ -124,7 +124,7 @@ export function summaryPrompt(film: FilmTarget, reviews: RunReview[], profile: P
     "forYou: 2-3 sentences for this viewer, using their priorities, warnings and learned taste.",
     note ? "The viewer's extra instruction: " + note : "",
     "Answer with JSON only:",
-    '{"lean":"positive|mixed|negative|unclear","score":7.1,"scoreWhy":"2-3 sentences: what pulls the score up and down","summary":"5-7 sentences","editorNote":"…","forYou":"…","likeIf":"one sentence","skipIf":"one sentence","praise":["1-2 sentences each, up to 5"],"criticism":["up to 5"],"consensus":[{"point":"…","share":60,"tone":"positive"}],"debates":["…"],"themes":[{"name":"…","share":40}],"emotions":[{"name":"…","share":50}],"audience":["who it is for, up to 3"],"similar":[{"title":"a title reviewers mention or that is clearly alike","year":1995,"why":"one sentence"}],"aspects":[{"aspect":"story|pace|acting|visuals|emotion|sound","tone":"positive|mixed|negative|unclear","score":7,"note":"one sentence"}]}',
+    '{"lean":"positive|mixed|negative|unclear","score":7.1,"scoreWhy":"2-3 sentences: what pulls the score up and down","summary":"5-7 sentences","editorNote":"…","forYou":"…","likeIf":"one sentence","skipIf":"one sentence","praise":["1-2 sentences each, up to 5"],"criticism":["up to 5"],"consensus":[{"point":"…","share":60,"tone":"positive"}],"debates":["…"],"themes":[{"name":"…","share":40}],"emotions":[{"name":"…","share":50}],"audience":["who it is for, up to 3"],"similar":[{"title":"one of up to five distinct titles reviewers mention or that are clearly alike; give five when justified, never fabricate","year":1995,"why":"one sentence"}],"aspects":[{"aspect":"story|pace|acting|visuals|emotion|sound","tone":"positive|mixed|negative|unclear","score":7,"note":"one sentence"}]}',
   ].filter(Boolean).join("\n");
   const prefs = ASPECTS.map((a) => `${names[a]}: ${profile.weights[a]}/5${profile.avoid.includes(a) ? " (warn me if criticised)" : ""}`).join(", ");
   const topicLine = Object.entries(topics).sort((a, b) => b[1]! - a[1]!).map(([t, n]) => `${t} ${n}`).join(", ");
@@ -159,7 +159,7 @@ export function cleanVerdict(x: any): AiVerdict | null {
     praise: list(x.praise, 5, 400), criticism: list(x.criticism, 5, 400),
     consensus: (Array.isArray(x.consensus) ? x.consensus : []).map((c: any) => ({ point: str(c?.point, 300), share: Math.round(num(c?.share, 0, 100) ?? 0), tone: tone(c?.tone) })).filter((c: Consensus) => c.point).slice(0, 6),
     debates: list(x.debates, 3, 400), themes: shares(x.themes), emotions: shares(x.emotions), audience: list(x.audience, 3, 200),
-    similar: (Array.isArray(x.similar) ? x.similar : []).map((s: any) => ({ title: str(s?.title, 100), year: num(s?.year, 1880, 2100), why: str(s?.why, 250) })).filter((s: { title: string }) => s.title).slice(0, 4),
+    similar: (Array.isArray(x.similar) ? x.similar : []).map((s: any) => ({ title: str(s?.title, 100), year: num(s?.year, 1880, 2100), why: str(s?.why, 250) })).filter((s: { title: string }) => s.title).slice(0, 5),
     aspects,
   };
   return v.summary ? v : null;
@@ -174,7 +174,7 @@ export function cleanRun(x: any): AiRun | null {
   const reviews: RunReview[] = (Array.isArray(x.reviews) ? x.reviews : []).slice(0, 100).map((r: any) => ({
     author: str(r?.author, 60), stars: num(r?.stars, 0.5, 5), spoiler: !!r?.spoiler, text: typeof r?.text === "string" ? r.text.slice(0, 3000) : "",
     read: cleanRead(r?.read), best: !!r?.best, worst: !!r?.worst,
-  })).filter((r: RunReview) => r.text);
+  })).filter((r: RunReview) => r.text.trim() || r.stars != null);
   const t = tally(reviews);
   return {
     at: x.at, url: str(x.url, 300), count: Number(x.count) || reviews.length, spoilers: Number(x.spoilers) || 0, stars: num(x.stars, 0, 5), model: str(x.model, 120),

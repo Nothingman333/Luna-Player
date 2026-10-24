@@ -47,3 +47,6 @@ export function zoomFor(map: ZoomMap, url: string): number {
   const key = siteKey(url);
   return key && Object.prototype.hasOwnProperty.call(map, key) && validZoom(map[key]) ? map[key] : 1;
 }
+
+/** Ignore a zoom event echoing Luna's own restore operation. */
+export function userZoomChange(echo:number|undefined,zoom:number):boolean{return validZoom(zoom)&&(echo===undefined||Math.abs(echo-zoom)>.001);}

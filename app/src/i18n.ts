@@ -1,3 +1,5 @@
+import {flushDatabaseStorage} from "./databaseStorage";
+import { appStorage as localStorage } from "./appStorage";
 import { EN } from "./i18n-en";
 
 /** UI language: English unless the user picked Turkish in Settings. Changing it reloads the app. */
@@ -7,7 +9,7 @@ export const lang = (): Lang => {
 };
 export const setLang = (l: Lang) => {
   try { localStorage.setItem("lang", l); } catch {}
-  window.location.reload();
+  void flushDatabaseStorage().then(()=>window.location.reload()).catch(()=>window.dispatchEvent(new Event("luna-storage-error")));
 };
 const isTr = lang() === "tr";
 /** The language the texts were set up with when the app loaded. */

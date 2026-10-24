@@ -1,3 +1,4 @@
+import { appStorage as localStorage } from "./appStorage";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { tt, lang } from "./i18n";

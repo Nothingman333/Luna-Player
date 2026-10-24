@@ -1,3 +1,4 @@
+import { appStorage as localStorage } from "./appStorage";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { lang } from "./i18n";

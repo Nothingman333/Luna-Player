@@ -1,0 +1,14 @@
+{
+  "fixture": "800 local copies of one matched movie; synthetic getter counters, not whole-app FPS",
+  "before": {
+    "pathReads": 645598,
+    "finishedLookups": 1600,
+    "ms": 90.42909999999995
+  },
+  "after": {
+    "pathReads": 5600,
+    "finishedLookups": 800,
+    "ms": 3.0441000000000145
+  },
+  "semanticParity": true
+}

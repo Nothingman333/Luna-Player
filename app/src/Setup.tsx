@@ -1,5 +1,6 @@
+import {HardwareCapabilities} from "./HardwareCapabilities";
+import {rememberHardware,systemProfile} from "./hardwareProfile";
 import { useEffect, useState } from "react";
-import { invoke } from "./nativeCore";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { store } from "./library";
 import { lang, setLang, tt } from "./i18n";
@@ -44,13 +45,13 @@ export function Setup({ onDone }: { onDone: () => void }) {
   useEffect(() => {
     setC(null); setFailed(false);
     // if the check itself can't run, say so instead of marking everything missing
-    invoke<SysCheck>("system_check").then(setC).catch(() => setFailed(true));
+    systemProfile(n > 0).then(p=>{rememberHardware(p);setC(p);}).catch(() => setFailed(true));
   }, [n]);
   const setKey = (id: string, v: string) => { setKeys((k) => ({ ...k, [id]: v })); store.set(id, v.trim()); };
   const st = (ok: boolean | undefined, optional = false): State => (failed ? "optional" : c == null ? "wait" : ok ? "ok" : optional ? "optional" : "missing");
   const drv = driverLink(c?.gpus ?? []);
-  const blocking = c != null && (!c.mpv || !c.vulkan);
-  const done = () => { store.set("setupDone", "1"); onDone(); };
+  const blocking = c != null && !c.mpv;
+  const done = () => { store.set("lunaHardwareOnboarded", "1"); store.set("setupDone", "1"); onDone(); };
   return (
     <div className="tour-bg su-bg">
       <div className="tour-glow g1" /><div className="tour-glow g2" />
@@ -72,8 +73,8 @@ export function Setup({ onDone }: { onDone: () => void }) {
         <Row state={st(c?.mpv)} title={tt("Video motoru (mpv)")}
           text={c?.mpv === false ? tt("Luna ile gelen video motoru çalışmadı. Luna'yı yeniden indirip kurmak bunu düzeltir.") : tt("Luna ile birlikte geliyor; neredeyse her video biçimini oynatır.")}
           action={c?.mpv === false ? { label: tt("Luna'yı indir"), url: "https://github.com/Nothingman333/Luna-Player/releases/latest" } : undefined} />
-        <Row state={st(c?.vulkan)} title={tt("Ekran kartı sürücüsü")}
-          text={failed ? "" : c?.vulkan === false ? tt("Video oynatmak için güncel bir ekran kartı sürücüsü (Vulkan) gerekiyor. Kurduktan sonra bilgisayarı yeniden başlat.") : c?.gpus.length ? c.gpus.join(" · ") : tt("Kontrol ediliyor…")}
+        <Row state={st(c?.vulkan, true)} title={tt("Ekran kartı sürücüsü")}
+          text={failed ? "" : c?.vulkan === false ? tt("Vulkan algılanmadı. Luna D3D11 ile de oynatır; GPU özellikleri için güncel sürücü önerilir.") : c?.gpus.length ? c.gpus.join(" · ") : tt("Kontrol ediliyor…")}
           action={c?.vulkan === false ? { label: tt("{0} sürücüsünü indir", drv.name), url: drv.url } : undefined} />
         <Row state={st(!!c?.webview)} title={tt("Arayüz (WebView2)")} text={c?.webview ? tt("Sürüm {0}", c.webview) : failed ? "" : tt("Kontrol ediliyor…")} />
 
@@ -82,6 +83,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
           text={c?.lossless ? tt("Kurulu; videoları büyütmek için Upscaler'ı kullanabilirsin.") : tt("Videoları daha net büyütmek için (ücretli, Steam). Gerekli değil.")}
           action={c && !c.lossless ? { label: "Steam", url: "https://store.steampowered.com/app/993090/Lossless_Scaling/" } : undefined} />
 
+        <HardwareCapabilities />
         <h3>{tt("Ücretsiz anahtarlar")} <small>{tt("girmesen de oynatıcı çalışır")}</small></h3>
         <div className="su-keys">
           {KEYS.map((k) => (

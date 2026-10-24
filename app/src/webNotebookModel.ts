@@ -1,14 +1,20 @@
 import type {WebReading} from "./extrasModel";
 import type {PageNote} from "./browserRecords";
 import {browserTabSearch} from "./browserWorkspaceModel";
+import {mergeReadingEntry,validPageNote} from "./browserRecords";
 
 export type ReadingFilter = "all" | "unread" | "started" | "read";
 export type WebOrder = "recent" | "title" | "progress";
-export function selectWebReading(rows:WebReading[],notes:PageNote[],query:string,status:ReadingFilter,order:WebOrder):WebReading[]{
+export function selectWebReading(rows:WebReading[],notes:PageNote[],query:string,status:ReadingFilter,order:WebOrder,withNotes=false):WebReading[]{
  const words=browserTabSearch(query).trim().split(/\s+/).filter(Boolean),byUrl=new Map(notes.map(n=>[n.url,n.text]));
- return rows.filter(r=>(status==="all"||(status==="read"?r.done:!r.done&&(status!=="started"||r.progress>0&&r.progress<1))))
+ return rows.filter(r=>(!withNotes||!!byUrl.get(r.url)?.trim())&&(status==="all"||(status==="read"?r.done:!r.done&&(status!=="started"||r.progress>0&&r.progress<1))))
  .filter(r=>words.every(w=>browserTabSearch(r.title+" "+r.url+" "+(byUrl.get(r.url)||"")).includes(w)))
  .sort((a,b)=>order==="title"?a.title.localeCompare(b.title)||a.url.localeCompare(b.url):order==="progress"?b.progress-a.progress||b.at-a.at:b.at-a.at||a.url.localeCompare(b.url));
+}
+export function queueNotePage(rows:WebReading[],note:PageNote,at:number):WebReading[]{
+ if(!validPageNote(note)||!Number.isFinite(at))throw Error("Invalid page note");
+ if(rows.some(r=>r.url===note.url))return rows;
+ return mergeReadingEntry(rows,{url:note.url,title:new URL(note.url).hostname,progress:0,done:false,at});
 }
 export function selectPageNotes(rows:PageNote[],reading:WebReading[],query:string):PageNote[]{
  const words=browserTabSearch(query).trim().split(/\s+/).filter(Boolean),titles=new Map(reading.map(r=>[r.url,r.title]));

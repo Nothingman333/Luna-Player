@@ -72,3 +72,6 @@ export async function translateRows(rows: TranslationRow[], target: string): Pro
   let parsed: unknown; try { parsed = JSON.parse(json); } catch { throw new Error("Model okunabilir JSON çevirisi döndürmedi; sayfa değiştirilmedi."); }
   return validateTranslationResult(parsed, rows);
 }
+
+/** Explicitly a selected-text request, never the whole-page translation intent. */
+export function selectionTranslatePrompt(language:string):string{const target=TRANSLATION_LANGUAGES.includes(language)?language:"English";return `Translate only the selected text into ${target}. Yalnız seçili metni çevir; sayfanın tamamını çevirme.`;}

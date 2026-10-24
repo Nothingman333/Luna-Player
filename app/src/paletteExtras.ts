@@ -1,6 +1,6 @@
 import { tt } from "./i18n";
 
-export type PanelName = "health" | "calendar" | "clip" | "scenes" | "recap" | "quote" | "lines";
+export type PanelName = "audioAnalysis" | "sources" | "syncplay" | "mcp" | "automation" | "health" | "calendar" | "clip" | "scenes" | "recap" | "quote" | "lines";
 /** Asks App to open one of the new panels (the ones that need the player, say so themselves when nothing plays). */
 export const openPanel = (name: PanelName) => window.dispatchEvent(new CustomEvent("luna-open", { detail: name }));
 
@@ -8,6 +8,11 @@ export const openPanel = (name: PanelName) => window.dispatchEvent(new CustomEve
 export function paletteExtras(): { id: string; group: string; label: string; hint?: string; keywords: string; run: () => void }[] {
   const g = tt("Eylemler");
   return [
+    {id:"a:audioAnalysis",group:g,label:tt("Ses analizi"),keywords:"chromaprint intro jenerik acoustid songrec shazam karaoke demucs vokal tanıma",run:()=>openPanel("audioAnalysis")},
+    {id:"a:sources",group:g,label:tt("Medya sunucuları"),keywords:"jellyfin subsonic audiobookshelf sunucu kaynak source server",run:()=>openPanel("sources")},
+    {id:"a:syncplay",group:g,label:tt("Birlikte izle · Syncplay"),keywords:"syncplay oda room birlikte izle arkadaş watch together",run:()=>openPanel("syncplay")},
+    {id:"a:mcp",group:g,label:tt("MCP sunucuları"),keywords:"mcp stdio sunucu server tools araç",run:()=>openPanel("mcp")},
+    { id:"a:automation", group:g,label:tt("Kütüphane araçları"),keywords:"bulk rename smart lists toplu adlandırma akıllı liste şablon",run:()=>openPanel("automation") },
     { id: "a:lines", group: g, label: tt("Replik ara"), keywords: "line search quote find scene dialogue subtitle replik ara sahne altyazı konuşma hangi film cümle", run: () => openPanel("lines") },
     { id: "a:recap", group: g, label: tt("Luna Özet"), keywords: "recap wrapped year review statistics stats özet yıl istatistik yılın özeti", run: () => openPanel("recap") },
     { id: "a:quote", group: g, label: tt("Replik kartı (oynarken)"), keywords: "quote card share subtitle line replik kart paylaş alıntı", run: () => openPanel("quote") },

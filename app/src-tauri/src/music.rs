@@ -39,7 +39,7 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>, depth: u32) {
     for e in entries.flatten() {
         let p = e.path();
         if p.is_dir() {
-            if depth < 8 {
+            if depth < 8 && !crate::stable_cache::skip_directory(&p) {
                 walk(&p, out, depth + 1);
             }
         } else if is_audio(&p) {
@@ -54,10 +54,7 @@ pub fn dedupe(files: &mut Vec<PathBuf>) {
 }
 
 fn hash(s: &str) -> String {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    s.hash(&mut h);
-    format!("{:016x}", h.finish())
+    crate::stable_cache::key(&[b"music", s.as_bytes()])
 }
 
 /// The album's picture: embedded in the file, else cover.jpg / folder.jpg… beside it. Copied into the cache once per album.

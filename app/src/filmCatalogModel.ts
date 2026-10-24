@@ -104,6 +104,11 @@ export function buildGroups(items: Item[]): { id: string; members: Item[] }[] {
 /** The catalog as the page shows it: filtered, sorted, copies of one film together and consistent with each other. */
 export function selectCatalog(items: Item[], p: CatalogParams, ctx: CatalogContext): CatalogResult {
   const idx = recentIndex(ctx.recent), words = queryWords(p.query), start = Number(p.decade);
+  const finishedPaths = new Map<string, boolean>();
+  const finished = (path: string) => {
+    if (!finishedPaths.has(path)) finishedPaths.set(path, ctx.finished(path));
+    return finishedPaths.get(path)!;
+  };
   const out: CatalogGroup[] = [];
   for (const g of buildGroups(items)) {
     const rep = g.members.find((m) => itemFacts(m).matched) ?? g.members[0], f = itemFacts(rep);
@@ -123,18 +128,27 @@ export function selectCatalog(items: Item[], p: CatalogParams, ctx: CatalogConte
       const reasons = hits.map((m) => matchReason(m, words));
       reason = reasons.some((r) => r === null) ? null : reasons.find((r) => r && r.kind !== "mixed") ?? reasons[0];
     }
-    const state = groupState(g.members, idx, ctx.finished);
+    const state = groupState(g.members, idx, finished);
     if (p.watch !== "all" && state !== p.watch) continue;
     // the copy where the user stopped comes first
-    const rank = (m: Item) => Math.min(...filesOf(m).map((x) => idx.get(x.path)?.rank ?? Infinity));
+    const ranks = new Map<Item, number>();
+    const rank = (m: Item) => {
+      let n = ranks.get(m); if (n !== undefined) return n;
+      n = Infinity; for (const file of filesOf(m)) n = Math.min(n, idx.get(file.path)?.rank ?? Infinity);
+      ranks.set(m, n); return n;
+    };
     const members = g.members.length > 1 ? [...g.members].sort((a, b) => rank(a) - rank(b)) : g.members;
-    out.push({ id: g.id, members, rep, files, episodes: rep.parsed.kind === "tv" ? episodeCount(members) : 0, state, reason, resume: resumeOf(members, idx, ctx.finished) });
+    out.push({ id: g.id, members, rep, files, episodes: rep.parsed.kind === "tv" ? episodeCount(members) : 0, state, reason, resume: resumeOf(members, idx, finished) });
   }
   const cmp = compareFactsFor(p.sort, p.locale);
   out.sort((a, b) => cmp({ item: a.rep, f: itemFacts(a.rep) }, { item: b.rep, f: itemFacts(b.rep) }));
   const list = out.flatMap((g) => g.members);
   const copies = new Map<string, number>();
-  for (const g of out) if (g.rep.parsed.kind === "movie") for (const m of g.members) copies.set(m.key, new Set(g.members.flatMap((x) => filesOf(x).map((f) => f.path))).size);
+  for (const g of out) if (g.rep.parsed.kind === "movie") {
+    const paths = new Set<string>();
+    for (const m of g.members) for (const file of filesOf(m)) paths.add(file.path);
+    for (const m of g.members) copies.set(m.key, paths.size);
+  }
   return { groups: out, list, titles: out.length, files: out.reduce((n, g) => n + g.files, 0), copies };
 }
 
