@@ -309,13 +309,13 @@ export function ReviewAiCard({ film, profile, mood, setMood, label, onReviews, o
       {busy && <button className="la-stop" onClick={() => { ticket.current++; setPhase(""); setStatus(""); setReading(null); }}>{tt("Durdur")}</button>}
       <button className="la-go" disabled={busy || !inApp} onClick={()=>setPreferences(true)}>{busy ? <><span className="spinner" aria-hidden="true" /> {tt("Okunuyor…")}</> : run ? tt("Yeniden analiz et") : tt("{0} yorumu oku ve analiz et", cfg.count)}</button>
     </div>
-    {preferences&&<ExtraModal title={extraText("Zevk tercihlerim","Taste preferences")} close={()=>setPreferences(false)} className="workspace-modal analysis-preferences"><section className="la"><TastePanel kind={book?"book":"film"} open/><div className="modal-actions"><button className="primary" onClick={()=>{setPreferences(false);void start();}}>{extraText("Analize başla","Start analysis")}</button></div></section></ExtraModal>}
-    <div hidden={collapsed}>
-    <p className="la-lead">{book ? tt("1000Kitap'taki en beğenilen {0} incelemeyi tek tek okur; okurların ortak düşüncelerini, tartıştıkları noktaları ve kitabın sana uygunluğunu çıkarır.", cfg.count) : tt("Letterboxd'daki en popüler {0} yorumu tek tek okur; ortak düşünceleri, tartışılan noktaları ve senin zevkine ne kadar uyduğunu çıkarır.", cfg.count)}</p>
-    {!book && <div className="la-moods" role="group" aria-label={tt("Analizde neye odaklanalım?")}>
+    {preferences&&<ExtraModal title={extraText("Zevk tercihlerim","Taste preferences")} close={()=>setPreferences(false)} className="workspace-modal analysis-preferences"><section className="la">    {!book && <div className="la-moods" role="group" aria-label={tt("Analizde neye odaklanalım?")}>
       <span>{tt("Analizde neye odaklanalım?")}</span>
       {moods.map(([m, n]) => <button key={m} className={"seg" + (mood === m ? " on" : "")} aria-pressed={mood === m} onClick={() => setMood(m)}>{n}</button>)}
     </div>}
+<TastePanel kind={book?"book":"film"} open/><div className="modal-actions"><button className="primary" onClick={()=>{setPreferences(false);void start();}}>{extraText("Analize başla","Start analysis")}</button></div></section></ExtraModal>}
+    <div hidden={collapsed}>
+    <p className="la-lead">{book ? tt("1000Kitap'taki en beğenilen {0} incelemeyi tek tek okur; okurların ortak düşüncelerini, tartıştıkları noktaları ve kitabın sana uygunluğunu çıkarır.", cfg.count) : tt("Letterboxd'daki en popüler {0} yorumu tek tek okur; ortak düşünceleri, tartışılan noktaları ve senin zevkine ne kadar uyduğunu çıkarır.", cfg.count)}</p>
 
     {busy && <div className="la-live">
       <div className="la-live-top"><span className="la-pulse" /><span className="la-live-msg" role="status">{status}</span><span className="la-live-n">{phase === "fetch" ? `${feed.length} / ${cfg.count}` : phase === "read" ? `${step[0]} / ${step[1]}` : ""}</span></div>

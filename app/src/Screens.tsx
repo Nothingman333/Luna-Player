@@ -1,3 +1,4 @@
+import {MediaGallery} from "./MediaGallery";
 import {CountrySelect} from "./CountrySelect";
 import {AiUsageSettings} from "./AiUsageSettings";
 import {HardwareCapabilities} from "./HardwareCapabilities";
@@ -236,8 +237,8 @@ export function Header({ browserOpen, onBrowser, mode, setMode, tabs: modeTabs, 
       {!browserOpen && scanning && <span className="muted small pulse">{tt("Taranıyor…")}</span>}
       {!browserOpen && <label className="search">
         <Icon d={I.search} size={18} />
-        <input value={query} placeholder={film ? tt("Ara") : mode === "music" ? tt("Müzikte ara") : tt("Kitaplarda ara")} aria-label={film ? tt("Kütüphanede ara") : mode === "music" ? tt("Müzikte ara") : tt("Kitaplarda ara")}
-          onChange={(e) => { setQuery(e.target.value); if (e.target.value && view === "home") setView(film ? "movies" : "library"); }}
+        <input value={query} placeholder={extraText("Her yerde ara","Search everywhere")} aria-label={extraText("Genel arama","Global search")}
+          onChange={(e) => { setQuery(e.target.value); }}
           onKeyDown={(e) => { if (e.key === "Escape" && query) { e.preventDefault(); e.stopPropagation(); setQuery(""); } }} />
         {query && <button type="button" className="search-clear" aria-label={extraText("Aramayı temizle", "Clear search")} title={extraText("Aramayı temizle (Esc)", "Clear search (Esc)")} onClick={() => setQuery("")}>×</button>}
       </label>}
@@ -425,8 +426,8 @@ function HeroSlider({ slides, a }: { slides: Slide[]; a: Actions }) {
           <button className="hero-arrow r" aria-label={tt("Sonraki")} onClick={(e) => { e.stopPropagation(); go(1); }}><Icon d={I.right} size={28} /></button>
           <div className="hero-dots" onClick={(e) => e.stopPropagation()}>
             {slides.map((sl, k) => (
-              <button key={k} aria-label={tt("{0}. öğe", k + 1)} className={"hero-dot" + (k === i ? " on" : "") + (sl.kind === "new" ? " new" : "")}
-                onClick={() => setI(k)}>{k === i && !hover && <span className="hero-dot-fill" />}</button>
+              <button key={k} aria-label={tt("{0}. öğe", k + 1)} className={"hero-dot" + (k === cur ? " on" : "") + (sl.kind === "new" ? " new" : "")}
+                onClick={() => setI(k)}>{k === cur && <span className="hero-dot-fill" style={{animationPlayState:hover?"paused":"running"}} />}</button>
             ))}
           </div>
         </>
@@ -725,6 +726,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
   const [season, setSeason] = useState(file.season ?? seasons[0] ?? 1);
   const [eps, setEps] = useState<Episode[]>([]);
   const [more, setMore] = useState(false);
+  const [gallery,setGallery]=useState(false);
   const [extraPanel,setExtraPanel]=useState<"preferences"|"series"|"file"|null>(null);
   const info = useMediaInfo(file.path);
 
@@ -744,9 +746,10 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
 
   return (
     <div className={"details page-anim" + (tint ? " tinted" : "")} style={tint ? ({ "--tint-rgb": tint } as React.CSSProperties) : undefined}>
-      <section className="d-hero">
+      {gallery&&m?.backdrop&&<MediaGallery kind={isTv?"tv":"movie"} id={m.id} backdrop={m.backdrop} title={m.title} close={()=>setGallery(false)}/>}
+      <section className="d-hero" onClick={e=>{if(m?.backdrop&&!(e.target as HTMLElement).closest("button,a,input,textarea,.d-body,header"))setGallery(true);}}>
         <div className={"hero-bg" + (it.files.every((f) => isRemote(f.path)) ? " remote" : "")} style={m?.backdrop ? { backgroundImage: `url(${IMG}w1280${m.backdrop})` } : undefined} />
-        <div className="d-shade" />
+        <div className="d-shade" />{m?.backdrop&&<button className="d-gallery-trigger chip" onClick={()=>setGallery(true)}>{extraText("Resimleri aç","Open images")}</button>}
         <header>
           <button className="round" aria-label={tt("Geri")} onClick={onBack}><Icon d={I.left} /></button>
           <div className="brand"><LunaMark />  {tt("Luna Player")}</div>

@@ -221,7 +221,7 @@ export const ttsHost = (): TtsHost | null => E.host;
 
 /** The reader opened (or closed: null) a book. */
 export function attachTts(host: TtsHost | null, book?: { path: string; title: string; lang?: string }) {
-  if (!host) { ttsStop(); E.host = null; E.book = null; return; }
+  if (!host) { try { ttsStop(); } finally { E.host = null; E.book = null; } return; }
   E.host = host;
   E.book = book ?? null;
   if (!T.active) set({ note: "" });

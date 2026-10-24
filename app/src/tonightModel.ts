@@ -1,6 +1,6 @@
 /** "What should I watch tonight?": a film from your own library that fits the time you have and the mood you're in. Pure. */
 export type Mood = "any" | "tense" | "light" | "deep" | "epic" | "heart";
-export type Candidate = { key: string; title: string; kind: "movie" | "tv"; runtime: number; genres: string[]; rating: number; poster: string | null; backdrop: string | null; path: string; episode?: string; order: number };
+export type Candidate = { year?:string;tmdbId?:number;key: string; title: string; kind: "movie" | "tv"; runtime: number; genres: string[]; rating: number; poster: string | null; backdrop: string | null; path: string; episode?: string; order: number };
 export type Reason = { kind: "time" | "mood" | "rating" | "waiting" | "episode"; value: string | number };
 export type Pick = { pick: Candidate; reasons: Reason[]; others: Candidate[] };
 

@@ -78,12 +78,12 @@ export function libraryView(raw:unknown){
  topic:typeof x.topic==="string"?x.topic:"",format:["epub","pdf","cbz","mobi","azw3","fb2"].includes(String(x.format))?String(x.format):"all",
  covers:["with","without"].includes(String(x.covers))?String(x.covers):"all"};
 }
-export function cleanBookPosition(raw:unknown):{loc?:string|number;pct:number;at:number;chapter?:string}|null{
+export function cleanBookPosition(raw:unknown):{loc?:string|number;pct:number;at:number;chapter?:string;pageLabel?:string}|null{
  if(!raw||typeof raw!=="object"||Array.isArray(raw))return null;
  const x=raw as Record<string,unknown>;
  if(typeof x.pct!=="number"||!Number.isFinite(x.pct)||x.pct<0||x.pct>1)return null;
  const loc=typeof x.loc==="string"&&x.loc.length<=20000?x.loc:typeof x.loc==="number"&&Number.isFinite(x.loc)&&x.loc>=0?x.loc:undefined;
- return {pct:x.pct,at:typeof x.at==="number"&&Number.isFinite(x.at)&&x.at>=0?x.at:0,...(loc!==undefined?{loc}:{}),...(typeof x.chapter==="string"?{chapter:x.chapter}:{})};
+ return {pct:x.pct,at:typeof x.at==="number"&&Number.isFinite(x.at)&&x.at>=0?x.at:0,...(loc!==undefined?{loc}:{}),...(typeof x.chapter==="string"?{chapter:x.chapter}:{}),...(typeof x.pageLabel==="string"&&x.pageLabel.length<=300?{pageLabel:x.pageLabel}:{})};
 }
 export function reorderReadingPlan(paths:string[],path:string,direction:-1|1):string[]{
  const rows=[...new Set(paths)],i=rows.indexOf(path),j=i+direction;

@@ -1,6 +1,7 @@
 import {ExtraModal,extraText} from "./Extras";
 import { appStorage as localStorage } from "./appStorage";
 import { useEffect, useState } from "react";
+import {convertFileSrc} from "./nativeCore";
 import { store } from "./library";
 import { matchKey } from "./textMatch";
 import { tt, locale } from "./i18n";
@@ -8,7 +9,7 @@ import { ASPECTS, cleanProfile } from "./filmReviewModel";
 import type { Aspect } from "./filmReviewModel";
 import { cleanRun } from "./reviewAnalysis";
 import type { AiRun } from "./reviewAnalysis";
-import { TASTE_NAMES, effectiveWeight, learnedTaste, loadAspectScores, profileKeyOf } from "./reviewTaste";
+import { TASTE_NAMES, effectiveWeight, suggestedWeights, learnedTaste, loadAspectScores, profileKeyOf } from "./reviewTaste";
 import type { TasteKind } from "./reviewTaste";
 import { fillTaste, musicTitle, pendingCount, tasteGenres, tasteFillState } from "./tasteFill";
 
@@ -37,7 +38,7 @@ function runs(prefix = "filmDecision:ai:"): { key: string; run: AiRun }[] {
 
 /** What one part keeps about the user, in the shape the profile below reads. Music has no diary or analyses:
  *  its likes and dislikes are the diary, its artists stand in for genres and the hour of listening for the rating spread. */
-type MQ = { src: string; title: string; artist?: string; podcast?: boolean; radio?: boolean };
+type MQ = { src: string; title: string; artist?: string; cover?: string|null; podcast?: boolean; radio?: boolean };
 function sourceOf(kind: TasteKind) {
   if (kind === "film") return { diary: Object.values(store.json<Record<string, Diary>>("diary", {})), all: runs(), extra: null as null | Extra };
   if (kind === "book") {
@@ -78,8 +79,8 @@ function Radar({ values }: { values: Record<Aspect, number> }) {
   const cx = 150, cy = 132, r = 96, n = ASPECTS.length;
   const pt = (i: number, v: number) => { const a = -Math.PI / 2 + (i * 2 * Math.PI) / n; return [cx + Math.cos(a) * r * v, cy + Math.sin(a) * r * v] as const; };
   const ring = (v: number) => ASPECTS.map((_, i) => pt(i, v).join(",")).join(" ");
-  const poly = ASPECTS.map((a, i) => pt(i, Math.min(1, values[a] / 2.2)).join(",")).join(" ");
-  return <svg viewBox="0 0 300 270" className="tp-radar" role="img" aria-label={ASPECTS.map((a) => `${name(a)} ×${n1(values[a])}`).join(", ")}>
+  const poly = ASPECTS.map((a, i) => pt(i, Math.min(1, values[a] / 5)).join(",")).join(" ");
+  return <svg viewBox="0 0 300 270" className="tp-radar" role="img" aria-label={ASPECTS.map((a) => `${name(a)} ${values[a]}/5`).join(", ")}>
     {[1, 0.66, 0.33].map((v) => <polygon key={v} points={ring(v)} className="tp-ring" />)}
     {ASPECTS.map((_, i) => { const [x, y] = pt(i, 1); return <line key={i} x1={cx} y1={cy} x2={x} y2={y} className="tp-ring" />; })}
     <polygon points={poly} className="tp-shape" />
@@ -96,6 +97,8 @@ export function TasteProfile({ onOpen, onWorkOpen, kind = "film", page, sync }: 
   const [artistFilter,setArtistFilter]=useState("");
   const [stat,setStat]=useState<number|null>(null);
   const [recordQuery,setRecordQuery]=useState("");
+  const [libraryCovers,setLibraryCovers]=useState<MQ[]>([]);
+  useEffect(()=>{if(kind!=="music"||stat===null)return;let active=true;void import("./Music").then(m=>m.loadMusicLibrary()).then(rows=>{if(active)setLibraryCovers(rows.map(t=>({src:t.path,title:t.title,artist:t.artist,cover:t.cover})));}).catch(()=>{});return()=>{active=false;};},[kind,stat]);
   useEffect(()=>setRecordQuery(""),[stat,artistFilter]);
   const [syncMsg, setSyncMsg] = useState("");
   const openKey = kind === "film" ? "tasteProfileOpen" : "tasteProfileOpen:" + kind;
@@ -125,6 +128,9 @@ export function TasteProfile({ onOpen, onWorkOpen, kind = "film", page, sync }: 
     <p className="muted">{music ? tt("Henüz bir şey yok: şarkı dinledikçe, beğendikçe ya da beğenmedikçe zevk profilin burada oluşur.") : tt("Henüz bir şey yok: kitapları beğendikçe, puanladıkça ve Luna Analiz yaptıkça zevk profilin burada oluşur.")}</p></section> : null;
   const profile = cleanProfile(store.json(profileKeyOf(kind), null));
   const learned = learnedTaste(kind);
+  const importance=suggestedWeights(profile,learned);
+  const coverItems:MQ[]=[...libraryCovers,...Object.values(store.json<Record<string,{q:MQ}>>("musicPlays",{})).map(x=>x.q),...store.json<{q:MQ}[]>("musicHistory",[]).map(x=>x.q),...store.json<{q:MQ}[]>("musicLikes",[]).map(x=>x.q),...store.json<{q:MQ}[]>("musicDislikes",[]).map(x=>x.q)];
+  const recordCover=(key:string)=>{const q=coverItems.find(q=>!!q.cover&&(key.startsWith("artist:")?q.artist===key.slice(7):musicTitle(q)===key));return q?.cover?(/^(https?:|data:|asset:|blob:)/.test(q.cover)?q.cover:convertFileSrc(q.cover)):undefined;};
   const eff = Object.fromEntries(ASPECTS.map((a) => [a, effectiveWeight(a, profile, learned)])) as Record<Aspect, number>;
 
   const liked = diary.filter((e) => e.vote === "like" || (e.rating ?? 0) >= 7);
@@ -209,14 +215,14 @@ export function TasteProfile({ onOpen, onWorkOpen, kind = "film", page, sync }: 
         <div className="tp-card">
           <h3>{tt("Zevk haritan")}</h3>
           <p className="muted small">{tt("Altı konunun senin için gerçek ağırlığı: elle verdiğin önem %35, beğeni sebeplerin %65.")}</p>
-          <Radar values={eff} />
+          <Radar values={importance} />
         </div>
         <div className="tp-card">
-          <h3>{tt("Konulara göre ağırlıkların")}</h3>
+          <h3>{extraText("Konulara göre önem /5","Importance by topic /5")}</h3>
           <div className="tp-weights">{[...ASPECTS].sort((a, b) => eff[b] - eff[a]).map((a) => <div key={a} className="tp-w">
             <span>{name(a)}</span>
-            <div className="tp-wbar"><i style={{ width: (eff[a] / 2.2) * 100 + "%" }} /></div>
-            <b title={tt("Etki çarpanı · eser puanı değildir")}>{eff[a] ? "×" + eff[a].toLocaleString(locale(), { maximumFractionDigits: 2 }) : tt("katılmıyor")}</b>
+            <div className="tp-wbar"><i style={{ width: (importance[a] / 5) * 100 + "%" }} /></div>
+            <b title={extraText("Önem · eser puanı değildir","Importance · not a rating of the work")}>{importance[a]}/5</b>
             <small>{learned?.boost[a] ? <em className="-up">↑ {tt("beğenilerinden")}</em> : null}{learned?.penalty[a] ? <em className="-down">↓ {tt("beğenmediklerinden")}</em> : null}{!learned?.boost[a] && !learned?.penalty[a] ? tt("önem {0}/5", profile.weights[a]) : null}</small>
           </div>)}</div>
           {learned && <p className="muted small">{tt("Zevkin {0} beğendiğin ve {1} beğenmediğin eserden öğrenildi.", learned.liked, learned.disliked)}</p>}
@@ -248,7 +254,7 @@ export function TasteProfile({ onOpen, onWorkOpen, kind = "film", page, sync }: 
 
       {(avoided.length > 0 || gaps.length > 0) && <div className="tp-grid">
         {avoided.length > 0 && <div className="tp-card"><h3>{tt("Kaçındıkların")}</h3><p className="muted small">{tt("Eleştiriliyorsa uyarı istediğin ya da beğenmediklerinde sebep gösterdiğin konular")}</p>
-          <div className="tp-tags">{avoided.map((a) => <i key={a} className="-bad">{name(a)}{learned?.penalty[a] ? ` ×${n1(learned.penalty[a]!)}` : ""}</i>)}</div></div>}
+          <div className="tp-tags">{avoided.map((a) => <i key={a} className="-bad">{name(a)}{learned?.penalty[a] ? ` · ${importance[a]}/5` : ""}</i>)}</div></div>}
         {gaps.length > 0 && <div className="tp-card"><h3>{tt("Profil boşlukları")}</h3><p className="muted small">{music ? tt("Bu konularda henüz sinyal yok. Büyük çalma ekranında beğendiğin ya da beğenmediğin şarkılarda sebep işaretlersen öneriler keskinleşir.")
             : kind === "book" ? tt("Bu konularda henüz sinyal yok. Kitap sayfasında \"Okuduktan sonra\" bölümünden sebep işaretlersen öneriler keskinleşir.")
             : tt("Bu konularda henüz sinyal yok. İzlediklerinde \"İzledikten sonra\" bölümünden sebep işaretlersen öneriler keskinleşir.")}</p>
@@ -267,6 +273,6 @@ export function TasteProfile({ onOpen, onWorkOpen, kind = "film", page, sync }: 
         })}</div>
       </div>}
     </>}
-    {stat!==null&&<ExtraModal title={extraText("Zevk profili kayıtları","Taste profile records")} close={()=>setStat(null)} className="workspace-modal taste-record-modal"><label className="taste-record-search"><span>{artistFilter || extraText("Kayıtlarda ara","Search records")}</span><input type="search" value={recordQuery} onChange={e=>setRecordQuery(e.target.value)} placeholder={extraText("Şarkı, sanatçı veya eser ara…","Search songs, artists or titles…")} /></label><div className="taste-record-list">{(()=>{const i=stat%6;const selected=i===0?liked:i===1?disliked:i===2?diary.filter(x=>x.rating):i===5?diary.filter(x=>(x.watched??0)>month):diary;let rows=selected.map(x=>({key:x.key??x.title,title:x.title}));if(music&&i>=2){const plays=Object.values(store.json<Record<string,{q:MQ;at:number}>>("musicPlays",{}));const history=store.json<{q:MQ;at:number}[]>("musicHistory",[]).filter(x=>!x.q.podcast&&!x.q.radio);if(i===4&&!artistFilter){rows=[...new Set(liked.map(x=>x.key?.split(" | ").slice(1).join(" | ")||"").filter(Boolean))].map(name=>({key:"artist:"+name,title:name}));}else{const source=i===3||i===5?history:artistFilter?[...new Map([...plays,...store.json<{q:MQ;at:number}[]>("musicLikes",[])].map(x=>[musicTitle(x.q),x])).values()]:plays;rows=source.filter(x=>!x.q.podcast&&!x.q.radio&&(i!==5||x.at>month)&&(!artistFilter||x.q.artist===artistFilter)).map(x=>({key:musicTitle(x.q),title:x.q.title+(x.q.artist?" — "+x.q.artist:"")+(i===3||i===5?" · "+new Date(x.at).toLocaleString(locale()):"")}));}}else if(i===5)rows=[...rows,...all.filter(x=>x.run.at>month).map(x=>({key:x.key,title:titleOf(x.run)}))];else if(i===3||i===4)rows=all.map(x=>({key:x.key,title:titleOf(x.run)}));rows=rows.filter(x=>matchKey(x.title+" "+x.key).includes(matchKey(recordQuery)));return rows.length?rows.map((x,index)=><button className="taste-record-row" key={x.key+index} onClick={()=>{if(music&&i===4&&!artistFilter&&x.key.startsWith("artist:")){setArtistFilter(x.key.slice(7));return;}setStat(null);if(onWorkOpen)onWorkOpen(x.key,x.title);else onOpen?.({title:x.title,kind:x.key.startsWith("tv:")?"tv":"movie"});}}><span className="taste-record-icon" aria-hidden="true">{music?"♫":"▤"}</span><span className="taste-record-copy"><strong>{x.title.split(" — ")[0]}</strong>{(x.title.includes(" — ") || (music&&x.key.includes(" | ")))&&<small>{x.title.includes(" — ")?x.title.split(" — ").slice(1).join(" — "):x.key.split(" | ").slice(1).join(" | ")}</small>}</span><span className="taste-record-arrow" aria-hidden="true">›</span></button>):<p>{extraText("Bu görünümde gösterilecek kayıt yok.","No records to show in this view.")}</p>;})()}</div></ExtraModal>}
+    {stat!==null&&<ExtraModal title={extraText("Zevk profili kayıtları","Taste profile records")} close={()=>setStat(null)} className="workspace-modal taste-record-modal"><label className="taste-record-search"><span>{artistFilter || extraText("Kayıtlarda ara","Search records")}</span><input type="search" value={recordQuery} onChange={e=>setRecordQuery(e.target.value)} placeholder={extraText("Şarkı, sanatçı veya eser ara…","Search songs, artists or titles…")} /></label><div className="taste-record-list">{(()=>{const i=stat%6;const selected=i===0?liked:i===1?disliked:i===2?diary.filter(x=>x.rating):i===5?diary.filter(x=>(x.watched??0)>month):diary;let rows=selected.map(x=>({key:x.key??x.title,title:x.title}));if(music&&i>=2){const plays=Object.values(store.json<Record<string,{q:MQ;at:number}>>("musicPlays",{}));const history=store.json<{q:MQ;at:number}[]>("musicHistory",[]).filter(x=>!x.q.podcast&&!x.q.radio);if(i===4&&!artistFilter){rows=[...new Set(liked.map(x=>x.key?.split(" | ").slice(1).join(" | ")||"").filter(Boolean))].map(name=>({key:"artist:"+name,title:name}));}else{const source=i===3||i===5?history:artistFilter?[...new Map([...plays,...store.json<{q:MQ;at:number}[]>("musicLikes",[])].map(x=>[musicTitle(x.q),x])).values()]:plays;rows=source.filter(x=>!x.q.podcast&&!x.q.radio&&(i!==5||x.at>month)&&(!artistFilter||x.q.artist===artistFilter)).map(x=>({key:musicTitle(x.q),title:x.q.title+(x.q.artist?" — "+x.q.artist:"")+(i===3||i===5?" · "+new Date(x.at).toLocaleString(locale()):"")}));}}else if(i===5)rows=[...rows,...all.filter(x=>x.run.at>month).map(x=>({key:x.key,title:titleOf(x.run)}))];else if(i===3||i===4)rows=all.map(x=>({key:x.key,title:titleOf(x.run)}));rows=rows.filter(x=>matchKey(x.title+" "+x.key).includes(matchKey(recordQuery)));return rows.length?rows.map((x,index)=><button className="taste-record-row" key={x.key+index} onClick={()=>{if(music&&i===4&&!artistFilter&&x.key.startsWith("artist:")){setArtistFilter(x.key.slice(7));return;}setStat(null);if(onWorkOpen)onWorkOpen(x.key,x.title);else onOpen?.({title:x.title,kind:x.key.startsWith("tv:")?"tv":"movie"});}}><span className="taste-record-icon" aria-hidden="true">{music&&recordCover(x.key)?<img src={recordCover(x.key)} alt="" loading="lazy" onError={e=>{e.currentTarget.style.display="none";}}/>:music?"♫":"▤"}</span><span className="taste-record-copy"><strong>{x.title.split(" — ")[0]}</strong>{(x.title.includes(" — ") || (music&&x.key.includes(" | ")))&&<small>{x.title.includes(" — ")?x.title.split(" — ").slice(1).join(" — "):x.key.split(" | ").slice(1).join(" | ")}</small>}</span><span className="taste-record-arrow" aria-hidden="true">›</span></button>):<p>{extraText("Bu görünümde gösterilecek kayıt yok.","No records to show in this view.")}</p>;})()}</div></ExtraModal>}
   </section>;
 }

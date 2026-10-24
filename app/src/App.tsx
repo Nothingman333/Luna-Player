@@ -1,3 +1,4 @@
+import {GlobalSearch} from "./GlobalSearch";
 import {PlayerSettingsPanel} from "./PlayerSettingsPanel";
 import {FullscreenHint} from "./FullscreenHint";
 import {CountryIntro} from "./CountryIntro";
@@ -132,6 +133,7 @@ export default function App() {
   const [mine, setMine] = useState<MineTab | null>(null);
   const [mineOpen, setMineOpen] = useState<string | null>(null);
   const [tour, setTour] = useState(() => !tourSeen());
+  useEffect(()=>{const replay=()=>{setTourNew(false);setTour(true);};window.addEventListener("luna-replay-intro",replay);return()=>window.removeEventListener("luna-replay-intro",replay);},[]);
   // saw an older tour: only what's new since (once); from Settings it's the whole tour again
   const [tourNew, setTourNew] = useState(() => tourNews());
   const [countryIntro,setCountryIntro]=useState(()=>!hasWatchCountry());
@@ -1920,6 +1922,7 @@ export default function App() {
       )}
       {toast && <div className={"toast " + toast.kind}>{toast.kind === "ok" && <Icon d={I.check} />}{toast.text}</div>}
       {mine && !playing && <MinePage tab={mine} setTab={setMine} items={lib.items} play={(p) => load(p)} onClose={() => { setMine(null); setMineOpen(null); }} openId={mineOpen} />}
+      {!playing&&!browserOpen&&query.trim().length>=2&&<GlobalSearch query={query} items={lib.items} onLocal={key=>{setModeState("film");store.set("mode","film");setDetailsKey(key);}} onClose={()=>setQuery("")}/>}
       <DeveloperHost/><DebugHost page={browserOpen?browserTab?.url:`${mode}/${view}`}/>
       {settings && (
         <Settings onTour={() => { setSettings(false); setTourNew(false); setTour(true); }} onSetup={() => { setSettings(false); setSetup(true); }}

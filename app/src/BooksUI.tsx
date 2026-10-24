@@ -47,7 +47,7 @@ import { TasteProfile } from "./TasteProfile";
 
 // ---------- library ----------
 const textBook = (kind:string) => ["epub","mobi","azw3","fb2"].includes(kind);
-type Pos = { loc?: string | number; pct: number; at: number; chapter?: string };
+type Pos = { loc?: string | number; pct: number; at: number; chapter?: string; pageLabel?:string };
 const setPos = (p: string, v: Pos) => store.set(posKey(p), JSON.stringify(v));
 
 function useBookLibrary() {
@@ -953,7 +953,10 @@ function initialFixedPage(b:Book,start:number) {
   return Number.isSafeInteger(loc)&&loc>=start?loc:start;
 }
 function pageNoteLabel(b:Book,n:PageNote) {
+  const resolved=n.loc?store.json<Record<string,string>>("bookNotePages:"+b.path,{})[n.loc]:undefined;
+  if(resolved)return resolved;
   if(n.pageLabel)return n.pageLabel;
+  const current=getPos(b.path);if(n.loc&&n.loc===String(current?.loc)&&current?.pageLabel)return current.pageLabel;
   if(!textBook(b.kind)&&n.loc!==undefined&&Number.isSafeInteger(Number(n.loc)))return extraText("Sayfa","Page")+" "+(Number(n.loc)+(b.kind==="cbz"?1:0));
   return n.chapter ? n.chapter+" · "+pctText(n.pct) : pctText(n.pct);
 }
@@ -971,15 +974,15 @@ function BookPageNotes({b,onOpen}:{b:Book;onOpen:()=>void}) {
       const raw=store.get(annKey(b));const data=raw===null?{hl:[],marks:[],notes:[]}:JSON.parse(raw);const ann=cleanAnn(data);
       if(!annotationDataWritable(data,ann))throw Error(extraText("Not kayıtları hasarlı; üzerine yazılmadı.","Annotation data is damaged and was not overwritten."));
       const old=editing?ann.notes.find(n=>n.id===editing):undefined;if(editing&&!old)throw Error(extraText("Not değişmiş. Pencereyi yeniden aç.","The note changed. Reopen this window."));
-      const note:PageNote=old?{...old,text:text.trim()}:{id:newId(),text:text.trim(),loc:fixed?String(num-(b.kind==="cbz"?1:0)):String(target!.loc),pct:target?.pct??0,chapter:fixed?undefined:target?.chapter,at:Date.now()};
+      const note:PageNote=old?{...old,text:text.trim()}:{id:newId(),text:text.trim(),loc:fixed?String(num-(b.kind==="cbz"?1:0)):String(target!.loc),pct:target?.pct??0,chapter:fixed?undefined:target?.chapter,pageLabel:fixed?undefined:target?.pageLabel,at:Date.now()};
       const next={...ann,notes:old?ann.notes.map(n=>n.id===old.id?note:n):[note,...ann.notes]};
       if(!store.set(annKey(b),JSON.stringify(next)))throw Error(tt("Not kaydedilemedi. Depolama alanını kontrol et."));
       setNotes(next.notes);setText("");setEditing(null);setError("");
     } catch(e){setError(String(e));}
   };
   return <section className="book-page-notes"><h3>{extraText("Sayfa notlarım","My page notes")}</h3>
-    <p className="muted small">{fixed?extraText("Sayfayı seç, notunu yaz. Kayıtlı sayfaya tek tıkla dönebilirsin.","Choose a page and write a note. Return to a saved page with one click."):extraText("Notlar bölüm ve okuma konumuna bağlanır; yazı boyutu değişse de aynı yere döner.","Notes follow the chapter and reading position, even when the font size changes.")}</p>
-    {!editing&&<div className="extra-row">{fixed?<label>{extraText("Sayfa","Page")}<input type="number" min="1" max="10000000" value={page} onChange={e=>setPage(e.target.value)}/></label>:<span className="muted small">{target?.chapter||pctText(target?.pct??0)}</span>}<button className="chip" onClick={useCurrent}>{extraText("Son okuduğum konumu al","Use last reading position")}</button></div>}
+    <p className="muted small">{fixed?extraText("Sayfayı seç, notunu yaz. Kayıtlı sayfaya tek tıkla dönebilirsin.","Choose a page and write a note. Return to a saved page with one click."):extraText("EPUB notları okuyucu sayfasına bağlanır; bu numara basılı kitabın sayfasından farklı olabilir.","EPUB notes use reader pages; these numbers may differ from the printed edition.")}</p>
+    {!editing&&<div className="extra-row">{fixed?<label>{extraText("Sayfa","Page")}<input type="number" min="1" max="10000000" value={page} onChange={e=>setPage(e.target.value)}/></label>:<span className="muted small">{target?.pageLabel || target?.chapter || pctText(target?.pct??0)}</span>}<button className="chip" onClick={useCurrent}>{extraText("Son okuduğum konumu al","Use last reading position")}</button></div>}
     <textarea aria-label={extraText("Sayfa notun","Your page note")} maxLength={4000} value={text} onChange={e=>setText(e.target.value)} placeholder={extraText("Bu sayfada hatırlamak istediğin…","What you want to remember on this page…")}/>
     <div className="extra-row"><button className="chip" disabled={!text.trim()} onClick={save}>{tt("Kaydet")}</button>{editing&&<button className="chip" onClick={()=>{setEditing(null);setText("");setError("");}}>{tt("Vazgeç")}</button>}</div>
     {error&&<p role="alert">{error}</p>}
@@ -1289,7 +1292,7 @@ function Reader({ b, onClose }: { b: Book; onClose: () => void }) {
                 {ann.notes.map((n) => (
                   <div key={n.id} className="bk-ann">
                     <button className="bk-ann-main" onClick={() => { goTo(n); setPanel(""); }}>
-                      <span className="bk-ann-note">{n.text}</span><span className="muted small">{tt("Sayfa notu")} · {n.pageLabel || pageNoteLabel(b,n)}</span></button>
+                      <span className="bk-ann-note">{n.text}</span><span className="muted small">{tt("Sayfa notu")} · {pageNoteLabel(b,n)}</span></button>
                     <button className="bk-ann-x" aria-label={tt("Düzenle")} onClick={() => { setPanel(""); setNoteFor({ id: n.id, text: n.text }); }}><Icon d="M4 20h4L19 9l-4-4L4 16z" size={13} /></button>
                   </div>
                 ))}
@@ -1519,9 +1522,10 @@ function EpubView({ b, set, nav, onState, onToc, onErr, hl, onSelect, onTap, onM
           const pct = located ? book.locations.percentageFromCfi(cfi) : loc.start.percentage ?? spineProgress(loc.start.index, (book as any).spine?.length, dd?.page, dd?.total, loc.atEnd) ?? saved?.pct ?? 0;
           const chapter = chapterOf(loc.start.href);
           const d = loc.start.displayed;
-          const page = d ? tt("Bölümde {0}/{1}", d.page, d.total) : "";
+          const page = loc.start.pageLabel ? extraText("Sayfa","Page")+" "+loc.start.pageLabel : d ? extraText("Okuyucu sayfası","Reader page")+" "+d.page+" / "+d.total : "";
+          if(page){const pages=store.json<Record<string,string>>("bookNotePages:"+b.path,{});if(pages[cfi]!==page){pages[cfi]=page;store.set("bookNotePages:"+b.path,JSON.stringify(Object.fromEntries(Object.entries(pages).slice(-3000))));}}
           onState({ pct, label: page, chapter, loc: cfi, left: d && !setRef.current.scroll ? Math.max(0, d.total - d.page) : undefined });
-          setPos(b.path, { loc: cfi, pct, at: Date.now(), chapter });
+          setPos(b.path, { loc: cfi, pct, at: Date.now(), chapter,pageLabel:page });
         });
         nav.current = {
           next: () => rendition.next(), prev: () => rendition.prev(), go: (h) => { rendition.display(h).catch(() => {}); },
@@ -1570,7 +1574,8 @@ function EpubView({ b, set, nav, onState, onToc, onErr, hl, onSelect, onTap, onM
           },
         }, { path: b.path, title: b.title, lang: b.lang });
         // page positions across the whole book, for the progress bar (in the background)
-        book.locations.generate(1200).then(() => { if (alive) { located = true; const c = rendition.currentLocation() as any; if (c?.start) rendition.emit("relocated", c); } })
+        book.locations.generate(1200).then(() => { if (alive) { located = true;
+ const c = rendition.currentLocation() as any; if (c?.start) rendition.emit("relocated", c); } })
           // if that fails the book still reads; the bar just keeps each chapter's own position
           .catch((e: unknown) => console.warn("epub locations", e));
       } catch (e) {

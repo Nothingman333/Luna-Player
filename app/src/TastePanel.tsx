@@ -1,3 +1,4 @@
+import {extraText} from "./Extras";
 import { useEffect, useId, useState } from "react";
 import { store } from "./library";
 import { tt, locale, lang } from "./i18n";
@@ -73,7 +74,7 @@ export function TastePanel({ kind, scores = {}, sub, open = true }: { kind: Tast
         <li><b>{tt("Noktalar")}</b> — {tt("bir konuya senin verdiğin önem (kare = hesaba katma, 5 nokta = çok önemli). Hesabın %35'i budur.")}</li>
 
         {t.scoreHere && <li><b>{tt("bu eserde 8,4")}</b> — {t.scoreHere}</li>}
-        <li><b>{tt("Eleştiriliyorsa uyar")}</b> — {tt("bu konu zayıfsa \"Senin için\" puanı düşer ve uyarı çıkar.")}</li>
+        <li><b>{tt("Eleştiriliyorsa uyar")}</b> — {extraText("Yorumlarda bu konu eleştiriliyorsa analizde özellikle belirtmesini ister. Örneğin tempo eleştiriliyorsa dikkatini çeker; doğrudan puan düşürme anahtarı değildir.","Ask the analysis to highlight criticism of this topic, such as slow pacing. This switch does not directly deduct points.")}</li>
       </ul>
     </div>}
     <p className="la-scale-key">{tt("Önem: {0}/5", "0–5")}</p>

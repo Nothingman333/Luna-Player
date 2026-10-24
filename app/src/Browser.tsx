@@ -798,9 +798,9 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
       if (busy || disposed) return;
       const r = slot.current?.getBoundingClientRect();
       // The tools menu is cut out of the page like the small chat, so the page stays visible beside it.
-      const chatElement = Array.from(document.querySelectorAll<HTMLElement>(".chat-panel,.browser-tools-pop,.browser-suggest,.browser-tab-menu")).find(el=>el.getClientRects().length>0);
+      const chatElement = Array.from(document.querySelectorAll<HTMLElement>(".chat-panel,.browser-tools-pop,.browser-suggest,.browser-tab-menu,.dev-notebook,.global-search")).find(el=>el.getClientRects().length>0);
       const chat = chatElement?.getBoundingClientRect();
-      const extraOverlays=Array.from(document.querySelectorAll<HTMLElement>(".chat-panel,.browser-tools-pop,.browser-suggest,.browser-tab-menu")).filter(el=>el!==chatElement&&el.getClientRects().length).slice(0,7).map(el=>{const r=el.getBoundingClientRect(),dpr=window.devicePixelRatio;return{x:Math.round((r.left-6)*dpr),y:Math.round((r.top-6)*dpr),width:Math.ceil((r.width+12)*dpr),height:Math.ceil((r.height+12)*dpr),radius:14*dpr};});
+      const extraOverlays=Array.from(document.querySelectorAll<HTMLElement>(".chat-panel,.browser-tools-pop,.browser-suggest,.browser-tab-menu,.dev-notebook,.global-search")).filter(el=>el!==chatElement&&el.getClientRects().length).slice(0,7).map(el=>{const r=el.getBoundingClientRect(),dpr=window.devicePixelRatio;return{x:Math.round((r.left-6)*dpr),y:Math.round((r.top-6)*dpr),width:Math.ceil((r.width+12)*dpr),height:Math.ceil((r.height+12)*dpr),radius:14*dpr};});
       const covered = !!document.querySelector('.modal-bg,.chat-ws,.menu-pop,.card-menu,.bk-reader,.mu-np,[role="dialog"]:not(.browser-tools-pop)');
       const right = r?.right ?? 0;
       setNeedsRoom(!!(active && r && right - r.left < 240));

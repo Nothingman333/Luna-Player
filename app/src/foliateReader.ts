@@ -60,7 +60,7 @@ class FoliateRendition{
     this.view=document.createElement('foliate-view');this.view.style.cssText='display:block;width:100%;height:100%';container.append(this.view);
     this.view.addEventListener('external-link',(event:any)=>{event.preventDefault();const href=event.detail?.href_??event.detail?.a?.href;try{const url=new URL(href);if(/^https?:$/.test(url.protocol)&&!url.username&&!url.password)void openUrl(url.href).catch(()=>{});}catch{}});
     this.view.addEventListener('load',({detail}:any)=>{
-      const {doc,index}=detail,contents=this.contents(doc,index);
+      const {doc,index}=detail;if(this.dead||!doc?.defaultView)return;const contents=this.contents(doc,index);
       for(const hook of this.contentHooks)hook(contents);
       for(const type of ['keydown','click','mousemove','mousedown','mouseup'])doc.addEventListener(type,(event:Event)=>{
         this.emit(type,event,contents);
@@ -79,9 +79,9 @@ class FoliateRendition{
   on(name:string,callback:Callback){if(!this.listeners.has(name))this.listeners.set(name,new Set());this.listeners.get(name)!.add(callback);}
   emit(name:string,...args:any[]){for(const callback of this.listeners.get(name)??[])callback(...args);}
   private contents(doc:Document,index:number){return{document:doc,window:doc.defaultView,sectionIndex:index,range:(cfi:string)=>{try{const target=this.view.resolveCFI(cfi);return target.index===index?target.anchor(doc):null;}catch{return null;}},cfiFromRange:(range:Range)=>this.view.getCFI(index,range)};}
-  getContents(){return(this.view.renderer?.getContents()??[]).map(({doc,index}:any)=>this.contents(doc,index));}
+  getContents(){if(this.dead)return[];return(this.view.renderer?.getContents()??[]).filter((entry:any)=>entry?.doc?.nodeType===9&&entry.doc.defaultView).map(({doc,index}:any)=>this.contents(doc,index));}
   fraction(){return this.view.lastLocation?.fraction??0;}
-  currentLocation(){const loc=this.view.lastLocation;if(!loc)return null;const index=loc.section?.current??0;return{start:{cfi:loc.cfi,index,href:this.view.book.sections[index]?.id??"",percentage:loc.fraction,displayed:undefined},atEnd:loc.fraction>=0.999};}
+  currentLocation(){const loc=this.view.lastLocation;if(!loc)return null;const index=loc.section?.current??0;return{start:{cfi:loc.cfi,index,href:this.view.book.sections[index]?.id??"",percentage:loc.fraction,pageLabel:loc.pageItem?.label?String(loc.pageItem.label):undefined,displayed:loc.location?{page:loc.location.current+1,total:loc.location.total}:undefined},atEnd:loc.fraction>=0.999};}
   async display(target?:unknown){await this.ready;if(this.dead)return;if(target==null){await this.view.init({showTextStart:true});return;}const resolved=this.view.resolveNavigation(target);if(!resolved)throw Error('Book location is unavailable');await this.view.renderer.goTo(resolved);}
   async next(){await this.ready;if(!this.dead)await this.view.next();}
   async prev(){await this.ready;if(!this.dead)await this.view.prev();}

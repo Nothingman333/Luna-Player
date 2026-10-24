@@ -1,3 +1,4 @@
+import {MediaGallery} from "./MediaGallery";
 import {RatingStars} from "./RatingStars";
 import {WhereToWatch} from "./TitleExtras";
 import {dKey,setSplit_renderDiary} from "./Taste";
@@ -2041,37 +2042,7 @@ function SourceBox({ s: src }: { s: SourceAsk }) {
 /** A click on a title page's backdrop (not on its buttons, poster or text) opens the pictures. */
 const heroClick = (e: React.MouseEvent) => !(e.target as HTMLElement).closest("button, a, input, select, img, h1, h2, h3, .rating, .lp, .fp-dir, .td-from");
 /** A title's pictures (backdrops, then posters) big, over the page but not edge to edge. */
-function Gallery({ id, kind, first, onClose }: { id: number; kind: "movie" | "tv"; first?: string | null; onClose: () => void }) {
-  const [pics, setPics] = useState<string[]>(first ? [first] : []);
-  const [i, setI] = useState(0);
-  useEffect(() => {
-    tmdbGet(`/${kind}/${id}/images`, { include_image_language: "null,en,tr" }).then((r: any) => {
-      const l = [...(r?.backdrops ?? []), ...(r?.posters ?? []).slice(0, 12)].map((x: any) => x.file_path as string).filter(Boolean);
-      setPics([...new Set([...(first ? [first] : []), ...l])].slice(0, 60));
-    }).catch(() => {});
-  }, [id, kind]);
-  useEffect(() => {
-    const k = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.stopPropagation(); onClose(); }
-      else if (e.key === "ArrowRight") setI((x) => Math.min(x + 1, pics.length - 1));
-      else if (e.key === "ArrowLeft") setI((x) => Math.max(x - 1, 0));
-    };
-    window.addEventListener("keydown", k, true);
-    return () => window.removeEventListener("keydown", k, true);
-  }, [pics.length]);
-  const cur = pics[i];
-  return createPortal(<div className="gal-bg" onClick={(e) => e.target === e.currentTarget && onClose()}>
-    <div className="gal">
-      <button className="round gal-x" aria-label={tt("Kapat")} onClick={onClose}><Icon d={I.x} size={18} /></button>
-      <div className="gal-main">
-        {cur ? <img src={`${IMG}original${cur}`} alt="" /> : <span className="muted small pulse">{tt("Görseller getiriliyor…")}</span>}
-        {i > 0 && <button className="round gal-nav -l" aria-label={tt("Önceki")} onClick={() => setI(i - 1)}>‹</button>}
-        {i < pics.length - 1 && <button className="round gal-nav -r" aria-label={tt("Sonraki")} onClick={() => setI(i + 1)}>›</button>}
-      </div>
-      {pics.length > 1 && <div className="gal-strip">{pics.map((p, j) => <img key={p} className={j === i ? "on" : ""} src={`${IMG}w185${p}`} alt="" loading="lazy" onClick={() => setI(j)} />)}</div>}
-    </div>
-  </div>, document.body);
-}
+function Gallery({id,kind,first,onClose}:{id:number;kind:"movie"|"tv";first?:string|null;onClose:()=>void}){return <MediaGallery kind={kind} id={id} backdrop={first??""} title={extraText("Resim galerisi","Image gallery")} close={onClose}/>;}
 
 function FilmPage({ f, onPlay }: { f: FilmCard; onPlay?: (path: string) => void }) {
   useTaste();

@@ -147,7 +147,7 @@ const ALL: Slide[] = [
     scene: ({ posters }) => (
       <div className="ts ts-recs">
         {[0, 1, 2].map((n) => <Poster key={n} src={P(posters, n + 4)} className={"c c" + n} />)}
-        <div className="like">👍</div>
+        <div className="like"><svg viewBox="0 0 32 32" width="38" height="38" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 14l5-9c1-2 4-1 4 2v6h5c2 0 3 2 2 4l-2 9H11zM5 14h6v12H5z"/><path d="M8 22h.01"/></svg></div>
         <div className="rate">
           <span>{tt("Kaç puan?")}</span>
           <div>{Array.from({ length: 10 }, (_, n) => <i key={n} className={n < 8 ? "on" : ""} style={{ animationDelay: `${1.1 + n * 0.06}s` }}>{n + 1}</i>)}</div>

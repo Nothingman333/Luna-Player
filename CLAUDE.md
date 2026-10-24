@@ -1,6 +1,6 @@
 # Luna Player project guidance
 
-Sürüm kuralı (kullanıcı, 2026-10-23): patch ve minor basamakları 0–9 ilerler, 10’da bir üst basamağa devreder. Örnek: 1.6.9 → 1.7.0, 1.7.9 → 1.8.0, 1.9.9 → 2.0.0. Önceki yerel 1.6.11C etiketi 1.7.1C olarak düzeltildi. Güncel arayüz güncellemesi 1.8.2C; sonraki güncelleme 1.8.3 + ajan son eki olmalıdır. Güncellemede scripts/release-version.cjs kullan ve version.ts yorumunu eşleştir. GitHub push Claude’da kalır.
+Sürüm kuralı (kullanıcı, 2026-10-23): patch ve minor basamakları 0–9 ilerler, 10’da bir üst basamağa devreder. Örnek: 1.6.9 → 1.7.0, 1.7.9 → 1.8.0, 1.9.9 → 2.0.0. Önceki yerel 1.6.11C etiketi 1.7.1C olarak düzeltildi. Güncel arayüz güncellemesi 1.9.2C; sonraki güncelleme 1.9.3 + ajan son eki olmalıdır. Güncellemede scripts/release-version.cjs kullan ve version.ts yorumunu eşleştir. GitHub push Claude’da kalır.
 
 Kullanıcının açık kuralı: disk alanı açma, dosya/klasör silme, önbellek veya derleme artığı temizleme işlemlerinden önce HER ZAMAN sor. Bu tur hiçbir temizlik yapılmadı. Kullanıcı disk alanını kendisi açıyor; yetki varsayma.
 
@@ -62,3 +62,5 @@ Son defter kararı (1.8.0C): Kitap/film defteri yalnız ana eylem satırında yu
 
 Değişiklik kaynağı kuralı (kullanıcı 2026-10-24): Doğrudan kullanıcı istemeyen, dış ZIP/rapor/öneri/ajan inisiyatifinden alınan her yeni CHANGELOG maddesine [external] etiketi koy. Yenilik ekranı bunu maddenin sonunda “Dış kaynaklardan gelen” diye gösterir. Kullanıcı isteklerine bu etiketi koyma; eski kaynağı bilinmeyen maddeleri tahminle sınıflandırma. Devir notunda kaynağı belirt.
 Geliştirici menüsü: F3, yerel ilk şifre kurulumu ve native PBKDF2 doğrulama. Alt+D sadece açık oturumda not/SS paneli; 30 dk sonra kilitlenir. dev_ komutlarını telemetry'ye alma; şifre/session token/not/PNG loglanmaz. Kimlik dosyası uygulama local data developer-auth.json; kaynak/backup/push içine alma, kullanıcı şifresini devir notuna asla yazma. Raporlar kullanıcı isteğiyle okunabilir PNG/MD/JSON/log; tüm ekran çekimi yalnız açık kullanıcı eylemiyle.
+
+Son kullanıcı kararı1.8.8C: geliştirici oturumunda30dk zaman aşımı yok; explicit Kilitle veya uygulama kapanışı kilitler. Dışarıdan öneriler sadece yerel kütüphane dışında. Genel arama kaynak gruplarıyla.

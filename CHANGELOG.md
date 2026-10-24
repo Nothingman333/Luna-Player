@@ -1,11 +1,67 @@
+## 1.9.2C — 2026-10-24
+
+- Müzik zevk profili kayıtlarında mevcut kapaklar gösterilir. Film, kitap ve müzikte konu önemi /5 olarak okunur.
+- Zevk testinde Hiçbiri seçeneği eklendi, uzun seçenek metinlerinin taşması düzeltildi.
+- Genel arama cam görünümü, kapak/afiş ve mevcut puan, süre ve tür bilgileriyle düzenlendi.
+- Ana sayfa önerileri gösterilmiş filmleri hatırlar, tekrar önermez ve Sonra izle listesine kaydedilebilir.
+- Yenilik ekranındaki Başlayalım yanındaki koyu şerit kaldırıldı.
+- [dev] F3, kilit açıldıktan sonra doğrudan ekran görüntüsü alan seçimini başlatır; Alt+D not panelini açar.
+
+## 1.9.1C — 2026-10-24
+
+- Galeri oklarının hover sırasında aşağı kayması düzeltildi; resim ve küçük resimler yüklenirken kontrol konumları sabit tutuldu.
+- Zevk testi altı hikâye seçimi üzerinden öneri üretir; süre/kaynak sorularını tekrarlamaz. Sonuçlardaki İzledim düğmesi izleme kaydını tutar ve yerine başka film getirir.
+
+## 1.9.0C — 2026-10-24
+
+- Film resimleri ortak büyük galeri, yan oklar ve küçük resim şeridiyle açılır.
+- Dışarıdan önerileri için gereksiz ayrıntı/oyuncu istekleri kaldırıldı, önbellek eklendi; kapsam değişiminde kontrollerin yerleşimi sabitlendi.
+- Üç soruluk Zevk testi film önerir. Ana sayfa slayt göstergelerinde yalnız geçerli slayt vurgulanır.
+
+## 1.8.9C — 2026-10-24
+
+- Genel arama çubuğunda küçük öneri listesi, Daha fazla ile kaynaklara ayrılmış tam sonuçlar gösterilir; yazarken sayfa değişmez.
+- Tanıtımın beğeni emojisi çizgi ikonla değiştirildi; güncelleme videosu yalnız yenilik kutusunun içine alındı.
+
+## 1.8.8C — 2026-10-24
+
+- Kitaptan çıkışta kapanmış Foliate sayfa belgelerine erişim düzeltildi.
+- [dev] Geliştirici notlarına çözüldü işareti ve seçili notu silme eklendi; intro tekrarı ve uygulama oturumu boyunca açık kalma sağlandı.
+- Dışarıdan kapsamı yalnız kütüphane dışındaki filmleri önerir. Genel arama kütüphane, öneriler, TMDB film/dizi, kitap ve müzik sonuçlarını ayırır.
+- F11 bildirimi üst ortaya taşındı; arka plan resimleri galerisi ve yerel token bütçesine göre kalan yüzde eklendi.
+- Güncelleme ekranında kullanıcı videolarından rastgele, karartılmış ve bulanık arka plan oynatılır.
+- [dev] Geliştirici değişiklik notları yalnız açık geliştirici oturumunda görünür.
+
+## 1.8.7C — 2026-10-24
+
+- [dev] Geliştirici notları panoya kopyalama veya rapor kaydetme sonrasında görüntü ve çizimleriyle kalıcı, kapalı listeye eklenir. Ayrı not ekleme ve eski kaydı yeniden açma eklendi.
+- Kütüphanede / Fark etmez seçimi Benim için seç yanında iki belirgin, kayar göstergeli düğme oldu.
+
+## 1.8.6C — 2026-10-24
+
+- [dev] Ekran alanı seçiminde fareyi bırakınca görüntü doğrudan not paneline döner; ikinci onay kaldırıldı. İptal, bozuk görüntü ve yakalama zaman aşımı akışları düzeltildi.
+
+## 1.8.5C — 2026-10-24
+
+- Analiz odak seçenekleri analiz öncesi zevk tercih penceresine taşındı. Eleştiriliyorsa uyar açıklaması gerçek davranışına uygun hale getirildi.
+
+## 1.8.4C — 2026-10-24
+
+- [dev] Geliştirici notları sağ üstte kompakt panel oldu; karartma kaldırıldı. Seçili alan yakalama ve resmi panoya kopyalama eklendi.
+- Bu akşam ne izlesem bölümüne tek düğmeyle Kütüphanede / Fark etmez kapsam seçimi eklendi; süre seçenekleri korundu.
+
+## 1.8.3C — 2026-10-24
+
+- EPUB sayfa notlarına okuyucu sayfası eklendi; defterden alınan notlar sayfa etiketini korur. Eski notların kayıtlı konumu okuyucuda ziyaret edilince sayfa etiketi tamamlanır.
+
 ## 1.8.3CC — 2026-10-24
 
-- Geliştirici araçları yalnız sahibinin geliştirici şifresiyle açılır; ilk açılışta şifre belirleme adımı kaldırıldı.
+- [dev] Geliştirici araçları yalnız sahibinin geliştirici şifresiyle açılır; ilk açılışta şifre belirleme adımı kaldırıldı.
 
 ## 1.8.2C — 2026-10-24
 
-- F3 geliştirici girişi, yerel şifre kurulumu ve 30 dakikalık kilitli oturum eklendi.
-- Alt+D not ve ekran görüntüsü paneli, Luna/tüm ekran çekimi, çizim/alan işaretleme ve okunabilir rapor dosyaları eklendi.
+- [dev] F3 geliştirici girişi, yerel şifre kurulumu ve 30 dakikalık kilitli oturum eklendi.
+- [dev] Alt+D not ve ekran görüntüsü paneli, Luna/tüm ekran çekimi, çizim/alan işaretleme ve okunabilir rapor dosyaları eklendi.
 - Dış kaynaklı yenilik maddeleri kaynak etiketiyle kaynaklarını sonunda gösterir; eski bilinmeyen kayıtlar tahminle etiketlenmez.
 
 ## 1.8.1C — 2026-10-24

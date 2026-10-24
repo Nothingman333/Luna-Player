@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, Webview};
 
 #[derive(Default)]
-struct Session { token: String, expires: Option<Instant>, failures: u32, retry: Option<Instant> }
-static SESSION: Mutex<Session> = Mutex::new(Session {token:String::new(),expires:None,failures:0,retry:None});
+struct Session { token: String, failures: u32, retry: Option<Instant> }
+static SESSION: Mutex<Session> = Mutex::new(Session {token:String::new(),failures:0,retry:None});
 fn trusted(caller:&Webview)->Result<(),String>{if caller.label()=="main"{Ok(())}else{Err("Developer tools require Luna's main UI".into())}}
 fn random<const N:usize>()->Result<[u8;N],String>{let mut b=[0;N];SystemRandom::new().fill(&mut b).map_err(|_|"Random generator failed")?;Ok(b)}
 fn auth_path(app:&AppHandle)->Result<PathBuf,String>{Ok(app.path().app_local_data_dir().map_err(|e|e.to_string())?.join("developer-auth.json"))}
@@ -15,7 +15,7 @@ fn auth_path(app:&AppHandle)->Result<PathBuf,String>{Ok(app.path().app_local_dat
 const BUILTIN_SALT:[u8;16]=[81,43,66,219,247,147,82,70,161,161,249,23,133,131,89,105];
 const BUILTIN:[[u8;32];2]=[[122,41,111,62,210,183,238,121,201,237,95,146,217,236,86,143,128,232,232,33,143,175,46,138,195,187,59,161,68,183,208,176],[88,101,67,38,142,83,175,215,90,210,179,161,116,219,40,137,42,92,166,167,117,93,182,249,205,34,53,59,136,254,63,196]];
 fn rounds()->NonZeroU32{NonZeroU32::new(600_000).unwrap()}
-fn valid(session:&Session,token:&str)->bool{!token.is_empty()&&session.token==token&&session.expires.is_some_and(|t|Instant::now()<t)}
+fn valid(session:&Session,token:&str)->bool{!token.is_empty()&&session.token==token}
 fn authorize(token:&str)->Result<(),String>{let s=SESSION.lock().map_err(|_|"Developer lock unavailable")?;if valid(&s,token){Ok(())}else{Err("Developer session locked or expired".into())}}
 #[tauri::command]
 pub fn dev_auth_status(app:AppHandle,caller:Webview)->Result<bool,String>{trusted(&caller)?;let _=auth_path(&app)?;Ok(true)}
@@ -27,12 +27,37 @@ pub fn dev_unlock(app:AppHandle,caller:Webview,password:String,setup:bool)->Resu
  if s.retry.is_some_and(|t|Instant::now()<t){return Err("Please wait before trying again".into())}
  let _=(&app,setup);
  if !BUILTIN.iter().any(|v|pbkdf2::verify(pbkdf2::PBKDF2_HMAC_SHA256,rounds(),&BUILTIN_SALT,password.as_bytes(),v).is_ok()){s.failures+=1;s.retry=Some(Instant::now()+Duration::from_secs(if s.failures>=5{30}else{1}));return Err("Incorrect developer password".into())}
- let token=STANDARD.encode(random::<32>()?);s.token=token.clone();s.expires=Some(Instant::now()+Duration::from_secs(1800));s.failures=0;s.retry=None;Ok(token)
+ let token=STANDARD.encode(random::<32>()?);s.token=token.clone();s.failures=0;s.retry=None;Ok(token)
 }
 #[tauri::command]
 pub fn dev_lock(caller:Webview,token:String)->Result<(),String>{trusted(&caller)?;let mut s=SESSION.lock().map_err(|_|"Developer lock unavailable")?;if s.token==token{*s=Session::default();}Ok(())}
 #[tauri::command]
 pub fn dev_capture(app:AppHandle,caller:Webview,token:String,desktop:bool)->Result<String,String>{trusted(&caller)?;authorize(&token)?;capture(&app,desktop).map(|b|STANDARD.encode(b))}
+
+#[tauri::command]
+pub fn dev_copy_image(caller:Webview,token:String,png:String)->Result<(),String>{
+ trusted(&caller)?;authorize(&token)?;
+ if png.len()>64_000_000{return Err("Image too large".into())}
+ let bytes=STANDARD.decode(png).map_err(|_|"Invalid image")?;
+ #[cfg(windows)]let owner=caller.window().hwnd().map_err(|e|e.to_string())?.0 as isize;
+ #[cfg(not(windows))]let owner=0;
+ copy_image(&bytes,owner)
+}
+#[cfg(not(windows))]
+fn copy_image(_: &[u8],_:isize)->Result<(),String>{Err("Clipboard image requires Windows".into())}
+#[cfg(windows)]
+fn copy_image(bytes:&[u8],owner:isize)->Result<(),String>{
+ let mut decoder=png::Decoder::new(std::io::Cursor::new(bytes));decoder.set_transformations(png::Transformations::EXPAND|png::Transformations::STRIP_16);
+ let mut reader=decoder.read_info().map_err(|e|e.to_string())?;
+ let (w,h)=(reader.info().width,reader.info().height);if w==0||h==0||u64::from(w)*u64::from(h)>64_000_000{return Err("Clipboard image dimensions exceed limit".into())}
+ let mut data=vec![0;reader.output_buffer_size()];let info=reader.next_frame(&mut data).map_err(|e|e.to_string())?;
+ let channels=match info.color_type{png::ColorType::Rgba=>4,png::ColorType::Rgb=>3,png::ColorType::Grayscale=>1,png::ColorType::GrayscaleAlpha=>2,_=>return Err("Unsupported PNG format".into())};
+ let mut dib=vec![0u8;40+w as usize*h as usize*4];dib[0..4].copy_from_slice(&40u32.to_le_bytes());dib[4..8].copy_from_slice(&(w as i32).to_le_bytes());dib[8..12].copy_from_slice(&(-(h as i32)).to_le_bytes());dib[12..14].copy_from_slice(&1u16.to_le_bytes());dib[14..16].copy_from_slice(&32u16.to_le_bytes());
+ for(src,dst)in data[..info.buffer_size()].chunks_exact(channels).zip(dib[40..].chunks_exact_mut(4)){if channels>=3{dst.copy_from_slice(&[src[2],src[1],src[0],255]);}else{dst.copy_from_slice(&[src[0],src[0],src[0],255]);}}
+ #[link(name="user32")]unsafe extern "system"{fn OpenClipboard(h:isize)->i32;fn EmptyClipboard()->i32;fn SetClipboardData(format:u32,data:isize)->isize;fn CloseClipboard()->i32;}
+ #[link(name="kernel32")]unsafe extern "system"{fn GlobalAlloc(flags:u32,size:usize)->isize;fn GlobalLock(h:isize)->*mut u8;fn GlobalUnlock(h:isize)->i32;fn GlobalFree(h:isize)->isize;}
+ unsafe{let mem=GlobalAlloc(0x42,dib.len());if mem==0{return Err("Clipboard allocation failed".into())}let ptr=GlobalLock(mem);if ptr.is_null(){GlobalFree(mem);return Err("Clipboard memory unavailable".into())}std::ptr::copy_nonoverlapping(dib.as_ptr(),ptr,dib.len());GlobalUnlock(mem);let mut opened=false;for _ in 0..6{if OpenClipboard(owner)!=0{opened=true;break;}std::thread::sleep(Duration::from_millis(40));}if !opened{GlobalFree(mem);return Err("Clipboard is busy".into())}if EmptyClipboard()==0||SetClipboardData(8,mem)==0{CloseClipboard();GlobalFree(mem);return Err("Cannot copy image".into())}CloseClipboard();}Ok(())
+}
 
 #[tauri::command]
 pub fn dev_save_report(app:AppHandle,caller:Webview,token:String,directory:String,note:String,png:Option<String>,logs:String,context:serde_json::Value)->Result<String,String>{
@@ -72,5 +97,5 @@ fn capture(app:&AppHandle,desktop:bool)->Result<Vec<u8>,String>{
 }
 #[cfg(test)]mod tests{
  use super::*;
- #[test]fn password_and_session(){let salt=[17;16];let mut hash=[0;32];pbkdf2::derive(pbkdf2::PBKDF2_HMAC_SHA256,rounds(),&salt,b"synthetic-test-password",&mut hash);assert!(pbkdf2::verify(pbkdf2::PBKDF2_HMAC_SHA256,rounds(),&salt,b"synthetic-test-password",&hash).is_ok());assert!(pbkdf2::verify(pbkdf2::PBKDF2_HMAC_SHA256,rounds(),&salt,b"wrong",&hash).is_err());let mut s=Session{token:"synthetic-token".into(),expires:Some(Instant::now()+Duration::from_secs(1)),..Default::default()};assert!(valid(&s,"synthetic-token"));assert!(!valid(&s,""));assert!(!valid(&s,"other"));s.expires=Some(Instant::now()-Duration::from_secs(1));assert!(!valid(&s,"synthetic-token"));}
+ #[test]fn password_and_session(){let salt=[17;16];let mut hash=[0;32];pbkdf2::derive(pbkdf2::PBKDF2_HMAC_SHA256,rounds(),&salt,b"synthetic-test-password",&mut hash);assert!(pbkdf2::verify(pbkdf2::PBKDF2_HMAC_SHA256,rounds(),&salt,b"synthetic-test-password",&hash).is_ok());assert!(pbkdf2::verify(pbkdf2::PBKDF2_HMAC_SHA256,rounds(),&salt,b"wrong",&hash).is_err());let mut s=Session{token:"synthetic-token".into(),..Default::default()};assert!(valid(&s,"synthetic-token"));assert!(!valid(&s,""));assert!(!valid(&s,"other"));s.token.clear();assert!(!valid(&s,"synthetic-token"));}
 }

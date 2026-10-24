@@ -21,3 +21,5 @@ export function recordTokenUsage(response:unknown){
  appStorage.setItem(KEY,JSON.stringify(next));window.dispatchEvent(new Event("luna-ai-usage"));
 }
 export function resetTokenUsage(){appStorage.removeItem(KEY);window.dispatchEvent(new Event("luna-ai-usage"));}
+
+export function tokenBudgetRemaining(total:number,budget:number){if(!Number.isFinite(budget)||budget<=0)return null;const remaining=Math.max(0,Math.floor(budget)-Math.max(0,total));return {remaining,percent:Math.max(0,Math.min(100,remaining/budget*100))};}

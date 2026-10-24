@@ -1515,6 +1515,7 @@ pub fn run() {
             dev_tools::dev_unlock,
             dev_tools::dev_lock,
             dev_tools::dev_capture,
+            dev_tools::dev_copy_image,
             dev_tools::dev_save_report,
             cache_tools::cache_tools,
             browser::browser_create,
