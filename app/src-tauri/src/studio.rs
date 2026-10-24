@@ -502,7 +502,7 @@ fn unzip_flat(zip_path: &Path, dest: &Path, exts: &[&str], per_file: u64, total_
         if entry.is_dir() {
             continue;
         }
-        let Some(name) = core::safe_entry_name(entry.name(), exts) else { continue };
+        let Some(name) = core::safe_entry_name(&entry.name().unwrap_or_default(), exts) else { continue };
         if entry.size() > per_file || names.iter().any(|n: &String| n.eq_ignore_ascii_case(&name)) {
             continue;
         }

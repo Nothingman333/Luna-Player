@@ -33,7 +33,7 @@ tokio = { version = "1", features = ["net", "io-util", "sync", "time", "rt", "ma
 trash = "5"
 librqbit-dualstack-sockets = "0.7"
 ttf-parser = "0.25"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 librqbit = { version = "9", default-features = false, features = ["http-api", "rust-tls", "tracing-subscriber-utils"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "rustls-tls-native-roots", "gzip", "brotli", "cookies"] }
 serde_yaml = "0.9"

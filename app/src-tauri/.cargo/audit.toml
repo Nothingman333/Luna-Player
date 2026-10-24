@@ -1,0 +1,5 @@
+# Transitive only, no fixed release reachable yet:
+# zip 4.x comes from tauri-plugin-updater (Luna's own zip is 9.x); ringbuf 0.4 comes from librqbit-utp.
+# Revisit when those crates move to zip >= 9 / ringbuf >= 0.5.2.
+[advisories]
+ignore = ["RUSTSEC-2026-0367", "RUSTSEC-2026-0368", "RUSTSEC-2026-0369", "RUSTSEC-2026-0293"]

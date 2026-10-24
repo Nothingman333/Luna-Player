@@ -149,7 +149,7 @@ fn archive_limits<R: std::io::Read + std::io::Seek>(z: &mut zip::ZipArchive<R>) 
         let f=z.by_index(i).map_err(|e|e.to_string())?;
         total=total.checked_add(f.size()).ok_or("Book archive size overflow")?;
         if total>MAX_ZIP_EXPANDED { return Err("Expanded book archive exceeds 2 GiB".into()); }
-        if IMG_EXT.contains(&f.name().rsplit('.').next().unwrap_or("").to_lowercase().as_str()) && f.size()>MAX_IMAGE_BYTES {
+        if IMG_EXT.contains(&f.name().unwrap_or_default().rsplit('.').next().unwrap_or("").to_lowercase().as_str()) && f.size()>MAX_IMAGE_BYTES {
             return Err("Book image exceeds 64 MiB".into());
         }
     }
@@ -261,7 +261,7 @@ fn zip_has_book(bytes: &[u8], kind: &str) -> bool {
     }
     let Ok(mut z) = zip::ZipArchive::new(std::io::Cursor::new(bytes)) else { return false };
     if archive_limits(&mut z).is_err(){return false;}
-    let mut names = z.file_names();
+    let mut names = z.file_names().filter_map(Result::ok);
     if kind == "epub" {
         names.any(|n| n.eq_ignore_ascii_case("META-INF/container.xml") || n.to_lowercase().ends_with(".opf"))
     } else {
@@ -274,7 +274,7 @@ pub fn cbz_pages(p: &Path) -> Result<Vec<String>, String> {
     validate_book_file(p)?;
     let z = zip::ZipArchive::new(std::fs::File::open(p).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let mut names: Vec<String> = z
-        .file_names()
+        .file_names().filter_map(Result::ok)
         .filter(|n| !n.starts_with("__MACOSX") && IMG_EXT.contains(&n.rsplit('.').next().unwrap_or("").to_lowercase().as_str()))
         .map(String::from)
         .collect();
@@ -308,7 +308,7 @@ fn natural(a: &str, b: &str) -> std::cmp::Ordering {
 /// The ComicInfo.xml inside a comic archive (the de-facto standard of comic taggers), read at most 256 KB.
 fn comic_info_of(p: &Path) -> Option<crate::shell_core::ComicInfo> {
     let mut z = zip::ZipArchive::new(std::fs::File::open(p).ok()?).ok()?;
-    let name = z.file_names().find(|n| n.eq_ignore_ascii_case("ComicInfo.xml"))?.to_string();
+    let name = z.file_names().filter_map(Result::ok).find(|n| n.eq_ignore_ascii_case("ComicInfo.xml"))?.to_string();
     let f = z.by_name(&name).ok()?;
     if f.size() > 256 * 1024 {
         return None;

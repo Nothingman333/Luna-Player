@@ -38,7 +38,7 @@ pub fn unpack(data:&[u8],dest:&Path,expected:Option<&str>)->Result<u64,String>{
  let mut zip=zip::ZipArchive::new(Cursor::new(payload)).map_err(|_|"ZIP/CRX paketi okunamadı".to_string())?;
  if zip.len()>5000{return Err("Eklentide çok fazla dosya var".into());}
  let mut entries=Vec::new();let mut names=HashSet::new();let mut total=0u64;
- for i in 0..zip.len(){let f=zip.by_index(i).map_err(|e|e.to_string())?;let name=f.name().to_string();let path=safe_name(&name)?;
+ for i in 0..zip.len(){let f=zip.by_index(i).map_err(|e|e.to_string())?;let name=f.name().unwrap_or_default().to_string();let path=safe_name(&name)?;
   if f.unix_mode().is_some_and(|m|m&0o170000==0o120000){return Err("Sembolik bağlantı kabul edilmiyor".into());}
   if f.is_dir(){continue;}
   if !names.insert(name.to_lowercase()){return Err("Arşivde yinelenen dosya yolu".into());}

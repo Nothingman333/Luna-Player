@@ -55,13 +55,13 @@ pub fn add(dir: &Path, paths: Vec<String>) -> Result<u32, String> {
             let mut zip = zip::ZipArchive::new(f).map_err(|e| tr!("Zip açılamadı: {}", "Couldn't open the zip: {}", e))?;
             if zip.len()>1000{return Err("Font archive has too many entries (maximum 1000)".into());}
             let mut expanded=0u64;
-            for i in 0..zip.len(){let entry=zip.by_index(i).map_err(|e|e.to_string())?;if entry.is_file()&&is_font(entry.name()){
+            for i in 0..zip.len(){let entry=zip.by_index(i).map_err(|e|e.to_string())?;if entry.is_file()&&is_font(&entry.name().unwrap_or_default()){
                 if entry.size()>MAX_FONT_BYTES{return Err("Font exceeds 32 MiB".into());}
                 expanded=expanded.checked_add(entry.size()).filter(|n|*n<=remaining).ok_or("Font archive exceeds the total byte budget")?;
             }}
             for i in 0..zip.len() {
                 let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
-                let name = entry.name().rsplit(['/', '\\']).next().unwrap_or("").to_string();
+                let name = entry.name().unwrap_or_default().rsplit(['/', '\\']).next().unwrap_or("").to_string();
                 if entry.is_file() && is_font(&name) {
                     let mut buf = Vec::new();
                     (&mut entry).take(MAX_FONT_BYTES.min(remaining)+1).read_to_end(&mut buf).map_err(|e| e.to_string())?;

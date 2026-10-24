@@ -910,9 +910,9 @@ async fn read_export(paths: Vec<String>) -> Result<Vec<(String, String)>, String
                 if z.len()>10_000{return Err("Export archive has too many entries".into());}
                 for i in 0..z.len() {
                     let mut f = z.by_index(i).map_err(|e| e.to_string())?;
-                    if !f.name().to_lowercase().ends_with(".csv") {continue;}
+                    if !f.name().unwrap_or_default().to_lowercase().ends_with(".csv") {continue;}
                     if f.size()>MAX || f.size()>remaining || out.len()>=200{return Err("Export exceeds its CSV count or byte budget".into());}
-                    let name = f.name().replace('\\', "/");
+                    let name = f.name().unwrap_or_default().replace('\\', "/");
                     let text=read_export_text(&mut f,&mut remaining)?;
                     out.push((name, text));
                 }
