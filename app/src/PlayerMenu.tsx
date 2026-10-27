@@ -1,3 +1,7 @@
+import {colorSignal} from "./hdrInfo";
+import {store} from "./library";
+import {extraText} from "./Extras";
+import {LunaSelect} from "./LunaSelect";import {mediaQualityLabel,cleanWebPlayback} from "./browserMediaModel";
 import {createPortal} from "react-dom";
 import {gpuCapabilities,systemProfile} from "./hardwareProfile";
 import { appStorage as localStorage } from "./appStorage";
@@ -109,6 +113,13 @@ const SLIDERS: [keyof VideoSet, string, number, number][] = [
 
 /** Gear panel: picture settings for the current video, saved for that video only. */
 export function VideoPanel({ path, onClose, onScenes, onClip, enhancements = false, embedded = false }: { path: string; onClose: () => void; onScenes?: () => void; onClip?: () => void; enhancements?: boolean; embedded?: boolean }) {
+  const [web,setWeb]=useState(()=>cleanWebPlayback(store.json("web-playback:"+path,null)));
+  const [hdr,setHdr]=useState("");
+  const [outputHdr,setOutputHdr]=useState("");
+  const [currentHeight,setCurrentHeight]=useState<number|null>(null);
+  useEffect(()=>{let live=true;setCurrentHeight(null);setHdr("");setOutputHdr("");const read=()=>{void mpv("get_property","height").then(value=>{if(live)setCurrentHeight(typeof value==="number"&&Number.isFinite(value)&&value>0&&value<=16384?Math.round(value):null);}).catch(()=>{});void mpv("get_property","video-params").then((raw)=>{if(!live)return;setHdr(colorSignal(raw));}).catch(()=>{});void mpv("get_property","video-target-params").then(raw=>{if(!live)return;setOutputHdr(colorSignal(raw));}).catch(()=>{});};read();const timer=window.setInterval(read,2000);return()=>{live=false;clearInterval(timer);};},[path]);
+
+  useEffect(()=>{const sync=(event:Event)=>{if((event as CustomEvent).detail===path){setWeb(cleanWebPlayback(store.json("web-playback:"+path,null)));setCurrentHeight(null);}};window.addEventListener("luna-web-source-state",sync);return()=>window.removeEventListener("luna-web-source-state",sync);},[path]);
   const [v, setV] = useState<VideoSet>(() => loadVideoSet(path));
   const [frame, setFrame] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -166,6 +177,7 @@ export function VideoPanel({ path, onClose, onScenes, onClip, enhancements = fal
         <h3>{enhancements ? tt("Luna iyileştirmeleri") : tt("Görüntü")}</h3><span className="grow" />
         <button className="chip" onClick={() => set(enhancements ? {hq:false,a4k:"off",vsr:"off",smooth:false} : {...VIDEO_DEFAULTS,hq:v.hq,a4k:v.a4k,vsr:v.vsr,smooth:v.smooth})}>{tt("Sıfırla")}</button>
       </div>
+      {!enhancements&&web&&<div className="web-source-quality"><span>{tt("Kalite")}</span>{(web.variants?.length||0)>1?<LunaSelect label={tt("Kalite")} value={web.streamUrl||""} options={web.variants!.filter(v=>v.mediaKind!=="audio").map((v,i)=>({value:v.url,label:mediaQualityLabel(v)||(v.url===web.streamUrl&&currentHeight?`${currentHeight}p`:extraText(`Kalite bilinmiyor · Akış ${i+1}`,`Quality unknown · Stream ${i+1}`))}))} onChange={url=>{const variant=web.variants?.find(v=>v.url===url);const next={...web,streamUrl:url,audio:variant?.audioUrl?[{url:variant.audioUrl}]:[]};store.set("web-playback:"+path,JSON.stringify(next));setWeb(next);window.dispatchEvent(new CustomEvent("luna-web-quality",{detail:path}));}}/>:<small>{currentHeight?`${currentHeight}p`:mediaQualityLabel(web.variants?.[0]||{url:web.streamUrl||""})||extraText("Kalite bilinmiyor","Quality unknown")}</small>}{currentHeight&&(web.variants?.length||0)>1&&<small className="web-current-quality">{extraText(`Şu an: ${currentHeight}p`,`Now playing: ${currentHeight}p`)}</small>}{outputHdr&&<small className="web-current-quality" title={extraText("Bu, oynatıcının renk çıkışıdır. Ekranda HDR için Windows HDR ve HDR destekli ekran gerekir.","This is the player’s color output. Displaying HDR requires Windows HDR and an HDR-capable screen.")}>{extraText("Oynatıcı çıkışı:","Player output:")} {outputHdr}</small>}{hdr&&<small className="web-current-quality">{extraText("Kaynak:","Source:")} {hdr}</small>}</div>}
       {!enhancements && <>{SLIDERS.map(([k, label, min, max]) => (
         <label key={k} className="vslider">
           <span>{label}</span>
@@ -374,13 +386,13 @@ export function TracksPanel({ s, onSearch, onSync, onClose, onTranscript }: {
     return () => window.removeEventListener("mousedown", down);
   }, []);
   return (
-    <div className="tracks" ref={box}>
+    <div className="tracks audio-sub-panel" ref={box}>
       <div className="tcol">
         <h3>{tt("Ses")}</h3>
         {audio.length === 0 && <div className="muted small">{tt("Ses parçası yok")}</div>}
         {audio.map((t) => (
           <button key={t.id} className={"titem" + (t.selected ? " on" : "")} onClick={() => setProp("aid", t.id)}>
-            {trackLabel(t)}
+            <span className="track-title" title={trackLabel(t)}>{trackLabel(t)}</span>
           </button>
         ))}
       </div>
@@ -389,7 +401,7 @@ export function TracksPanel({ s, onSearch, onSync, onClose, onTranscript }: {
         <button className={"titem" + (subOff ? " on" : "")} onClick={() => setProp("sid", "no")}>{tt("Kapalı")}</button>
         {subs.map((t) => (
           <button key={t.id} className={"titem" + (t.id === mainId ? " on" : "")} onClick={() => { if (t.id === second) setProp("secondary-sid", "no"); setProp("sid", t.id); }}>
-            {trackLabel(t)}
+            <span className="track-title" title={trackLabel(t)}>{trackLabel(t)}</span>
           </button>
         ))}
         {subs.length > 1 && (
@@ -397,7 +409,7 @@ export function TracksPanel({ s, onSearch, onSync, onClose, onTranscript }: {
             <div className="tsub">{tt("İkinci altyazı")}</div>
             <button className={"titem sec" + (second == null ? " on" : "")} onClick={() => setProp("secondary-sid", "no")}>{tt("Kapalı")}</button>
             {subs.filter((t) => t.id !== mainId).map((t) => (
-              <button key={"2-" + t.id} className={"titem sec" + (t.id === second ? " on" : "")} onClick={() => setProp("secondary-sid", t.id)}>{trackLabel(t)}</button>
+              <button key={"2-" + t.id} className={"titem sec" + (t.id === second ? " on" : "")} onClick={() => setProp("secondary-sid", t.id)}><span className="track-title" title={trackLabel(t)}>{trackLabel(t)}</span></button>
             ))}
           </>
         )}

@@ -2449,7 +2449,7 @@ body.pl-open {
   --pl-y: calc((100vh - var(--pl-h)) / 2);
 }
 /* the music dock shrinks into the playlist window while it is open */
-body.pl-open .mu-dock {
+body.pl-open .mu-dock:not(.luna-video-dock) {
   z-index: 305; left: 50%; right: auto; transform: translateX(-50%);
   width: calc(var(--pl-w) - 56px);
   bottom: calc(var(--pl-y) + 10px); height: 68px; border-radius: 16px; padding: 0 14px; gap: 10px;
@@ -3163,3 +3163,407 @@ body:has(.mu-np) .chat-panel { bottom: 150px; height: min(600px, calc(100vh - 23
 /* User review: consistent profile art, transparent release footer and frosted search. */
 .taste-record-icon{width:44px;height:44px;overflow:hidden;position:relative}.taste-record-icon>img{width:100%;height:100%;object-fit:cover;display:block}.release-news>.modal-actions:last-child{background:transparent;box-shadow:none;margin-bottom:0}
 .global-search.compact,.global-search.expanded{background:color-mix(in srgb,var(--panel) 80%,transparent);backdrop-filter:blur(26px) saturate(155%);-webkit-backdrop-filter:blur(26px) saturate(155%);border:1px solid color-mix(in srgb,var(--text) 16%,transparent);box-shadow:inset 0 1px 0 #ffffff0b,0 18px 48px #0006;border-radius:18px}.global-search .global-search-result{align-items:center;justify-content:flex-start;height:auto;min-height:76px;gap:12px}.global-search-art{width:40px;height:58px;object-fit:cover;flex:none;border-radius:6px;background:var(--bg)}.global-search-art.blank{display:grid;place-items:center;color:var(--muted)}.global-search-copy{min-width:0;flex:1;display:grid;gap:4px}.global-search-copy>b{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.global-search .global-search-copy small{margin:0;white-space:normal;font-size:11px;line-height:1.45}.global-search-meta{color:var(--muted);font-size:11px;line-height:1.4}.global-search-meta em{font-style:normal;color:var(--accent);margin-right:8px}
+
+/* A warning only blurs artwork, keeping badges, boundaries and the title legible. */
+.disc-poster.cw-blur{filter:none;transform:none}.disc-poster.cw-blur>img,.disc-poster.cw-blur>.plg-blank{filter:blur(14px) brightness(.7);transform:scale(1.06)}
+/* All three onboarding modes share one clock; only transforms/opacity move each frame. */
+.ts-modes .sw{padding:4px;isolation:isolate;animation:none;--mode-width:104px}
+.ts-modes .mode-highlight{position:absolute;left:4px;top:4px;width:var(--mode-width);height:36px;padding:0;border:0;border-radius:18px;background:#e8701a;pointer-events:none;will-change:transform;animation:modeHighlight 9s cubic-bezier(.4,0,.2,1) infinite}
+.ts-modes .sw span{width:var(--mode-width);animation-duration:9s;animation-delay:0s;animation-timing-function:linear;animation-iteration-count:infinite}
+.ts-modes .sw .m0{animation-name:modeFilmText}.ts-modes .sw .m1{animation-name:modeMusicText}.ts-modes .sw .m2{animation-name:modeBookText}
+@keyframes modeHighlight{0%,26%{transform:translate3d(0,0,0);background:#e8701a}33%,59%{transform:translate3d(var(--mode-width),0,0);background:#22c79a}66%,92%{transform:translate3d(calc(var(--mode-width)*2),0,0);background:#a78bfa}100%{transform:translate3d(0,0,0);background:#e8701a}}
+@keyframes modeFilmText{0%,26%,100%{color:#0b0b0d}33%,92%{color:#b7b7c0}}
+@keyframes modeMusicText{0%,26%,66%,100%{color:#b7b7c0}33%,59%{color:#0b0b0d}}
+@keyframes modeBookText{0%,59%,100%{color:#b7b7c0}66%,92%{color:#0b0b0d}}
+.ts-modes .mc{position:relative;isolation:isolate;border-color:var(--line);box-shadow:none;filter:none;will-change:transform;animation:modeFilmLift 9s cubic-bezier(.4,0,.2,1) infinite;animation-delay:0s!important}
+.ts-modes .mc::before{content:"";position:absolute;inset:-1px;pointer-events:none;border-radius:inherit;border:1px solid rgba(var(--c),.8);box-shadow:0 16px 34px rgba(var(--c),.18);opacity:0;animation:modeFilmGlow 9s cubic-bezier(.4,0,.2,1) infinite}
+.ts-modes .mc.c1{animation-name:modeMusicLift}.ts-modes .mc.c2{animation-name:modeBookLift}.ts-modes .mc.c1::before{animation-name:modeMusicGlow}.ts-modes .mc.c2::before{animation-name:modeBookGlow}
+@keyframes modeFilmLift{0%,26%,100%{transform:translate3d(0,-7px,0)}33%,92%{transform:translate3d(0,0,0)}}
+@keyframes modeMusicLift{0%,26%,66%,100%{transform:translate3d(0,0,0)}33%,59%{transform:translate3d(0,-7px,0)}}
+@keyframes modeBookLift{0%,59%,100%{transform:translate3d(0,0,0)}66%,92%{transform:translate3d(0,-7px,0)}}
+@keyframes modeFilmGlow{0%,26%,100%{opacity:1}33%,92%{opacity:0}}
+@keyframes modeMusicGlow{0%,26%,66%,100%{opacity:0}33%,59%{opacity:1}}
+@keyframes modeBookGlow{0%,59%,100%{opacity:0}66%,92%{opacity:1}}
+.ts-modes .mc.c2 .art i{width:100%;flex:none}.ts-modes .mc.c2 .art i:nth-child(2n){width:70%}
+.ts-modes .eq i{height:24px;transform-origin:bottom;animation:modeEq .9s ease-in-out infinite alternate}.ts-modes .eq i:nth-child(2n){animation-delay:-.3s}.ts-modes .eq i:nth-child(3n){animation-delay:-.6s}
+@keyframes modeEq{from{transform:scaleY(.25)}to{transform:scaleY(1)}}
+.tour-text>*{animation-name:tourTextIn}.tour-scene{animation-name:tourSceneIn}.tour-stage.bwd .tour-scene{animation-name:tourSceneBack}
+@keyframes tourTextIn{from{opacity:0;transform:translate3d(28px,0,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+@keyframes tourSceneIn{from{opacity:0;transform:translate3d(20px,0,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+@keyframes tourSceneBack{from{opacity:0;transform:translate3d(-20px,0,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+.token-live{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);margin:4px 0 14px}.token-live::before{content:"";width:6px;height:6px;border-radius:50%;background:#22c79a}.token-availability{padding:12px 0;margin:12px 0;border-block:1px solid var(--line);font-size:13px}.token-availability strong{display:block;margin-bottom:5px}.token-availability p{margin:0;color:var(--muted);font-size:12px;line-height:1.55}
+@media(max-width:520px){.ts-modes .sw{--mode-width:88px}.ts-modes .cards{gap:8px}.ts-modes .mc{width:96px;padding:10px}.ts-modes .mc em{font-size:11px}}
+@media(prefers-reduced-motion:reduce){.ts-modes .mode-highlight{transform:none}.ts-modes .mc::before{opacity:0}.ts-modes .mc.c0::before{opacity:1}.ts-modes .sw .m0{color:#0b0b0d}}
+
+/* Settings cards share the same translucent surface across their owners. */
+.set-ws .set-body :is(.set-card,.luna-extra){background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:18px 20px;box-shadow:none}.set-ws .set-body .luna-extra{margin:0;max-width:none;color:var(--text)}.set-ws .set-body .luna-extra h3{margin:0 0 12px;font-size:13px;font-family:inherit}.set-ws .set-body .luna-extra>p{font-size:12px;color:var(--muted);line-height:1.6}
+
+.ts-modes .sw :is(.m0,.m1,.m2){animation-duration:9s;animation-delay:0s;animation-timing-function:linear;animation-iteration-count:infinite}
+
+/* Grouped collection approval uses the expanded assistant's available space. */
+.chat-ws .chat-col.selecting{width:100%;max-width:none;min-width:0}.chat-ws .chat-col.selecting>.ask-card{width:100%;max-width:100%;min-width:0;align-self:stretch}.chat-ws .ask-card .ask-groups{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));align-items:start;gap:16px;max-height:clamp(280px,42dvh,620px);min-width:0;overscroll-behavior:contain}.chat-ws .ask-card .ask-group{min-width:0}.chat-ws .ask-card .ask-item>span{min-width:0;overflow-wrap:anywhere}
+
+.disc-poster .disc-warning{position:absolute;top:8px;right:8px;z-index:3;line-height:1;pointer-events:none}.disc-poster .disc-warning .cw-star{display:inline-grid;place-items:center;margin:0;padding:4px;border-radius:6px;background:rgba(12,12,16,.85);font-size:17px}
+
+:is(.ws-main,.chat-panel) .title-acts{margin:0 3px;vertical-align:middle}:is(.ws-main,.chat-panel) .title-acts .ta-more{width:22px!important;height:22px!important;border-radius:6px!important;padding:3px!important}:is(.ws-main,.chat-panel) .title-acts .ta-more .ta-i{width:13px;height:13px}:is(.ws-main,.chat-panel) .title-acts .ta-more:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+:is(.ws-main,.chat-panel) .title-acts.no-marker{margin:0}:is(.ws-main,.chat-panel) b.film-link:focus-visible + .title-acts .ta-pop{opacity:1;visibility:visible;transform:none}
+
+.d-meta .d-remaining{color:var(--accent-soft,var(--text));font-size:inherit}.friends-watched{display:flex;align-items:center;gap:12px;margin-top:12px;max-width:600px;min-width:0}.friends-watched>span{flex:none}.friends-watched .ww-fan{min-width:150px}.friends-watched .friend-avatar{background:linear-gradient(145deg,rgba(var(--acc-rgb),.32),var(--panel));font-size:12px;font-weight:700;color:var(--text)}@media(max-width:480px){.friends-watched{align-items:flex-start;flex-direction:column;gap:4px}.friends-watched .ww-fan{width:100%;flex:none}}
+
+.friend-photo{width:100%;height:100%;min-width:0;display:grid;place-items:center;border-radius:50%;overflow:hidden}.friend-photo img{width:100%;height:100%;object-fit:cover;display:block}.friend-profile-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;color:inherit;border:1px solid var(--line);cursor:pointer;padding:0;overflow:hidden}.friend-profile-button:disabled{cursor:default;opacity:1}.ppl-friend-tile{position:relative;flex:none;width:150px}.ppl-friend-tile>.ppl{width:100%}.ppl-profile-link{position:absolute;top:106px;right:4px;width:38px;height:38px;border-radius:50%;border:3px solid var(--bg,#0d0d10);background:linear-gradient(135deg,var(--accent),var(--accent-soft));font-size:14px;font-weight:700;box-shadow:0 3px 10px #0006}.friend-profile-button.ppl-avatar{border:0}.friends-watched{position:relative}.friends-average{display:flex;align-items:center;gap:8px;flex:none;background:none;border:0;padding:0;color:var(--text);text-align:left;cursor:pointer}.friends-average>b{color:var(--accent-soft,var(--accent));font-size:14px;white-space:nowrap}.friends-ratings{position:absolute;bottom:calc(100% + 10px);left:0;z-index:35;width:min(320px,calc(100vw - 64px));max-height:280px;overflow-y:auto;overscroll-behavior:contain;border:1px solid var(--line);border-radius:14px;padding:10px;background:var(--bg,#15151b);box-shadow:0 14px 36px #0008;box-sizing:border-box}.friends-ratings:after{content:"";position:absolute;top:100%;left:0;right:0;height:12px}.friends-watched .friends-ratings>header{position:static;display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0;padding:3px 4px 9px;font-size:12px}.friends-ratings>header>span{color:var(--muted);white-space:nowrap}.friends-rating-row{display:flex;align-items:center;gap:10px;width:100%;padding:8px 4px;text-align:left;border:0;border-top:1px solid var(--line);background:none;color:var(--text);cursor:pointer}.friends-rating-row:disabled{opacity:1;cursor:default}.friends-rating-row:not(:disabled):hover{background:rgba(var(--acc-rgb),.12)}.friends-rating-row .friend-photo{width:30px;height:30px;flex:none;background:rgba(var(--acc-rgb),.2);font-size:11px}.friends-rating-row>span:not(.friend-photo){flex:1;min-width:0;overflow-wrap:anywhere}.friends-rating-row>b{white-space:nowrap;font-size:12px}.td-body>.friends-watched{margin:4px 0 18px}.friend-profile-button:focus-visible,.friends-average:focus-visible,.friends-rating-row:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.friend-review{display:grid;gap:5px;min-width:0;text-align:left}.friend-review small{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted);font-weight:400;line-height:1.45}.friends-rating-row{height:auto;min-height:45px}.modal.td{width:min(1180px,calc(100vw - 48px));max-height:calc(100dvh - 40px)}.td-head,.td-titles{min-width:0}.td-titles h2{overflow-wrap:anywhere}@media(max-width:650px){.modal.td{width:calc(100vw - 20px);max-height:calc(100dvh - 20px)}.td-head{gap:16px}.td-poster{max-width:26vw}.td-body{padding:20px}}
+.chat-ws .music-add{width:100%;max-width:none;min-width:0}.chat-ws .music-add .sp-list{max-height:clamp(200px,40dvh,560px);overflow:auto}.chat-ws .music-add .modal-actions{flex-wrap:wrap}.music-preview-play{flex:none;width:32px;height:32px}.assistant-detail{display:flex;align-items:center;gap:7px;font-size:11px;white-space:nowrap}.assistant-detail select{max-width:110px}.assistant-context-row>.chat-ctx{margin-right:auto}.assistant-header-player{display:flex;align-items:center;gap:6px;min-width:0;max-width:360px}.assistant-header-player>span{max-width:160px;font-size:12px}.assistant-header-player button{width:30px;height:30px}.youtube-summary{display:flex;align-items:center;gap:12px;padding:14px;border-radius:14px;background:#ff313114;border:1px solid #ff535344}.youtube-mark{display:inline-flex;align-items:center;justify-content:center;width:30px;height:21px;background:#e53535;border-radius:6px;color:white;vertical-align:middle;margin-right:8px}.youtube-summary .youtube-mark{animation:youtube-pulse 1.4s ease-in-out infinite}@keyframes youtube-pulse{50%{box-shadow:0 0 0 7px #ff39391c;transform:scale(1.07)}}@media(prefers-reduced-motion:reduce){.youtube-summary .youtube-mark{animation:none}}@media(max-width:900px){.assistant-header-player>span{display:none}.assistant-header-player{max-width:110px}}
+
+.home-feature{position:relative;display:grid;isolation:isolate;margin-top:8px}.home-feature-panel{grid-area:1/1;display:grid;min-width:0;opacity:0;visibility:hidden;pointer-events:none;transform:translateY(10px) scale(.994);transition:opacity .3s ease,transform .38s cubic-bezier(.2,.8,.2,1),visibility .38s}.home-feature-panel.active{opacity:1;visibility:visible;pointer-events:auto;transform:none}.home-feature .hero{margin:0;min-height:390px;height:100%}.home-feature .tn{margin:0;min-height:390px;padding-top:64px;height:100%;border-radius:16px}.home-feature-toggle{position:absolute;z-index:8;bottom:22px;right:clamp(230px,29vw,460px);display:flex;align-items:center;gap:8px;min-height:36px;padding:8px 13px;border:1px solid rgba(255,255,255,.2);border-radius:18px;background:#151518d9;backdrop-filter:blur(16px);color:var(--text);font-size:12px;box-shadow:0 4px 18px #0003}.home-feature-toggle:hover,.home-feature-toggle[aria-expanded=true]{border-color:var(--accent);color:var(--accent-soft,var(--accent))}.home-feature.choosing .home-feature-toggle{top:16px;right:18px;bottom:auto}.home-feature-panel .hero-body{padding-bottom:76px}@media(max-width:1000px){.home-feature-toggle{top:16px;right:18px;bottom:auto}.home-feature .hero-body{padding-top:68px}.home-feature .tn{padding-top:110px}}@media(prefers-reduced-motion:reduce){.home-feature-panel{transition:none;transform:none}}
+
+.web-buffering{position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;gap:12px;pointer-events:none;background:#0002;color:#fff;font-size:15px;animation:buffer-show .15s .2s both}.web-buffering>span{width:30px;height:30px;border:3px solid #ffffff38;border-top-color:var(--accent);border-radius:50%;animation:buffer-spin .8s linear infinite}@keyframes buffer-spin{to{transform:rotate(360deg)}}@keyframes buffer-show{from{opacity:0}to{opacity:1}}.mu-dock{transition:transform .3s ease,opacity .3s ease}.browser-audio-active .mu-dock:not(.luna-video-dock){transform:translateY(150%);opacity:0;pointer-events:none}.luna-web-video-fullscreen .app-header,.luna-web-video-fullscreen .mu-dock,.luna-web-video-fullscreen .browser-cinema-bar{display:none!important}.luna-web-video-fullscreen .browser-shell{position:fixed!important;inset:0!important;height:100dvh!important;z-index:250}.luna-web-video-fullscreen .browser-chrome{display:none!important}.friends-ratings{background:linear-gradient(135deg,rgba(38,37,43,.94),rgba(17,17,22,.94));backdrop-filter:blur(28px) saturate(1.4);border:1px solid #ffffff26;box-shadow:inset 0 1px #ffffff12,0 18px 50px #0008;border-radius:18px}.home-feature-toggle{right:18px;bottom:74px;background:linear-gradient(135deg,#30303699,#15151ac9);border-color:#ffffff2a;box-shadow:inset 0 1px #ffffff13,0 6px 24px #0003}.home-feature .hero-dots{right:118px!important}.assistant-header-player{position:absolute;left:50%;transform:translateX(-50%);max-width:min(400px,36%);justify-content:center}.assistant-header-player>span{color:var(--accent);font-weight:600}.chat-head{position:relative}.clip-maker-modal{width:min(760px,calc(100vw - 32px))}.clip-maker{position:relative;display:flex;flex-direction:column;gap:12px;min-width:0;max-width:100%}.clip-maker .cm-row{flex-wrap:wrap}.tn-overview{font-size:13px;line-height:1.6;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;margin:8px 0}.tn-cast{display:flex;gap:10px;margin:10px 0;overflow:auto}.tn-cast>div{width:62px;flex:none;text-align:center}.tn-cast img,.tn-cast>div>span{width:36px;height:36px;object-fit:cover;border-radius:50%;margin:auto;display:grid;place-items:center;background:var(--panel)}.tn-cast small{font-size:10px;line-height:1.2;display:block;margin-top:4px}.tn-poster-frame[role=button]{cursor:pointer}.web-source-quality{display:flex;gap:12px;align-items:center;margin:10px 0}.web-source-quality small{color:var(--muted);line-height:1.5}@media(max-width:1000px){.home-feature-toggle{top:16px;bottom:auto}.assistant-header-player>span{display:none}}@media(prefers-reduced-motion:reduce){.mu-dock{transition:none}}
+
+.chat-head:has(.assistant-header-player) .ws-title{max-width:calc(50% - 210px);min-width:0}@media(max-width:1000px){.chat-head:has(.assistant-header-player) .ws-title{max-width:30%}}
+
+.luna-web-video-fullscreen .browser-shell{padding:0!important}
+
+.audio-sub-panel.tracks{position:fixed;right:24px;bottom:100px;width:min(1040px,calc(100vw - 48px));min-width:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(230px,1fr);gap:18px}.audio-sub-panel .tcol{min-width:0;max-width:100%;overflow:hidden}.audio-sub-panel .titem{max-width:100%;min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.45}.cm-preview{position:relative;aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:var(--panel);display:grid;place-items:center}.cm-frames .cm-preview img{width:100%;height:100%;border:0}.preview-loading{display:flex;flex-direction:column;align-items:center;gap:8px;color:var(--muted);font-size:12px;text-align:center}.preview-loading>i{width:22px;height:22px;border:2px solid #ffffff25;border-top-color:var(--accent);border-radius:50%;animation:buffer-spin .8s linear infinite}.cm-frames .preview-loading>i{aspect-ratio:1;width:22px;height:22px;background:transparent;border-radius:50%}@media(max-width:760px){.audio-sub-panel.tracks{right:12px;width:calc(100vw - 24px);grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.audio-sub-panel .tcol.look{grid-column:1/-1;border:0;padding-left:0}.web-source-quality{flex-wrap:wrap}}
+
+.sg-progress{font-size:12px;color:var(--muted);margin:0 0 8px}.sg-wait{animation:preview-pulse 1.2s ease-in-out infinite alternate}@keyframes preview-pulse{to{background:rgba(255,255,255,.08)}}@media(prefers-reduced-motion:reduce){.sg-wait{animation:none}}
+
+.audio-sub-panel .track-title{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;overflow-wrap:anywhere}.audio-sub-panel .titem{flex:none}
+
+/* Web film identity: scoped to the active playback, independent of fading controls. */
+.web-identity-notice{position:fixed;z-index:150;top:max(24px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100vw - 32px);display:flex;align-items:center;gap:14px;padding:12px 16px;border:1px solid var(--line);border-radius:20px;background:color-mix(in srgb,var(--panel) 90%,transparent);backdrop-filter:blur(22px);box-shadow:0 12px 42px #0006;pointer-events:auto;color:var(--text)}
+.web-identity-notice img,.web-identity-placeholder{width:42px;height:62px;flex:none;border-radius:7px;object-fit:cover;background:var(--bg)}
+.web-identity-placeholder{display:grid;place-items:center}.web-identity-notice>div{display:grid;gap:3px;min-width:0;max-width:460px}.web-identity-notice strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.web-identity-notice small{font-size:12px;color:var(--muted)}.web-identity-notice .chip{flex:none}
+@media(max-width:620px){.web-identity-notice{gap:9px;padding:10px}.web-identity-notice>div{max-width:calc(100vw - 200px)}}
+
+.hero-navigation{position:absolute;right:118px;bottom:20px;z-index:4;display:flex;align-items:center;justify-content:flex-end;gap:22px;max-width:calc(100% - 150px)}.hero-navigation .hero-dots{position:static;flex-shrink:1;flex-wrap:wrap;justify-content:flex-end;gap:8px}.hero-navigation .hero-choose{display:flex;align-items:center;gap:8px;flex:none;min-height:44px;padding:10px 18px;font-size:14px;white-space:nowrap}.web-source-quality{flex-wrap:wrap}.web-current-quality{white-space:nowrap}@media(max-width:720px){.hero-navigation{left:20px;right:20px;bottom:16px;gap:12px;max-width:none;justify-content:space-between}.hero-navigation .hero-choose{font-size:12px;padding:8px 12px}.hero-navigation .hero-dots{max-width:40%;gap:5px}.hero-navigation .hero-dot{width:12px}.home-feature .hero-body{padding-bottom:90px}}
+
+.clip-maker .cm-t{width:132px;min-width:110px;font-variant-numeric:tabular-nums}.clip-maker .cm-t[aria-invalid=true]{border-color:#f07878}
+
+/* 2.1.5: shared Luna glass on hero controls and layered dialogs. */
+.hero-choose,.d-gallery-trigger,.d-hero .hero-actions>.ghost,.d-hero .hero-actions>.act{background:color-mix(in srgb,var(--panel) 65%,transparent);backdrop-filter:blur(22px) saturate(140%);-webkit-backdrop-filter:blur(22px) saturate(140%);border-color:#ffffff40;color:var(--text);box-shadow:inset 0 1px #ffffff18,0 5px 20px #0003}
+body.ws-open .assistant-workspace-scrim{position:fixed;inset:0;z-index:300;background:#08080d55;backdrop-filter:blur(24px) saturate(115%);-webkit-backdrop-filter:blur(24px) saturate(115%)}
+body.ws-open .chat-ws.glass{background:linear-gradient(145deg,#24242ee8,#111116ec)!important}
+.friends-ratings{background:linear-gradient(135deg,color-mix(in srgb,var(--panel) 88%,transparent),color-mix(in srgb,var(--bg) 88%,transparent));backdrop-filter:blur(28px) saturate(150%);-webkit-backdrop-filter:blur(28px) saturate(150%)}
+.plg-poster>.tmdb-badge{left:10px;right:auto;bottom:auto;top:10px;font-size:11px;max-width:calc(100% - 20px)}
+.plg-poster>.rec-analysis-badge{top:42px}.plg-poster>.plg-flags{top:42px}
+.library-copy-stack{position:relative;min-width:0;isolation:isolate}.library-copy-stack>.library-comparable{position:relative;min-width:0}
+.library-copy-stack.has-copies{margin-right:10px}.library-copy-stack.has-copies>.library-comparable:not(:first-child){position:absolute;inset:0;transform:translate(calc(min(var(--copy-index),3)*5px),calc(min(var(--copy-index),3)*-3px));z-index:calc(0 - var(--copy-index));transition:transform .25s ease,opacity .2s ease;opacity:.85}
+.library-copy-stack.has-copies:hover,.library-copy-stack.has-copies:focus-within{z-index:20}
+.library-copy-stack.has-copies:hover>.library-comparable:not(:first-child),.library-copy-stack.has-copies:focus-within>.library-comparable:not(:first-child){transform:translateX(calc(var(--copy-index)*65%));opacity:1;z-index:calc(10 - var(--copy-index))}
+.library-copy-stack.has-copies>.library-comparable:first-child{z-index:12}.library-copy-stack .poster{width:100%}
+.disc-categories{padding:20px 0}.disc-category-controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px}.disc-category-controls .luna-select{min-width:180px}
+.dev-watch-target{display:flex;align-items:center;gap:8px;font-size:12px;flex-wrap:wrap}
+@media(prefers-reduced-motion:reduce){.library-copy-stack *{transition:none!important}}
+
+.browser-adblock .browser-menu-action small{display:block;font-size:11px;color:var(--muted);padding-top:3px}.browser-adblock-error{font-size:12px;line-height:1.5;max-width:340px;overflow-wrap:anywhere;color:var(--accent);padding:0 14px}.dev-watch-target select{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:8px}
+
+.plg-warning{position:absolute;top:10px;left:10px;z-index:3;display:flex}.plg-warning .cw-star{margin:0;font-size:14px}.plg-poster:has(.plg-warning .cw-star)>.tmdb-badge{left:30px}.library-copy-stack.has-copies:focus-within>.library-comparable:first-child,.library-copy-stack.has-copies:hover>.library-comparable:first-child{box-shadow:0 8px 24px #0006}
+
+.friends-ratings.below{top:calc(100% + 10px);bottom:auto}.friends-ratings.below:after{bottom:100%;top:auto}
+
+/* Hero actions share the same glass surface and never cover the slide markers. */
+.hero-navigation .hero-choose{background:rgba(20,20,23,.38);border:1px solid rgba(255,255,255,.2);box-shadow:none;backdrop-filter:blur(24px) saturate(135%);-webkit-backdrop-filter:blur(24px) saturate(135%);border-radius:999px;font-weight:500}
+.library-copy-stack{position:relative;min-width:0;isolation:isolate}.library-copy-stack.has-copies:hover,.library-copy-stack.has-copies:focus-within{z-index:30}
+.library-copy-stack.has-copies>.library-comparable:not(:first-child){position:absolute;inset:0;transform:translate(calc(var(--copy-index)*5px),calc(var(--copy-index)*-4px));opacity:.7;pointer-events:none;transition:transform .28s ease,opacity .28s ease}
+.library-copy-stack.has-copies:hover>.library-comparable:not(:first-child),.library-copy-stack.has-copies:focus-within>.library-comparable:not(:first-child){transform:translateX(calc(var(--copy-index)*70%));opacity:1;pointer-events:auto}
+.disc-filter-anchor{position:relative}.disc-filter-menu{position:absolute;top:calc(100% + 10px);left:0;width:min(580px,85vw);padding:20px;background:color-mix(in srgb,var(--panel) 94%,transparent);border:1px solid var(--line);border-radius:20px;backdrop-filter:blur(28px);z-index:35;box-shadow:0 18px 50px #0007}.disc-filter-menu .disc-category-controls{margin:0}
+
+.home-feature .hero-actions>.ghost,.home-feature .hero-navigation .hero-choose{background:rgba(20,20,23,.26);border:1px solid rgba(255,255,255,.28);border-radius:999px;backdrop-filter:blur(24px) saturate(135%);-webkit-backdrop-filter:blur(24px) saturate(135%);box-shadow:inset 0 1px #ffffff10;color:var(--text);font-weight:500}
+
+.youtube-list .sp-row{grid-template-columns:24px minmax(0,1fr)}.youtube-list .sp-row>.mu-song-t,.youtube-list .sp-arrow,.youtube-list .sp-row>button{display:none}.youtube-list .sp-yt{min-width:0}.youtube-list .sp-yt img{width:56px;height:42px;object-fit:cover;border-radius:7px}
+.library-copy-stack.has-copies:hover>.library-comparable:not(:first-child),.library-copy-stack.has-copies:focus-within>.library-comparable:not(:first-child){transform:translateX(calc(var(--copy-index)*105%))}
+
+@media(max-width:800px){.disc-parts{position:relative}.disc-filter-anchor{position:static}.disc-filter-menu{left:0;width:min(580px,calc(100vw - 96px))}}
+
+.luna-video-dock{position:fixed;z-index:160;bottom:14px;left:18px;right:18px;min-height:114px;display:flex;align-items:center;gap:12px;padding:10px 16px;background:rgba(22,24,26,.94);backdrop-filter:blur(24px);border:1px solid #ffffff28;border-radius:20px;box-shadow:0 12px 40px #0008}.luna-video-surface{flex:0 0 176px;height:99px;background:transparent;border-radius:10px}.luna-video-dock>strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.luna-video-dock .chip.on{color:var(--accent,#ff9b22)}@media(max-width:800px){.luna-video-dock{flex-wrap:wrap}.luna-video-dock .save-queue-playlist{max-width:220px}}
+
+.luna-browser-audio-dock{position:fixed;z-index:150;bottom:14px;left:24px;right:24px;padding:14px 20px;display:flex;gap:14px;align-items:center;border-radius:22px;border:1px solid #ffffff28;background:rgba(20,24,26,.94);backdrop-filter:blur(24px);box-shadow:0 10px 40px #0006}.luna-browser-audio-dock strong{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+
+.web-video-music-actions{display:flex;justify-content:flex-end;align-items:center;gap:8px}.web-video-music-actions:empty{display:none}.web-video-music-actions .chip.on{color:var(--accent,#ff9b22)}
+
+/* A collapsed copy stack has one caption; reveal individual captions only after fanning out. */
+.library-copy-stack.has-copies>.library-comparable:not(:first-child){opacity:1}
+.library-copy-stack.has-copies>.library-comparable:not(:first-child) .poster>:not(.poster-img){visibility:hidden;opacity:0;transition:opacity .14s ease}
+.library-copy-stack.has-copies:is(:hover,:focus-within)>.library-comparable:not(:first-child) .poster>:not(.poster-img){visibility:visible;opacity:1;transition-delay:.18s}
+.library-copy-stack.has-copies:is(:hover,:focus-within)::before{content:"";position:absolute;inset:0 auto 0 0;width:calc(var(--copy-count,2)*105%);z-index:0}
+@media(prefers-reduced-motion:reduce){.library-copy-stack.has-copies .poster>:not(.poster-img){transition:none!important}}
+
+/* Shared hero button sizing; the existing ghost style also owns focus/hover. */
+.home-feature .hero-navigation .hero-choose{height:48px;min-height:48px;padding:0 22px;font-size:15px;line-height:normal}
+/* One caption in the closed stack; visible, separated poster edges behind it. */
+.library-copy-stack.has-copies{margin-right:24px}
+.library-copy-stack.has-copies>.library-comparable:not(:first-child){transform:translate(calc(min(var(--copy-index),3)*12px),calc(min(var(--copy-index),3)*-6px)) rotate(calc(min(var(--copy-index),3)*1.5deg));transform-origin:center 45%}
+.library-copy-stack.has-copies>.library-comparable:not(:first-child) .poster-img{outline:1px solid #ffffff38;box-shadow:3px 2px 8px #0008}
+.library-copy-stack.has-copies:is(:hover,:focus-within)>.library-comparable:not(:first-child){transform:translateX(calc(var(--copy-index)*105%))}
+.luna-video-info{flex:0 1 420px;min-width:0;display:flex;flex-direction:column;gap:6px}
+.luna-video-info>strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.luna-video-info>span{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.luna-video-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.luna-video-controls>.chip{display:inline-flex;align-items:center;justify-content:center;min-width:40px;min-height:40px}
+@media(max-width:800px){.luna-video-dock{gap:10px}.luna-video-info{flex:1}.luna-video-controls{flex-basis:100%}.luna-video-surface{flex-basis:142px;height:80px}}
+
+/* Clear card deck silhouette even when the copies share the exact same artwork. */
+.library-copy-stack.has-copies{margin-right:28px}
+.library-copy-stack.has-copies>.library-comparable:not(:first-child){transform:translate(calc(min(var(--copy-index),3)*22px),calc(min(var(--copy-index),3)*-8px)) rotate(calc(min(var(--copy-index),3)*3deg))}
+.library-copy-stack.has-copies>.library-comparable:not(:first-child) .poster-img{outline:2px solid color-mix(in srgb,var(--accent) 60%,var(--line));box-shadow:4px 4px 12px #000a;filter:brightness(.68)}
+.library-copy-stack.has-copies>.library-comparable:first-child .poster-img{outline:1px solid color-mix(in srgb,var(--accent) 40%,var(--line));box-shadow:0 5px 15px #0008}
+.library-copy-stack.has-copies:is(:hover,:focus-within)>.library-comparable:not(:first-child){transform:translateX(calc(var(--copy-index)*105%))}
+.library-copy-stack.has-copies:is(:hover,:focus-within)>.library-comparable:not(:first-child) .poster-img{filter:none}
+.library-copy-badge{position:absolute;right:7px;bottom:34px;z-index:4;display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid color-mix(in srgb,var(--accent) 65%,transparent);border-radius:8px;background:color-mix(in srgb,var(--panel) 90%,transparent);color:var(--accent-soft);font-size:12px;font-weight:600;line-height:1.2;white-space:nowrap;box-shadow:0 2px 8px #0008;backdrop-filter:blur(14px)}
+.library-copy-stack .copies-n{display:none}
+.library-copy-stack>.library-comparable:not(:first-child) .library-copy-badge{display:none}
+
+/* Copy-specific facts stay readable after the deck opens. */
+.library-copy-stack.has-copies .poster-badges{right:8px;z-index:5}
+.library-copy-stack.has-copies .poster-badges .badges{flex-wrap:wrap;gap:4px}
+.library-copy-stack.has-copies .poster-badges .qb{max-width:100%;white-space:normal;overflow-wrap:anywhere;font-size:11px;line-height:1.3;background:rgba(13,14,17,.92);border:1px solid #ffffff45}
+.library-copy-stack.has-copies>.library-comparable:not(:first-child) .poster-badges{visibility:hidden}
+.library-copy-stack.has-copies:is(:hover,:focus-within)>.library-comparable:not(:first-child) .poster-badges{visibility:visible}
+.disc-filter-menu{width:min(540px,calc(100vw - 64px));padding:20px;background:color-mix(in srgb,var(--panel) 96%,transparent);box-sizing:border-box;max-height:calc(100vh - 150px);overflow:auto}
+.disc-filter-menu .disc-category-controls{display:grid;gap:18px}
+.disc-filter-heading{display:flex;align-items:center;gap:9px;color:var(--text);padding-bottom:12px;border-bottom:1px solid var(--line)}
+.disc-category-controls fieldset{border:0;padding:0;margin:0;min-width:0}
+.disc-category-controls legend{padding:0;margin-bottom:10px;font-size:13px;color:var(--muted);font-weight:500}
+.disc-kind-switch,.disc-runtime-options,.disc-genre-options{display:flex;flex-wrap:wrap;gap:7px}
+.disc-kind-switch{display:grid;grid-template-columns:1fr 1fr;padding:4px;border:1px solid var(--line);border-radius:14px;background:#0002}
+.disc-kind-switch .chip{justify-content:center;border-color:transparent}
+.disc-genre-options{max-height:190px;overflow:auto;padding:2px}
+.disc-category-controls .chip{min-height:34px;padding:7px 12px;font-size:13px;line-height:1.3;white-space:normal;height:auto}
+.disc-category-controls .chip.on{background:rgba(var(--acc-rgb),.18);border-color:var(--accent);color:var(--accent-soft)}
+.disc-filter-menu .modal-actions{margin-top:18px;padding-top:14px;border-top:1px solid var(--line);justify-content:space-between;gap:10px}
+@media(max-width:800px){.disc-filter-menu{width:calc(100vw - 96px);max-height:calc(100vh - 160px)}}
+
+/* Windowed playback: bound overlay surfaces and allow their contents to scroll. */
+.modal-bg{padding:12px;box-sizing:border-box}
+.modal{box-sizing:border-box;max-height:calc(100dvh - 24px);overflow:auto;overscroll-behavior:contain;min-height:0}
+.modal>header,.modal>.modal-actions{flex-shrink:0}
+.tracks.audio-sub-panel{box-sizing:border-box;max-height:calc(100dvh - 116px);bottom:96px;overscroll-behavior:contain}
+.tracks.vset.player-gear{box-sizing:border-box;max-height:calc(100dvh - 116px);bottom:96px;right:12px;width:min(470px,calc(100vw - 24px))}
+.luna-video-dock{box-sizing:border-box;max-width:calc(100vw - 24px);max-height:calc(100dvh - 24px);left:12px;right:12px;bottom:12px;min-height:0}
+.luna-video-controls{max-width:100%;flex-shrink:1}
+.controls{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}
+.controls .c-side{min-width:0}
+@media(max-width:1100px){.controls{gap:10px}.c-side{gap:10px}.controls .nf{width:42px;height:42px}.controls .c-title{max-width:24vw}.controls .volume:hover .vol,.controls .volume:focus-within .vol{width:65px}}
+@media(max-width:760px){.controls{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:4px 8px}.controls .c-title{grid-column:1/-1;grid-row:1;max-width:100%;justify-content:center}.controls .c-side{grid-row:2;gap:5px}.tracks.audio-sub-panel,.tracks.vset.player-gear{bottom:136px;max-height:calc(100dvh - 152px)}}
+@media(max-width:520px){.controls .nf{width:34px;height:38px}.controls .c-side{gap:2px}.controls .nf svg{max-width:26px}.audio-sub-panel.tracks{grid-template-columns:minmax(0,1fr)}.audio-sub-panel .tcol.look{grid-column:auto}.controls .volume .vol{display:none}.luna-video-dock{gap:8px;padding:8px}.luna-video-surface{flex-basis:112px;height:63px}.luna-video-controls>.chip{min-width:34px;min-height:34px;padding:6px}}
+@media(max-height:430px){.luna-video-dock{max-height:calc(100dvh - 16px);bottom:8px}.modal{padding:14px}.tracks.audio-sub-panel,.tracks.vset.player-gear{bottom:90px;max-height:calc(100dvh - 102px)}}
+
+/* Keep the mini controls above the window edge and leave room for the playing content. */
+.luna-video-dock{bottom:max(24px,env(safe-area-inset-bottom));max-height:calc(100dvh - 48px)}
+.luna-video-volume{display:flex;align-items:center;gap:8px;min-width:0}
+.luna-video-volume input{width:100px;min-width:65px;accent-color:var(--accent);cursor:pointer}
+.luna-video-volume span{font-size:12px;color:var(--muted);min-width:36px;font-variant-numeric:tabular-nums}
+.root:has(.luna-video-dock) .shell,.root:has(.luna-video-dock) .details{padding-bottom:210px}
+@media(max-width:800px){.luna-video-controls{flex-basis:auto;flex:1;justify-content:flex-start}.luna-video-info{flex:1 1 180px}.luna-video-volume input{width:80px}}
+@media(max-width:520px){.luna-video-dock{bottom:18px;max-height:calc(100dvh - 36px)}.luna-video-controls{flex-basis:100%}.luna-video-volume{gap:5px}.luna-video-volume input{width:70px}}
+/* Video mini player uses the music dock layout: cover+title | controls+seek | volume+close. */
+.luna-video-dock.mu-dock{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) minmax(0,1fr);height:auto;min-height:92px;padding:10px 18px;gap:16px;flex-wrap:nowrap}
+.luna-video-dock.mu-dock .luna-video-surface{flex:none;width:128px;height:72px;border-radius:10px}
+.luna-video-dock.mu-dock .mu-dock-mid .mu-seek{width:100%}
+@media(max-width:800px){.luna-video-dock.mu-dock{grid-template-columns:minmax(0,1fr);gap:8px}.luna-video-dock.mu-dock .mu-dock-right{justify-content:flex-start;flex-wrap:wrap}}
+
+/* The native preview is clipped to this dock; music playlist positioning must not move it. */
+.luna-video-dock.mu-dock{bottom:max(32px,env(safe-area-inset-bottom));left:16px;right:16px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 64px);transform:none;opacity:1;pointer-events:auto;z-index:160}
+.luna-video-dock.mu-dock .mu-dock-left,.luna-video-dock.mu-dock .mu-dock-right{min-width:0}
+@media(max-height:500px){.luna-video-dock.mu-dock{bottom:20px;max-height:calc(100dvh - 40px)}.luna-video-dock.mu-dock .luna-video-surface{width:96px;height:54px}}
+
+/* Discovery glass: a dark readable base, softened scenery and bright active controls. */
+.disc-filter-menu{background:linear-gradient(145deg,rgba(38,39,45,.82),rgba(17,18,23,.90));backdrop-filter:blur(28px) saturate(145%);-webkit-backdrop-filter:blur(28px) saturate(145%);border:1px solid #ffffff30;box-shadow:inset 0 1px #ffffff16,0 24px 60px #0007;isolation:isolate;animation:discGlassIn .18s ease-out both}
+.disc-filter-menu .disc-filter-heading{color:var(--text);border-color:#ffffff22}
+.disc-filter-menu legend{color:color-mix(in srgb,var(--text) 78%,transparent);font-weight:500}
+.disc-filter-menu .chip{background:#11121875;color:var(--text);border-color:#ffffff26;box-shadow:inset 0 1px #ffffff08;transition:background .16s,border-color .16s}
+.disc-filter-menu .chip:hover{background:#ffffff14;border-color:#ffffff50}
+.disc-filter-menu .chip.on{background:color-mix(in srgb,var(--accent) 24%,#111218);border-color:var(--accent);color:var(--text)}
+.disc-filter-menu .chip:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.disc-filter-menu .disc-kind-switch{background:#0a0a0d4d;border-color:#ffffff20}
+@keyframes discGlassIn{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.disc-filter-menu{animation:none}}
+
+.disc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:18px 14px}
+.disc-grid .disc-card{width:auto}
+
+/* Shared film card: friends who watched it, and the hover row (FilmCardExtras.tsx). The row reuses the Öneriler .plg-hover look. */
+.fc-friends{position:absolute;right:6px;bottom:6px;z-index:3;display:flex;align-items:center;transition:opacity .15s}
+.fc-friends .friend-photo{width:24px;height:24px;margin-left:-8px;border:2px solid #111;font-size:10px}
+.fc-friends .fc-more{display:inline-flex;align-items:center;justify-content:center;background:#2c2c2c;color:#ddd;border-radius:50%}
+.fc-friends.inline{position:relative;right:auto;bottom:auto;margin-left:8px}
+.poster:hover .fc-friends:not(.inline),.disc-card:hover .fc-friends:not(.inline),.plg-card:hover .fc-friends:not(.inline),
+.poster:focus-within .fc-friends:not(.inline),.disc-card:focus-within .fc-friends:not(.inline),.plg-card:focus-within .fc-friends:not(.inline){opacity:0;pointer-events:none}
+.fc-pop{position:absolute;right:0;bottom:30px;min-width:150px;display:none;flex-direction:column;gap:2px;padding:8px 10px;border-radius:9px;background:rgba(24,24,24,.97);border:1px solid rgba(255,255,255,.12);font-size:11.5px;line-height:1.5;white-space:nowrap;text-align:left;z-index:5}
+.fc-pop b{font-weight:600;color:#fff}
+.fc-friends:hover .fc-pop{display:flex}
+.fc-line{font-size:11.5px;color:#9fd8a8;margin-top:2px}
+.fc-slot{display:contents}
+.plg-hover.fc-row{z-index:2;flex-wrap:wrap;align-items:center;opacity:1;transform:none;animation:fcIn .18s ease-out}
+.fc-row .round{width:30px;height:30px;font-weight:800;cursor:pointer}
+.fc-row .round.on{background:var(--accent);color:#fff}
+@keyframes fcIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* Home hero: Detaylar and "Bu akşam ne izlesem?" look the same over any backdrop (a bright image no longer turns one grey). */
+.home-feature .hero-actions>.ghost,.home-feature .hero-navigation .hero-choose{background:rgba(16,16,19,.62);border:1px solid rgba(255,255,255,.28);font-weight:600;font-size:15px;height:48px;padding:0 22px}
+.home-feature .hero-actions>.ghost:hover,.home-feature .hero-navigation .hero-choose:hover{background:rgba(16,16,19,.78);border-color:rgba(255,255,255,.5)}
+
+/* Shared card row: the Öneriler glass look (translucent, blurred, light rim) with icons that stay crisp on any poster. */
+.fc-row{background:linear-gradient(transparent,rgba(0,0,0,.72));color:#fff}
+.fc-row .round{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.34);color:#fff;
+  -webkit-backdrop-filter:blur(12px) saturate(160%);backdrop-filter:blur(12px) saturate(160%);
+  box-shadow:inset 0 1px rgba(255,255,255,.22),0 4px 14px rgba(0,0,0,.35);text-shadow:0 1px 3px rgba(0,0,0,.6)}
+.fc-row .round svg{color:#fff;filter:drop-shadow(0 1px 2px rgba(0,0,0,.6))}
+.fc-row .round:hover{background:rgba(255,255,255,.28);border-color:rgba(255,255,255,.6)}
+.fc-row .round.on{background:rgba(var(--acc-rgb),.55);border-color:rgba(var(--acc-rgb),.9)}
+
+/* Friends list: on <body> so the poster cannot clip it, but sized to the poster; glass like the hover buttons. */
+.fc-pop{position:fixed;right:auto;display:flex;flex-direction:column;gap:6px;min-width:0;white-space:normal;z-index:9999;overflow-y:auto;overscroll-behavior:contain;
+  padding:10px 12px;border-radius:12px;background:rgba(22,22,26,.55);border:1px solid rgba(255,255,255,.22);color:#fff;font-size:12px;line-height:1.45;
+  -webkit-backdrop-filter:blur(16px) saturate(160%);backdrop-filter:blur(16px) saturate(160%);box-shadow:inset 0 1px rgba(255,255,255,.18),0 10px 28px rgba(0,0,0,.45);animation:fcIn .15s ease-out}
+.fc-pop-row b{font-weight:700}
+.fc-pop-stars{color:#46d369;letter-spacing:1px}
+.fc-pop-note{color:rgba(255,255,255,.78);font-size:11.5px;margin-top:2px;overflow-wrap:anywhere}
+.fc-pop-me{color:rgba(255,255,255,.6);border-top:1px solid rgba(255,255,255,.14);padding-top:6px}
+.fc-pop::-webkit-scrollbar{width:6px}.fc-pop::-webkit-scrollbar-thumb{background:rgba(255,255,255,.25);border-radius:3px}
+
+/* Tonight picker: the friends button belongs to "Önerilenler" only; it slides in when that source is chosen. */
+.tn-friend-settings{max-width:0;padding-left:0!important;padding-right:0!important;margin-left:-8px;border-width:0!important;opacity:0;transform:scale(.6);overflow:hidden;pointer-events:none;transition:max-width .28s ease,padding .28s ease,margin .28s ease,opacity .2s ease,transform .28s cubic-bezier(.2,.9,.3,1.3)}
+.tn-friend-settings.shown{max-width:60px;padding-left:12px!important;padding-right:12px!important;margin-left:0;border-width:1px!important;opacity:1;transform:none;pointer-events:auto}
+@media (prefers-reduced-motion:reduce){.tn-friend-settings{transition:none}}
+
+/* Film / music tabs above the dock: the last opened plays, the other waits; a click switches. */
+.dock-tabs{position:fixed;left:50%;bottom:104px;transform:translateX(-50%);z-index:60;display:flex;gap:4px;padding:4px;border-radius:999px;
+  background:rgba(20,20,23,.55);border:1px solid rgba(255,255,255,.18);-webkit-backdrop-filter:blur(18px) saturate(150%);backdrop-filter:blur(18px) saturate(150%);
+  box-shadow:inset 0 1px rgba(255,255,255,.14),0 8px 24px rgba(0,0,0,.4);animation:fcIn .2s ease-out}
+.dock-tabs button{display:flex;align-items:center;gap:7px;max-width:240px;height:32px;padding:0 14px;border-radius:999px;font-size:13px;color:rgba(255,255,255,.72);transition:background .2s,color .2s}
+.dock-tabs button:hover{color:#fff;background:rgba(255,255,255,.1)}
+.dock-tabs button.on{background:var(--accent);color:#fff}
+.dock-tab-time{font-size:11px;opacity:.75}
+
+/* Music dock, compact (B): same full width and buttons, half the height; the timeline is a thin line on the top edge
+   (thicker with a knob on hover) and the time sits under the title. The video mini dock keeps its own layout. */
+.mu-dock:not(.luna-video-dock){height:58px;padding:0 16px;gap:12px}
+.mu-dock:not(.luna-video-dock) .mu-dock-mid{gap:0}
+.mu-dock:not(.luna-video-dock) .mu-dock-mid .mu-seek{position:absolute;left:20px;right:20px;top:-6px;width:auto;height:12px;gap:0}
+.mu-dock:not(.luna-video-dock) .mu-dock-mid .mu-seek>span{display:none}
+.mu-dock:not(.luna-video-dock) .mu-dock-mid .mu-bar{height:12px;background-size:100% 3px;transition:background-size .15s}
+.mu-dock:not(.luna-video-dock) .mu-dock-mid .mu-bar>div{height:3px;position:relative;transition:height .15s}
+.mu-dock:not(.luna-video-dock) .mu-dock-mid .mu-bar:hover,.mu-dock:not(.luna-video-dock) .mu-dock-mid .mu-bar:focus-visible{background-size:100% 5px}
+.mu-dock:not(.luna-video-dock) .mu-dock-mid .mu-bar:hover>div,.mu-dock:not(.luna-video-dock) .mu-dock-mid .mu-bar:focus-visible>div{height:5px}
+.mu-dock:not(.luna-video-dock) .mu-dock-mid .mu-bar:hover>div::after,.mu-dock:not(.luna-video-dock) .mu-dock-mid .mu-bar:focus-visible>div::after{content:"";position:absolute;right:-5px;top:50%;width:11px;height:11px;margin-top:-5.5px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5)}
+.mu-dock:not(.luna-video-dock) .mu-dock-now img,.mu-dock:not(.luna-video-dock) .mu-dock-now .mu-cover{width:40px;height:40px}
+.mu-dock:not(.luna-video-dock) .mu-play{width:38px;height:38px}
+.dock-tabs{bottom:84px}
+.dock-tabs.over-video{bottom:120px}
+
+/* Compact music dock: centred, not full width (narrow windows still fit with 18px sides). */
+.mu-dock:not(.luna-video-dock){left:50%;right:auto;width:min(980px,calc(100vw - 36px));transform:translateX(-50%);grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);animation:dockInC .35s cubic-bezier(.2,.9,.3,1.1) both}
+@keyframes dockInC{from{opacity:0;transform:translate(-50%,24px)}to{transform:translateX(-50%)}}
+
+/* Music dock = mockup B exactly: one row ~780px, cover and title on the left, every button side by side on the right, no volume slider. */
+.mu-dock:not(.luna-video-dock){display:flex;align-items:center;gap:6px;width:min(780px,calc(100vw - 36px));padding:0 14px 0 10px}
+.mu-dock:not(.luna-video-dock) .mu-dock-left{flex:1;min-width:0;gap:4px}
+.mu-dock:not(.luna-video-dock) .mu-dock-mid{flex:none}
+.mu-dock:not(.luna-video-dock) .mu-ctl{gap:6px}
+.mu-dock:not(.luna-video-dock) .mu-dock-right{flex:none;gap:4px}
+.mu-dock:not(.luna-video-dock) .mu-dock-mid .mu-seek{left:24px;right:24px}
+
+/* Friend stars: one glyph for all, a real half star, dim empty ones */
+.fc-stars{display:inline-flex;gap:1px;letter-spacing:0;vertical-align:-1px}
+.fc-stars>span{color:rgba(255,255,255,.22)}
+.fc-stars>span.on{color:#46d369}
+.fc-stars>span.half{background:linear-gradient(90deg,#46d369 50%,rgba(255,255,255,.22) 50%);-webkit-background-clip:text;background-clip:text;color:transparent}
+
+/* The mini video dock takes the music dock's shape: centred, one compact row, the timeline on the top edge, the small
+   video as the cover. Both slide in the same way, so switching between film and song tabs feels like one dock. */
+.luna-video-dock.mu-dock{display:flex;align-items:center;gap:6px;left:50%;right:auto;width:min(780px,calc(100vw - 36px));max-width:none;
+  height:68px;min-height:0;padding:0 14px 0 8px;transform:translateX(-50%);bottom:16px;animation:dockInC .35s cubic-bezier(.2,.9,.3,1.1) both}
+.luna-video-dock.mu-dock .mu-dock-left{flex:1;min-width:0;gap:10px}
+.luna-video-dock.mu-dock .luna-video-surface{width:92px;height:52px;border-radius:9px}
+.luna-video-dock.mu-dock .mu-dock-mid{flex:none;gap:0}
+.luna-video-dock.mu-dock .mu-ctl{gap:6px}
+.luna-video-dock.mu-dock .mu-play{width:38px;height:38px}
+.luna-video-dock.mu-dock .mu-dock-right{flex:none;gap:4px}
+.luna-video-dock.mu-dock .mu-dock-mid .mu-seek{position:absolute;left:24px;right:24px;top:-6px;width:auto;height:12px;gap:0}
+.luna-video-dock.mu-dock .mu-dock-mid .mu-seek>span{display:none}
+.luna-video-dock.mu-dock .mu-dock-mid .mu-bar{height:12px;background-size:100% 3px;transition:background-size .15s}
+.luna-video-dock.mu-dock .mu-dock-mid .mu-bar>div{height:3px;position:relative;transition:height .15s}
+.luna-video-dock.mu-dock .mu-dock-mid .mu-bar:hover{background-size:100% 5px}
+.luna-video-dock.mu-dock .mu-dock-mid .mu-bar:hover>div{height:5px}
+.dock-tabs.over-video{bottom:94px}
+.dock-tabs{transition:bottom .3s ease}
+.dock-tabs button{transition:background .25s,color .25s,max-width .3s}
+.root:has(.luna-video-dock) .shell,.root:has(.luna-video-dock) .details{padding-bottom:110px}
+
+/* Film/song switch inside the dock: one arrow and two dots (the lit one is what plays). */
+.dock-switch{display:inline-flex;align-items:center;gap:2px;margin-right:4px;padding-right:6px;border-right:1px solid rgba(255,255,255,.12)}
+.dock-dots{display:inline-flex;flex-direction:column;gap:3px}
+.dock-dots i{width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.28);transition:background .25s,transform .25s}
+.dock-dots i.on{background:var(--accent);transform:scale(1.2)}
+/* A film keeps the film colour (orange) even when opened from the music side; the dots carry their own colours:
+   the song's green, the film's orange, faint when waiting and full when playing. */
+.luna-video-dock.mu-dock{--accent:#e8701a;--accent-soft:#ffb070;--acc-rgb:232,112,26}
+.dock-dots i:first-child{background:rgba(34,199,154,.32)}
+.dock-dots i:last-child{background:rgba(232,112,26,.38)}
+.dock-dots i:first-child.on{background:#22c79a}
+.dock-dots i:last-child.on{background:#e8701a}
+/* What's new: every version since the last one seen, newest first, as a timeline. */
+.release-span{margin:-4px 0 12px;color:var(--muted);font-size:13px;flex-shrink:0}
+.release-timeline{position:relative;padding-left:22px}
+.release-timeline::before{content:"";position:absolute;left:6px;top:8px;bottom:8px;width:2px;background:rgba(255,255,255,.12);border-radius:2px}
+.release-timeline>section{position:relative;margin-bottom:16px}
+.release-timeline>section::before{content:"";position:absolute;left:-21px;top:6px;width:10px;height:10px;border-radius:50%;background:#555;border:2px solid #111}
+.release-timeline>section.latest::before{background:var(--accent);box-shadow:0 0 0 4px rgba(var(--acc-rgb),.25)}
+.release-timeline h3{display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:14px}
+.release-ver{font-variant-numeric:tabular-nums}
+.release-now{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--accent);color:#fff}
+.release-timeline ul{margin:0;padding-left:16px;font-size:13.5px;line-height:1.6;color:rgba(255,255,255,.86)}
+.release-timeline section:not(.latest) ul{color:rgba(255,255,255,.7)}
+/* What's new in the timeline's style for everyone (the blurred video stays behind): lighter title, a quiet line under it,
+   and the summary as a list with small accent dots. */
+.release-news>h2{font-weight:500;font-size:26px;letter-spacing:0;margin-bottom:4px}
+.release-summary ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;font-size:14.5px;line-height:1.55;color:rgba(255,255,255,.88)}
+.release-summary li{position:relative;padding-left:20px}
+.release-summary li::before{content:"";position:absolute;left:2px;top:.55em;width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px rgba(var(--acc-rgb),.22)}
+.release-news .modal-actions .primary{border:0;box-shadow:none;font-weight:500;padding:11px 26px}
+/* What's new, as in the approved mock-up: a compact dark-blue glass card over the blurred video, plain sans title,
+   and the list (summary or versions) on a thin timeline line with dots. */
+.modal.release-news{width:min(560px,calc(100vw - 40px));max-height:min(82vh,720px);padding:30px 28px 22px;border-radius:20px;
+  background:linear-gradient(180deg,rgba(28,44,60,.86),rgba(13,13,16,.92));border:1px solid rgba(255,255,255,.12);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+.release-news>h2{font-family:inherit;font-weight:500;font-size:24px;margin:0 0 4px}
+.release-news .release-span{margin:0 0 16px;font-size:13px;color:rgba(255,255,255,.55)}
+.release-news li{margin:0}
+.release-summary{position:relative;padding-left:22px}
+.release-summary::before{content:"";position:absolute;left:6px;top:8px;bottom:8px;width:2px;background:rgba(255,255,255,.12);border-radius:2px}
+.release-summary ul{gap:10px;font-size:13.5px;line-height:1.6;font-weight:400;color:rgba(255,255,255,.82)}
+.release-summary li{padding-left:0}
+.release-summary li::before{left:-20px;top:.5em;width:8px;height:8px;background:#666;box-shadow:none}
+.release-summary li:first-child::before{background:var(--accent);box-shadow:0 0 0 4px rgba(var(--acc-rgb),.25)}
+.release-summary li:first-child{color:#fff}
+.release-news .modal-actions .primary{outline:none;border:0;box-shadow:none;border-radius:999px;padding:11px 28px;font-weight:500;color:#fff}
+.release-news .modal-actions .primary:focus-visible{box-shadow:0 0 0 3px rgba(var(--acc-rgb),.35)}
+/* On the Web page, a paused song's dock slides away (a web video took over) and the page keeps its full height;
+   when the music plays again the dock slides back in. */
+
+.root.dock-away .browser-shell{padding-bottom:0}
+
+/* Dock volume: the slider is always visible next to the speaker. */
+.mu-dock .mu-dock-right .mu-vol{display:block;position:static;flex:none;width:72px;min-width:0;max-width:72px;margin:0 4px 0 0;padding:0;
+  background:none;border:0;transform:none;animation:none;visibility:visible;opacity:1;transition:none}
+.mu-dock .mu-dock-right.vol-open .mu-vol,.mu-dock .mu-dock-right .mu-vol:focus-visible{visibility:visible;opacity:1;transition:opacity .15s,visibility 0s}
+/* Web page and the docks: a dock that is away gives the page its full height (stronger than Browser.css's padding);
+   the small film dock gets the same room as the music dock while it is shown, and slides away like it. */
+.root.has-dock.dock-away .browser-shell,.root.dock-away .browser-shell{padding-bottom:0}
+.root:has(.luna-video-dock):not(.dock-away) .browser-shell{bottom:0;padding-bottom:104px}
+
+/* The docks are cut out of the web page window (Browser.tsx), so the page no longer makes room for them. */
+.root.has-dock .browser-shell,.root:has(.luna-video-dock) .browser-shell{padding-bottom:0!important}
+/* Film <-> song: both docks have the same shape, so the new one fades in place (no slide from below). Coming back after a
+   web video, the dock slides up again (the dock-away transform is undone with a transition). */
+/* One entrance for every dock (first song, film <-> song switch): a short fade in place with a slight rise. A later
+   @keyframes with the same name replaces the earlier slide-up. */
+@keyframes dockInC{from{opacity:0;transform:translate(-50%,8px) scale(.98)}to{transform:translateX(-50%)}}
+.mu-dock:not(.luna-video-dock),.luna-video-dock.mu-dock{animation-duration:.3s;animation-timing-function:ease-out}
+/* Away (a web video plays) and back use the separate translate property with a transition both ways: the entrance
+   animation is never restarted, so leaving and returning slide the same way. */
+.mu-dock:not(.luna-video-dock),.luna-video-dock.mu-dock{translate:0 0;transition:translate .38s cubic-bezier(.2,.9,.3,1),opacity .3s}
+.root.dock-away .mu-dock:not(.luna-video-dock),.root.dock-away .luna-video-dock.mu-dock{translate:0 calc(100% + 40px);opacity:0;pointer-events:none}
+/* Leaving for a web video: a slower, even slide down (the return keeps the quicker rise). */
+.root.dock-away .mu-dock:not(.luna-video-dock),.root.dock-away .luna-video-dock.mu-dock{transition:translate .75s cubic-bezier(.45,0,.25,1) .45s,opacity .1s 1.15s}

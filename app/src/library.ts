@@ -1,3 +1,5 @@
+import {isYouTubeVideo} from "./browserMediaModel";
+import {webFilmName,webFilmYear,webEpisode} from "./webFilmName";
 import {airedEpisodeCount} from "./tvEpisodeSummary";
 import {storageRelink,writeDelta} from "./extrasModel";
 import {hybridName} from "./filenameModel";
@@ -89,7 +91,7 @@ export const torrentSrc = (path: string) => store.get("tsrc:" + path) || null;
 export const isRemote = (path: string) => !!torrentSrc(path) && store.get("tdone:" + path) !== "1";
 
 export type Recent = { path: string; title: string; time: number; duration: number };
-export const loadRecent = (): Recent[] => {const raw=store.json<unknown>("recent",[]);return Array.isArray(raw)?raw.filter((x):x is Recent=>!!x&&typeof x.path==="string"&&typeof x.title==="string"&&Number.isFinite(x.time)&&x.time>=0&&Number.isFinite(x.duration)&&x.duration>=0):[];};
+export const loadRecent = (): Recent[] => {const raw=store.json<unknown>("recent",[]);return Array.isArray(raw)?raw.filter((x):x is Recent=>!!x&&typeof x.path==="string"&&!isYouTubeVideo(x.path)&&typeof x.title==="string"&&Number.isFinite(x.time)&&x.time>=0&&Number.isFinite(x.duration)&&x.duration>=0):[];};
 
 // ---------- file name parsing ----------
 export type Parsed = { release?: ReleaseDetails; kind: "movie" | "tv"; title: string; year?: number; season?: number; episode?: number };
@@ -130,7 +132,11 @@ const base = (p: string) => (urlFileName(p) ?? p.split(/[\\/]/).pop()!).replace(
 const parentDir = (p: string, up = 1) => p.split(/[\\/]/).slice(0, -up).pop() ?? "";
 
 export function parseName(path: string): Parsed {
-  const name = (path.startsWith("luna-source://")?store.get("srcName:"+path):null)??base(path);
+  const webInfo=/^https?:\/\//i.test(path)?store.json<{title?:string;releaseYear?:number}|null>("web-playback:"+path,null):null;
+  const episodeInfo=webEpisode(webInfo?.title);
+  if(episodeInfo)return {kind:"tv",title:clean(episodeInfo.title),season:episodeInfo.season,episode:episodeInfo.episode,...(webFilmYear(webInfo?.title,webInfo?.releaseYear)?{year:webFilmYear(webInfo?.title,webInfo?.releaseYear)}:{})};
+  const webName=webFilmName(webInfo?.title),webYear=webFilmYear(webInfo?.title,webInfo?.releaseYear);
+  const name = (webName?(webYear&&!webName.includes(String(webYear))?`${webName} (${webYear})`:webName):null)??(path.startsWith("luna-source://")?store.get("srcName:"+path):null)??base(path);
   // Locate the marker first, then slice its title prefix. A lazy prefix plus a separator run
   // retried the same long filename quadratically when there was no episode marker.
   const marker = /[Ss](\d{1,2})[\s._-]*[Ee](\d{1,3})/.exec(name) ??
@@ -519,6 +525,7 @@ export function useLibrary(opened: string[] = []) {
     // Files opened directly (outside library folders) get posters and details too.
     const series = folders.filter((f) => kinds[f] === "tv").map((f) => [f, normDir(f)] as const);
     for (const path of [...new Set([...files, ...pinned, ...opened])]) {
+      if(isYouTubeVideo(path))continue;
       const inSeries = series.find(([, n]) => normDir(path).startsWith(n + "/"));
       const detected = hybridName(path, inSeries ? parseInSeries(path, inSeries[0]) : parseName(path));
       const parsed = overrides[path] ? applyMediaOverride(detected,overrides[path]) : detected;

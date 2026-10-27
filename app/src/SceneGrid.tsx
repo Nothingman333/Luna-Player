@@ -1,3 +1,5 @@
+import {extraText} from "./Extras";
+import {webPlaybackSource} from "./webPlaybackSource";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { convertFileSrc, invoke } from "./nativeCore";
@@ -17,7 +19,8 @@ export function lineAt(cues: Cue[] | undefined, t: number): string {
 }
 
 export function SceneGrid({ path, duration, time, cues, onSeek, onClose }: { path: string; duration: number; time: number; cues?: Cue[]; onSeek: (t: number) => void; onClose: () => void }) {
-  const times = useRef(Array.from({ length: CELLS }, (_, i) => Math.floor(((i + 0.5) / CELLS) * duration)));
+  const cells=useRef(/^https?:\/\//i.test(path)?12:CELLS).current;
+  const times = useRef(Array.from({ length: cells }, (_, i) => Math.floor(((i + 0.5) / cells) * duration)));
   const [imgs, setImgs] = useState<Record<number, string>>(() => {
     const o: Record<number, string> = {};
     times.current.forEach((t, i) => { const u = cache.get(path + "|" + t); if (u) o[i] = u; });
@@ -29,10 +32,12 @@ export function SceneGrid({ path, duration, time, cues, onSeek, onClose }: { pat
   useEffect(() => {
     let alive = true;
     (async () => {
-      for (let i = 0; i < CELLS && alive; i++) {
+      const order=times.current.map((_,i)=>i).sort((a,b)=>Math.abs(times.current[a]-time)-Math.abs(times.current[b]-time));
+      for (const i of order) {
+        if(!alive)break;
         const t = times.current[i], k = path + "|" + t;
         if (cache.has(k)) continue;
-        try { const f = await invoke<string>("seek_preview", { path, secs: t }); const u = convertFileSrc(f); cache.set(k, u); if (alive) setImgs((m) => ({ ...m, [i]: u })); }
+        try { const f = await invoke<string>("seek_preview", { ...webPlaybackSource(path), secs: t }); const u = convertFileSrc(f); cache.set(k, u); if (alive) setImgs((m) => ({ ...m, [i]: u })); }
         catch { if (alive) setFail((n) => n + 1); }
       }
     })();
@@ -43,7 +48,7 @@ export function SceneGrid({ path, duration, time, cues, onSeek, onClose }: { pat
   const key = (e: React.KeyboardEvent) => {
     e.stopPropagation();
     const c = cols();
-    const move = (d: number) => { e.preventDefault(); setAt((a) => Math.max(0, Math.min(CELLS - 1, a + d))); };
+    const move = (d: number) => { e.preventDefault(); setAt((a) => Math.max(0, Math.min(cells - 1, a + d))); };
     if (e.key === "Escape") { e.preventDefault(); onClose(); }
     else if (e.key === "ArrowRight") move(1); else if (e.key === "ArrowLeft") move(-1);
     else if (e.key === "ArrowDown") move(c); else if (e.key === "ArrowUp") move(-c);
@@ -53,6 +58,7 @@ export function SceneGrid({ path, duration, time, cues, onSeek, onClose }: { pat
     <div className="sg-bg" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="sg glass" role="dialog" aria-modal="true" aria-label={tt("Sahne ızgarası")} ref={root} onKeyDown={key}>
         <div className="sg-head"><b>{tt("Sahne ızgarası")}</b><span className="lp-hint">{tt("Ok tuşlarıyla gez, Enter ile git, Esc ile kapat")}</span><button className="chip" onClick={onClose}>{tt("Kapat")}</button></div>
+        <div className="sg-progress" role="status">{extraText(`Önizlemeler: ${Object.keys(imgs).length}/${cells}`,`Previews: ${Object.keys(imgs).length}/${cells}`)}</div>
         <div className="sg-grid">
           {times.current.map((t, i) => {
             const now = time >= t && time < (times.current[i + 1] ?? Infinity);

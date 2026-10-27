@@ -1,3 +1,7 @@
+import {sharedPosition,pendingResumeReached} from "./playbackResumeModel";
+import {webPlaybackSource} from "./webPlaybackSource";
+import {cleanWebPlayback,webMediaOptions,isYouTubeVideo,playableVideoSources} from "./browserMediaModel";
+import type {WebMediaTransfer} from "./browserMediaModel";
 import {GlobalSearch} from "./GlobalSearch";
 import {PlayerSettingsPanel} from "./PlayerSettingsPanel";
 import {FullscreenHint} from "./FullscreenHint";
@@ -15,7 +19,7 @@ import {DebugHost} from "./DebugPanel";
 import {DeveloperHost} from "./DeveloperTools";
 import { LibraryScanNotice } from "./EverydayTools";
 import { ttsActive, ttsStop } from "./ReadAloud";
-import { BulkRelink, MediaNotebook } from "./Extras";
+import { BulkRelink, MediaNotebook, ExtraModal, extraText } from "./Extras";
 import { readActiveBrowserPage, translateActiveBrowser } from "./browserTranslation";
 const Browser = lazy(() => import("./Browser").then(m => ({ default: m.Browser })));
 import type { PaletteCommand } from "./CommandPalette";
@@ -30,6 +34,8 @@ import { convertFileSrc, invoke } from "./nativeCore";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
+import {SaveQueuePlaylist} from "./MusicPlaylistTools";
+import {toggleLike,isLiked,toggleDislike,isDisliked,loadMusicPlaylists,saveMusicPlaylists} from "./Music";
 import { PlaybackRuntime } from "./PlaybackRuntime";
 import { BarMarks, useExtras } from "./PlaybackExtras";
 import { CommandPalette } from "./CommandPalette";
@@ -54,7 +60,7 @@ import { isM3u, M3uDialog, readM3u } from "./M3u";
 import type { M3uList } from "./M3u";
 import { WebResults } from "./Web";
 import { DiscoverPage } from "./Discover";
-import { MusicDock, MusicLinkDialog, SongRatePop, MusicView, isMusicPath, markMusicPath, musicRetrying, openMusicFiles, playYouTubeLink, purgeMusicFromFilms, resumeSuspendedMusic, suspendMusic, useMusic } from "./Music";
+import { MusicDock, MusicLinkDialog, SongRatePop, MusicView, isMusicPath, unmarkMusicPath, markMusicPath, musicRetrying, openMusicFiles, playYouTubeLink, purgeMusicFromFilms, resumeSuspendedMusic, suspendMusic, pauseMusic, useMusic, onMusicTakeover, suspendedSong, playSuspendedMusic } from "./Music";
 import { MusicPage } from "./LazyViews";
 import { BooksView, openBookFile } from "./Books";
 import { BookLinkDialog, BooksPage } from "./LazyViews";
@@ -103,10 +109,16 @@ const srcName = (p: string) => store.get("srcName:" + p);
 
 type Toast = { text: string; kind: "ok" | "info" | "warn" } | null;
 
+// Fullscreen the player turned on by itself is undone when the film closes; fullscreen the user chose (F11 or the
+// maximize button) stays until F11, so Esc only leaves the film.
+let playerMadeFull = false;
+function leavePlayerFull() { if (!playerMadeFull) return; playerMadeFull = false; void getCurrentWindow().setFullscreen(false).catch(() => {}); }
+
 export default function App() {
   const [recent, setRecent] = useState<Recent[]>(loadRecent);
   useEffect(()=>{const update=()=>setRecent(loadRecent());window.addEventListener("luna-library",update);return()=>window.removeEventListener("luna-library",update);},[]);
-  const lib = useLibrary(recent.map((r) => r.path));
+  const [webLibraryPath,setWebLibraryPath]=useState<string|null>(null);
+  const lib = useLibrary([...recent.map((r) => r.path),...(webLibraryPath?[webLibraryPath]:[])]);
   const libRef = useRef(lib);
   libRef.current = lib;
 
@@ -205,6 +217,8 @@ export default function App() {
   const [nextUp, setNextUp] = useState<{ path: string; title: string; count: number } | null>(null);
 
   const autoSubtitles = async (path: string) => {
+    if(isYouTubeVideo(path))return;
+    const generation=filmGeneration.current;
     if (tracksRef.current.some((t) => t.type === "sub")) {
       store.set("hasSub:" + path, "1");
       return;
@@ -221,7 +235,7 @@ export default function App() {
         path, apiKey: key, langs: store.get("langs") ?? defaultSubLangs(),
         query: { title: lib.itemFor(path)?.meta?.title ?? p.title, year: p.year, season: p.season, episode: p.episode },
       });
-      if (pathRef.current !== path) return;
+      if (pathRef.current !== path||filmGeneration.current!==generation) return;
       await mpv("sub-add", r.file, "select");
       store.set("hasSub:" + path, "1");
       flash(tt("Altyazı bulundu · OpenSubtitles · {0}{1}", r.language.toUpperCase(), r.hashMatch ? tt(" · hash eşleşmesi") : ""), "ok", 6000);
@@ -233,18 +247,57 @@ export default function App() {
   const noteJump = useRef<{path:string;time:number}|null>(null);
   // mpv reports the new path before the new file's time and duration: until this file's own resume point
   // has been read (file-loaded), nothing may be recorded for it, else film A's place could be saved onto B.
+  const [webLoading,setWebLoading]=useState(false),[webRejected,setWebRejected]=useState(false);
+
+  const webTracks=useRef<{path:string;media:WebMediaTransfer}|null>(null);
+  const webRejectedUrls=useRef(new Set<string>()),webRejectedPage=useRef<string|null>(null);
+  const [webRecovery,setWebRecovery]=useState<string|null>(null);
+  const webAttempt=useRef<{id?:number;url:string;pageUrl?:string;replay:boolean;ready:boolean}|null>(null),webFailRef=useRef<()=>void>(()=>{});
+
   const progressReady = useRef<string | null>(null);
+  const resumePending=useRef<{path:string;time:number}|null>(null);
   const sRaw = useMpv((name, ev) => {
     // Track lists arrive before "file-loaded": don't save mpv's defaults as the user's choice
     // until this video's saved choice has been restored.
     if (name === "start-file") { restoring.current = true; progressReady.current = null; }
-    if (name === "end-file") progressReady.current = null;
+    if (name === "end-file" || name === "time-cleared") progressReady.current = null;
     if (name === "playback-restart" || (name === "end-file" && ev.reason === "error")) setTLoad(null);
+    if(name==="file-loaded"||name==="end-file")setWebLoading(false);
     if (name === "end-file" && ev.reason === "error" && !musicRetrying()) {
       noteJump.current=null;
-      flash(tt("Bu dosya açılamadı: ") + (ev.file_error ?? tt("bilinmeyen hata")), "warn", 8000);
+      if(webAttempt.current){webFailRef.current();return;}
+      flash(cleanWebPlayback(store.json("web-playback:"+(pathRef.current||""),null))?extraText("Bu oynatıcı desteklenmiyor olabilir. Videoyu sitede başlatıp tekrar dene.","This player may not be supported. Start the video on the site and try again."):tt("Bu dosya açılamadı: ") + (ev.file_error ?? tt("bilinmeyen hata")), "warn", 8000);
     }
+    if(name==="shutdown"&&webAttempt.current){webFailRef.current();return;}
+    if(name==="file-loaded"&&webAttempt.current)webAttempt.current.ready=true;
     if (name === "file-loaded") {
+      const loadedGeneration=filmGeneration.current;
+      void (async()=>{
+      const rawPath=await mpv("get_property","path").catch(()=>null);
+      if(typeof rawPath!=="string"||loadedGeneration!==filmGeneration.current)return;
+      const pendingIdentity=webTracks.current?.path;
+      if(pendingIdentity)streamMap.current[rawPath]=pendingIdentity;
+      pathRef.current=streamMap.current[rawPath]??rawPath;
+      const pendingWeb=webTracks.current;
+      if(pendingWeb&&pendingWeb.path===pathRef.current){
+        const tracks=await mpv("get_property","track-list").catch(()=>null) as Track[]|null;
+        if(loadedGeneration!==filmGeneration.current)return;
+        if(Array.isArray(tracks)&&!tracks.some(t=>t.type==="video")){
+          const media=pendingWeb.media,bad=media.streamUrl!;webRejectedUrls.current.add(bad);
+          const variants=(media.variants||[]).map(v=>v.url===bad?{...v,mediaKind:"audio" as const,height:undefined,qualities:undefined}:v);
+          const next=playableVideoSources(variants).find(v=>!webRejectedUrls.current.has(v.url));
+          const updated={...media,variants};store.set("web-playback:"+pendingWeb.path,JSON.stringify(updated));
+          window.dispatchEvent(new CustomEvent("luna-web-source-state",{detail:pendingWeb.path}));
+          if(next&&webRejectedUrls.current.size<5){
+            flash(extraText("Bu kaynak yalnız ses içeriyor; başka video kaynağı deneniyor.","This source contains audio only; trying another video source."),"info",5000);
+            const position=await mpv("get_property","time-pos").catch(()=>0);if(loadedGeneration!==filmGeneration.current)return;
+            if(typeof position==="number"&&position>0)noteJump.current={path:pendingWeb.path,time:position};
+            loadRef.current(next.url,false,true,{...updated,streamUrl:next.url,audio:next.audioUrl?[{url:next.audioUrl}]:[]});window.dispatchEvent(new CustomEvent("luna-web-source-state",{detail:pendingWeb.path}));return;
+          }
+          webFailRef.current();return;
+        }
+      }
+      const external=webTracks.current;if(external?.media.sourceTabId!==undefined)window.dispatchEvent(new CustomEvent("luna-web-playing",{detail:external.media.sourceTabId}));if(external&&external.path===pathRef.current){webTracks.current=null;for(const track of external.media.subtitles)void mpv("sub-add",track.url,"auto",track.label||"",track.language||"").catch(()=>{});for(const track of external.media.audio)void mpv("audio-add",track.url,external.media.variants?.some(v=>v.url===external.media.streamUrl&&v.audioUrl===track.url)?"select":"auto",track.label||"",track.language||"").catch(()=>{});}
       setNextUp(null);
       getCurrentWebview().setFocus();
       const p = pathRef.current;
@@ -261,9 +314,9 @@ export default function App() {
       setProp("secondary-sid", "no");
       heard.current = [];
       skipped.current.clear();
-      const pos = loadRecent().find((r) => r.path === p);
+      const pos = playbackPosition(p);
       if(!optionsApplied && noteJump.current?.path===p){void mpv("seek",noteJump.current.time,"absolute").catch(e=>flash(String(e),"warn"));noteJump.current=null;}
-      else if (!optionsApplied && !fromStart.current && pos && pos.time > 10 && pos.time < pos.duration - 30)
+      else if (!fromStart.current && pos && pos.time > 10 && pos.time < pos.duration - 30)
         mpv("seek", pos.time, "absolute");
       fromStart.current = false;
       progressReady.current = p;
@@ -272,8 +325,8 @@ export default function App() {
       applyVideoSet(loadVideoSet(p));
       setProp("audio-delay", Number(store.get("adelay:" + p) ?? 0));
       restoring.current = true;
-      const pref = store.json<TrackPref | null>("trk:" + p, null);
-      const ext = pref?.sidExt ?? store.get("extSub:" + p);
+      const pref = isYouTubeVideo(p)?null:store.json<TrackPref | null>("trk:" + p, null);
+      const ext = isYouTubeVideo(p)?null:pref?.sidExt ?? store.get("extSub:" + p);
       // Wait for actual IPC acknowledgements; no guessed 350/1500 ms restore window.
       void (async () => {
         const current = () => pathRef.current === p && filmGeneration.current === generation;
@@ -288,15 +341,16 @@ export default function App() {
             if (loaded) await setProp("sid", loaded.id); else await mpv("sub-add", ext, "select");
           } else if (!optionsApplied && typeof pref?.sid === "number") await setProp("sid", pref.sid);
           if (!current()) return;
-          const sec = store.get("secSub:" + p);
+          const sec = isYouTubeVideo(p)?null:store.get("secSub:" + p);
           if (sec) await selectSecondary(p, sec, true);
           if (!current()) return;
-          if (!pref?.sid && !ext) void autoSubtitles(p);
+          if (!pref?.sid && !ext&&!isYouTubeVideo(p)) void autoSubtitles(p);
         } catch (error) {
           if (current()) flash(String(error), "warn");
         } finally {
           if (current()) { restoring.current = false; setTrackTick(n => n + 1); }
         }
+      })();
       })();
     }
   });
@@ -306,14 +360,27 @@ export default function App() {
   const s = { ...sRaw, path: sRaw.path ? streamMap.current[sRaw.path] ?? sRaw.path : null };
   Object.defineProperty(s,"time",{enumerable:true,get:playbackTime});
   const music = useMusic();
+  useEffect(()=>{const audio=(e:Event)=>{if((e as CustomEvent<boolean>).detail&&music.now&&!music.paused)pauseMusic(true);};if(document.documentElement.classList.contains("browser-audio-active")&&music.now&&!music.paused)pauseMusic(true);window.addEventListener("luna-browser-audio",audio);return()=>window.removeEventListener("luna-browser-audio",audio);},[music.now,music.paused]);
   const [mode, setModeState] = useState<Mode>(() => {
-    const saved = store.get("mode");
-    const m: Mode = saved === "music" || saved === "books" ? saved : "film";
+    // Luna always opens on the film side (the last section is not restored)
+    const m: Mode = "film";
     document.documentElement.dataset.mode = m; // before the first paint: no orange flash
     return m;
   });
   const [browserOpen, setBrowserOpen] = useState(false);
   const [browserMounted, setBrowserMounted] = useState(false);
+  webFailRef.current=()=>{
+    const attempt=webAttempt.current;if(!attempt)return;
+    webAttempt.current=null;setWebRejected(true);setWebLoading(false);webTracks.current=null;
+    progressReady.current=null;resumePending.current=null;
+    void mpv('stop').catch(()=>{});leavePlayerFull();
+    if(attempt.replay){setWebRecovery(attempt.pageUrl||attempt.url);return;}
+    setBrowserMounted(true);setBrowserOpen(true);
+    flash(extraText('Bu dosyayı oynatamadım. Başka bir video seç.','Could not play this file. Choose another video.'),'warn',8000);
+    window.dispatchEvent(new CustomEvent('luna-web-open-failed',{detail:{id:attempt.id,url:attempt.url}}));
+  };
+  useEffect(()=>{if(!webLoading)return;const timer=window.setTimeout(()=>{if(webAttempt.current&&!webAttempt.current.ready)webFailRef.current();},30000);return()=>clearTimeout(timer);},[webLoading]);
+
   const [browserPage, setBrowserPage] = useState<BrowserPage | undefined>();
   const invalidateBrowserPage = useCallback(() => setBrowserPage(undefined), []);
   // which Web tab the assistant would read (shown in the chat so the context is never a guess)
@@ -337,12 +404,65 @@ export default function App() {
   useEffect(() => { document.documentElement.dataset.mode = mode; }, [mode]);
   // music in mpv isn't a video: no player screen, subtitles, resume or per-video settings.
   // The queue is the reliable sign (mpv may report a resolved YouTube URL instead of the item's src).
-  const isMusic = !!music.now || isMusicPath(s.path);
+  const parkedPath = useRef<string | null>(null);
+  const isMusic = !!music.now || (!cleanWebPlayback(store.json("web-playback:"+(s.path||""),null))&&isMusicPath(s.path));
   // whatever address mpv plays while the music queue is on is music (a podcast's CDN redirect included)
-  if (music.now && s.path) markMusicPath(s.path);
+  // (not the parked film: mpv still reports its path for a moment while the song replaces it)
+  if (music.now && s.path && s.path !== parkedPath.current) markMusicPath(s.path);
   tracksRef.current = s.tracks;
-  pathRef.current = isMusic ? null : s.path;
-  const playing = !!s.path && !isMusic;
+  pathRef.current = isMusic||webRejected ? null : s.path;
+  const playing = !!s.path && !isMusic && !webRejected;
+  const [miniVideo,setMiniVideo]=useState(false);
+  const miniTransition=useRef(0);
+  const keepMini=useRef(false);
+  const [parked, setParked] = useState<{ path: string; title: string; time: number } | null>(null);
+  const minimizeVideo=async()=>{
+    const transition=++miniTransition.current;setPanel(null);
+    try{
+      // fullscreen the user chose stays (only F11 leaves it); the player's own fullscreen ends with the big view
+      if(playerMadeFull){playerMadeFull=false;const w=getCurrentWindow();await w.setFullscreen(false);
+      await invoke("fit_window",{fitZoom:store.get("uiFit")!=="0",keepInside:true});}
+      if(transition===miniTransition.current)setMiniVideo(true);
+    }catch{flash(extraText("Küçük oynatıcıya geçilemedi. Tekrar deneyebilirsin.","Could not switch to the mini player. Try again."),"warn");}
+  };
+  const miniSurface=useRef<HTMLDivElement>(null);
+  const [videoRatingRevision,setVideoRatingRevision]=useState(0);
+  useEffect(()=>{
+    if(!miniVideo||!playing)return;
+    let disposed=false,busy=false,last='',failures=0,pending=false,frame=0,slide=0,slideUntil=0,awayAt=0;
+    const delayed=new Set<number>();
+    const fit=(force=false)=>{
+      if(disposed||!miniSurface.current)return;
+      if(force){last='';failures=0;}
+      if(busy){pending=true;return;}
+      if(failures>=3)return;
+      const r=miniSurface.current.getBoundingClientRect(),d=window.devicePixelRatio||1;
+      if(r.width<1||r.height<1)return;
+      // dock-away is seen before the slide's transitionrun arrives: the video stays (and follows) for the whole slide
+      const away=!!document.querySelector('.root.dock-away');if(!away)awayAt=0;else if(!awayAt){awayAt=performance.now();slideUntil=Math.max(slideUntil,awayAt+1450);if(!slide)slide=requestAnimationFrame(follow);}
+      const covered=(away&&performance.now()>slideUntil)||Array.from(document.querySelectorAll('.modal-bg,[role=dialog]')).some(e=>e.getClientRects().length);
+      const rect=covered?null:[r.x,r.y,r.width,r.height].map(v=>Math.round(v*d)),key=JSON.stringify(rect);
+      if(key===last)return;busy=true;
+      void invoke('mpv_dock',{rect}).then(()=>{last=key;failures=0;}).catch(()=>{
+        if(!disposed&&++failures===3)flash(extraText('Küçük görüntü yerleştirilemedi. Pencereyi yeniden boyutlandırabilir veya Büyüt düğmesini kullanabilirsin.','The mini video could not be positioned. Resize the window or use Expand.'),'warn');
+      }).finally(()=>{busy=false;if(pending&&!disposed){pending=false;frame=requestAnimationFrame(()=>fit(true));}});
+    };
+    // mpv resizes its child on WM_SIZE too: reapply after that native resize, even if
+    // the DOM rectangle is unchanged. A transient resize error must never exit mini mode.
+    const resized=()=>{
+      cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>fit(true));
+      for(const timer of delayed)clearTimeout(timer);delayed.clear();
+      for(const ms of [180,650]){const timer=window.setTimeout(()=>{delayed.delete(timer);fit(true);},ms);delayed.add(timer);}
+    };
+    // while the dock slides (away for a web video, or back), the native video follows it every frame instead of jumping
+    slide=0;slideUntil=0;const follow=()=>{if(disposed||performance.now()>slideUntil){slide=0;fit(true);return;}fit(true);slide=requestAnimationFrame(follow);};
+    const sliding=(e:Event)=>{if(!(e.target as HTMLElement|null)?.classList?.contains('luna-video-dock'))return;slideUntil=performance.now()+1450;if(!slide)slide=requestAnimationFrame(follow);};
+    document.addEventListener('transitionrun',sliding,true);document.addEventListener('animationstart',sliding,true);
+    fit();const timer=window.setInterval(()=>fit(),500);
+    const observer=new ResizeObserver(resized);observer.observe(miniSurface.current!);
+    window.addEventListener('resize',resized);document.addEventListener('visibilitychange',resized);
+    return()=>{disposed=true;clearInterval(timer);cancelAnimationFrame(frame);cancelAnimationFrame(slide);document.removeEventListener('transitionrun',sliding,true);document.removeEventListener('animationstart',sliding,true);for(const t of delayed)clearTimeout(t);observer.disconnect();window.removeEventListener('resize',resized);document.removeEventListener('visibilitychange',resized);void invoke('mpv_dock',{rect:null}).catch(()=>{});};
+  },[miniVideo,playing]);
   // a film starting (from the assistant too) closes the collections page, so it doesn't come back after the film
   useEffect(() => { if (playing) { setMine(null); setMineOpen(null); } }, [playing]);
   useEffect(() => {
@@ -359,7 +479,7 @@ export default function App() {
   // Remember the dub / subtitle picked for this video (only this one).
   useEffect(() => {
     const p = s.path;
-    if (!p || restoring.current || isMusic) return;
+    if (!p || restoring.current || isMusic ||isYouTubeVideo(p)||progressReady.current!==p) return;
     const audio = s.tracks.find((t) => t.type === "audio" && t.selected);
     const subs = s.tracks.filter((t) => t.type === "sub");
     const sub = mainSubTrack(s.tracks, s.secondarySid);
@@ -405,6 +525,8 @@ export default function App() {
     if (document.hasFocus()) start(); else window.addEventListener("focus", start);
     return () => { clearTimeout(t); window.removeEventListener("focus", start); };
   }, [clip]);
+  useEffect(()=>{const onImport=(event:Event)=>{const url=(event as CustomEvent<string>).detail;if(typeof url!=="string"||!/^https:\/\/(?:www\.)?(?:youtube\.com|youtu\.be|open\.spotify\.com)\//i.test(url))return;setMusicLinkInit(url);setPartLink("music");};window.addEventListener("luna-import-playlist",onImport);return()=>window.removeEventListener("luna-import-playlist",onImport);},[]);
+  useEffect(()=>{const open=(event:Event)=>{const url=(event as CustomEvent<{url:string}>).detail?.url;if(url===undefined){setDetailsKey(null);setBrowserMounted(true);setBrowserOpen(true);return;}if(typeof url!=="string"||!/^https?:\/\//i.test(url))return;store.set("pendingDevWatch",url);setDetailsKey(null);setBrowserMounted(true);setBrowserOpen(true);};window.addEventListener("luna-browser-open",open);return()=>window.removeEventListener("luna-browser-open",open);},[]);
   const importClip = () => {
     if (!clip) return;
     const { url, kind } = clip;
@@ -438,7 +560,7 @@ export default function App() {
   tSrcRef.current = tSources;
   const [dlPending, setDlPending] = useState<string[]>([]);
   const tCancel = useRef(0);
-  const loadRef = useRef<(p: string, start?: boolean, confirmed?: boolean) => void>(() => {});
+  const loadRef = useRef<(p: string, start?: boolean, confirmed?: boolean,web?:WebMediaTransfer) => void>(() => {});
   // A torrent's file joins the library; a library entry that was waiting for this magnet
   // (its old file was lost) is moved over to the new file, keeping its settings and progress.
   const adoptTorrentFile = (src: string, local: string) => {
@@ -554,7 +676,11 @@ export default function App() {
 
   const [m3uList, setM3uList] = useState<M3uList | null>(null);
   const channelName = useRef<string | null>(null);
-  const load = useCallback((p: string, start = false, confirmed = false) => {
+  const playbackPosition=(identity:string)=>{const item=lib.itemFor(identity);return sharedPosition(identity,lib.items,loadRecent(),item?.meta?.id?store.json<Recent|null>("film-position:"+item.meta.id,null):null);};
+  const load = useCallback((p: string, start = false, confirmed = false, web?:WebMediaTransfer) => {
+    // a film coming back from the dock stays small (no flash of the big player in between)
+    ++miniTransition.current;setMiniVideo(keepMini.current);keepMini.current=false;setDetailsKey(null);setTitleOpen(null);
+    const prior=progressRef.current;if(prior&&prior.time>0)saveProgress(prior);
     const sourceRequest=++sourceGeneration.current;
     if(p.startsWith("luna-source://")){
       try{const address=new URL(p);const profile=Number(address.hostname),id=decodeURIComponent(address.pathname.slice(1));
@@ -564,9 +690,14 @@ export default function App() {
         }).catch(error=>{if(sourceRequest===sourceGeneration.current)flash(String(error),"warn");});
       }catch(error){flash(String(error),"warn");}return;
     }
+    const replayWeb=web===undefined;setWebRecovery(null);
+    web=web??cleanWebPlayback(store.json("web-playback:"+p,null))??undefined;
+    if(web){const context=cleanWebPlayback({...web,streamUrl:web.streamUrl||p,pageUrl:web.pageUrl||web.referer});if(context){web=context;p=context.streamUrl!;streamMap.current[p]=context.pageUrl!;store.set("web-playback:"+p,JSON.stringify(context));store.set("web-playback:"+context.pageUrl,JSON.stringify(context));}}
     const identity=streamMap.current[p]??p;
+    if(webRejectedPage.current!==identity){webRejectedPage.current=identity;webRejectedUrls.current.clear();}
+    setWebLibraryPath(web&&!isYouTubeVideo(identity)?identity:null);
     // A YouTube link belongs to the music part: it plays there and never enters the film library.
-    if (YT_LINK.test(p)) { playYouTubeLink(p).then((ok) => { if (!ok) flash(tt("Bu bağlantıda çalınacak bir şey yok"), "warn"); }); return; }
+    if (YT_LINK.test(p)&&!web) { playYouTubeLink(p).then((ok) => { if (!ok) flash(tt("Bu bağlantıda çalınacak bir şey yok"), "warn"); }); return; }
     // A torrent video that wasn't finished: stream it again instead of the partial file.
     // (asked first; the music keeps playing until the answer is yes)
     const src = store.get("tsrc:" + p);
@@ -585,6 +716,7 @@ export default function App() {
       return;
     }
     // the music waits, paused, until the film is closed
+    if (!isMusicPath(p) || lib.itemFor(p)) unmarkMusicPath(p);
     suspendMusic();
     if (ttsActive()) ttsStop();
     if (isTorrentSource(p)) return openTorrent(p, start);
@@ -595,22 +727,31 @@ export default function App() {
     setProp("vid", "auto");
     setProp("ytdl-format", "");
     // a channel from an .m3u list shows its name, anything else its own title
-    setProp("force-media-title", channelName.current ?? "");
+    setProp("force-media-title", web?.title || channelName.current || "");
     channelName.current = null;
-    const options = filmLoadOptions({
-      fromStart: start, position: loadRecent().find(r => r.path === identity),
+    let options = filmLoadOptions({
+      fromStart: start, position: playbackPosition(identity),
       jump: noteJump.current?.path === identity ? noteJump.current.time : undefined,
       delay: store.get("delay:" + identity), audioDelay: store.get("adelay:" + identity),
-      subSpeed: store.get("subspeed:" + identity) ?? 1, pref: store.json<TrackPref | null>("trk:" + identity, null),
+      subSpeed: store.get("subspeed:" + identity) ?? 1, pref: isYouTubeVideo(identity)?null:store.json<TrackPref | null>("trk:" + identity, null),
     });
+    const expectedStart=Number(options.match(/(?:^|,)start=([0-9.]+)/)?.[1])||0;resumePending.current=expectedStart>0?{path:identity,time:expectedStart}:null;
+    if(web)options+=webMediaOptions(web.referer,web.agent);
+    if(isYouTubeVideo(identity))options+=",ytdl-format=bestvideo[dynamic_range!=SDR]+bestaudio/bestvideo+bestaudio/best";
+    setWebRejected(false);
+    webAttempt.current=web?{id:web.sourceTabId,url:p,pageUrl:web.pageUrl,replay:replayWeb,ready:false}:null;
+    setWebLoading(!!web);
+    webTracks.current=web?{path:identity,media:web}:null;
     noteJump.current = null;
     loadedWithOptions.current = identity;
     filmGeneration.current++;
-    void mpv("loadfile", p, "replace", -1, options).catch(error => flash(String(error), "warn"));
+    pathRef.current=identity;progressReady.current=null;
+    void mpv("loadfile", p, "replace", -1, options).catch(error => {if(webAttempt.current?.url===p)webFailRef.current();else flash(String(error), "warn");});
     setProp("pause", false);
-    if (store.get("autoFull") !== "0") getCurrentWindow().setFullscreen(true);
-  }, []);
+    if (store.get("autoFull") !== "0") { const w = getCurrentWindow(); void w.isFullscreen().then((on) => { if (!on) { playerMadeFull = true; void w.setFullscreen(true); } }).catch(() => {}); }
+  }, [lib.items]);
   loadRef.current = load;
+  useEffect(()=>{const change=(e:Event)=>{const path=(e as CustomEvent<string>).detail;if(path!==pathRef.current)return;noteJump.current={path,time:playbackTime()};loadRef.current(path,false,true);};window.addEventListener("luna-web-quality",change);return()=>window.removeEventListener("luna-web-quality",change);},[]);
   useEffect(()=>{const open=(e:Event)=>{const target=(e as CustomEvent<{path:string;time:number}>).detail;if(!target||typeof target.path!=="string"||!Number.isFinite(target.time)||target.time<0)return;noteJump.current=target;loadRef.current(target.path,true,true);};window.addEventListener("luna-open-note",open);return()=>window.removeEventListener("luna-open-note",open);},[]);
 
   // Opened via double-click / "Open with": start playing immediately.
@@ -685,15 +826,16 @@ export default function App() {
   const lastProgress = useRef<Progress | null>(null);
   const saveProgress = (given?: Progress | null) => {
     const p = given ?? progressRef.current;
-    if (!p) return;
+    if (!p||isYouTubeVideo(p.path)||!pendingResumeReached(resumePending.current,p.path,p.time)) return;
     const list = [p, ...loadRecent().filter((r) => r.path !== p.path)].slice(0, 30);
+    const work=lib.itemFor(p.path);if(work?.meta?.id&&work.meta.kind==="movie")store.set("film-position:"+work.meta.id,JSON.stringify(p));
     // the shared history: one entry per sitting, with the film's real name and poster
     const it = lib.items.find((i) => i.files.some((f) => f.path === p.path));
     noteFilm({ ...p, title: it?.meta?.title ?? it?.parsed.title ?? p.title, poster: it?.meta?.poster ? IMG + "w185" + it.meta.poster : null });
     store.set("recent", JSON.stringify(list));
     setRecent(list);
   };
-  progressRef.current = recordableProgress(s.path, s.path ? srcName(s.path) ?? s.title : "", s.time ?? 0, s.duration, progressReady.current, isMusic);
+  progressRef.current = recordableProgress(s.path, s.path ? srcName(s.path) ?? s.title : "", s.time ?? 0, s.duration, progressReady.current, isMusic||!!s.path&&isYouTubeVideo(s.path));
   if (progressRef.current) lastProgress.current = progressRef.current;
   // Leaving a file without "close" (the next episode, another film, a stop from elsewhere): its last
   // known place is written for that file, so up to five seconds are not lost and nothing lands elsewhere.
@@ -921,17 +1063,17 @@ export default function App() {
     setProp("sub-pos", Math.round(100 - (covered / h) * 100));
   }, [playing, uiVisible, showSync]);
 
-  // Window mode: Windows' maximize button goes straight to fullscreen, so there are only two modes.
+  // Window mode: Windows' maximize button goes straight to fullscreen (the top-centre hover shows exit buttons), so there are two modes.
   const [isFull, setIsFull] = useState(false);
   useEffect(() => {
     const w = getCurrentWindow();
     // the window stays above the taskbar, and a narrower screen gets the same layout, zoomed out (Rust: fit_window)
-    let fitT = 0;
-    const fit = (keepInside = false) => { clearTimeout(fitT); fitT = window.setTimeout(() => invoke("fit_window", { fitZoom: store.get("uiFit") !== "0", keepInside }).catch(() => {}), 250); };
+    let fitT = 0,lastFull:boolean|null=null,syncGeneration=0,pendingInside=false;
+    const fit = (keepInside = false) => { pendingInside=pendingInside||keepInside;clearTimeout(fitT);fitT=window.setTimeout(()=>{const keepInside=pendingInside;pendingInside=false;void invoke("fit_window",{fitZoom:store.get("uiFit")!=="0",keepInside}).catch(()=>{});},250); };
     const sync = async () => {
-      if (await w.isMaximized()) { await w.unmaximize(); await w.setFullscreen(true); }
-      setIsFull(await w.isFullscreen());
-      fit();
+      const generation=++syncGeneration;if(await w.isMaximized()){await w.unmaximize();await w.setFullscreen(true);}if(generation!==syncGeneration)return;const full=await w.isFullscreen();if(generation!==syncGeneration)return;
+      const restored=lastFull===true&&!full;lastFull=full;setIsFull(full);
+      fit(restored);
     };
     // Luna opens full screen once on a machine (afterwards the window keeps how it was left)
     if (!store.get("fullOnce")) { store.set("fullOnce", "1"); w.setFullscreen(true).catch(() => {}); }
@@ -977,7 +1119,7 @@ export default function App() {
     const unR = listen<string>("pgs-ready", (e) => { setPgsReady(e.payload); showOsd(tt("Altyazı hazır")); });
     const unP = listen<number>("pgs-progress", (e) => { if (e.payload < 1) showOsd(tt("Altyazı hazırlanıyor %{0}", Math.round(e.payload * 100)), 3000); });
     const unE = listen<string>("pgs-error", (e) => flash(tt("Altyazı okunamadı: ") + e.payload, "warn", 7000));
-    const unM = listen<string>("mpv-error", (e) => flash(e.payload, "warn", 0));
+    const unM = listen<string>("mpv-error", (e) => {if(webAttempt.current)webFailRef.current();else flash(e.payload, "warn", 0);});
     return () => { unR.then((f) => f()); unP.then((f) => f()); unE.then((f) => f()); unM.then((f) => f()); };
   }, []);
   useEffect(() => {
@@ -1043,7 +1185,7 @@ export default function App() {
   }, [playing]);
 
   const toggleFull = async () => {
-    const w = getCurrentWindow();
+    const w = getCurrentWindow(); playerMadeFull = false; // a user choice: only F11 undoes it
     await w.setFullscreen(!(await w.isFullscreen()));
   };
   // F11 also on the library screens (the player's own keys handle it during a film)
@@ -1113,7 +1255,7 @@ export default function App() {
       if(document.querySelector(".extra-modal"))return;
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
-      if (!playing) {
+      if (!playing||miniVideo) {
         if (e.ctrlKey && e.key.toLowerCase() === "o") { e.preventDefault(); (mode === "music" ? openMusicFiles : mode === "books" ? openBookFile : openFile)(); }
         return;
       }
@@ -1220,7 +1362,36 @@ export default function App() {
   };
 
   // the music that was playing before the film comes back, paused
-  const close = () => { saveProgress(); endFilmSitting(); setNextUp(null); mpv("stop"); setShowSync(false); getCurrentWindow().setFullscreen(false); setTimeout(resumeSuspendedMusic, 300); };
+  // mpv can reset time before end-file arrives. Save once, then revoke recording before stop.
+  // Film and music share one player. When a song starts while a film plays, the film is parked: its place is saved and
+  // it waits as a tab in the dock, so the two can be switched (the last one opened plays, the other waits).
+  const park = () => { if (!s.path || isMusicPath(s.path) || webRejected) return; parkedPath.current = s.path; setParked({ path: s.path, title: displayTitle, time: sRaw.time ?? 0 }); ++miniTransition.current;webRejectedUrls.current.clear();webAttempt.current=null;saveProgress(); progressReady.current=null; resumePending.current=null; progressRef.current=null; endFilmSitting(); setNextUp(null); setShowSync(false); leavePlayerFull(); };
+  const parkRef = useRef(park); parkRef.current = park;
+  // a web page is playing sound right now (the docks step aside only then, and come back when it stops)
+  const [webAudible, setWebAudible] = useState(() => document.documentElement.classList.contains("browser-audio-active"));
+  useEffect(() => { const on = (e: Event) => setWebAudible(!!(e as CustomEvent<boolean>).detail); window.addEventListener("luna-browser-audio", on); return () => window.removeEventListener("luna-browser-audio", on); }, []);
+  const miniFilmRef = useRef(false); miniFilmRef.current = playing && miniVideo && !s.paused;
+  useEffect(() => { const audio = (e: Event) => { if ((e as CustomEvent<boolean>).detail && miniFilmRef.current) void setProp("pause", true); }; window.addEventListener("luna-browser-audio", audio); return () => window.removeEventListener("luna-browser-audio", audio); }, []);
+  // a click on the small video brings the film back big, full screen
+  const expandFull = () => { ++miniTransition.current; setMiniVideo(false); const w = getCurrentWindow(); void w.isFullscreen().then((on) => { if (!on) { playerMadeFull = true; void w.setFullscreen(true); } }).catch(() => {}); };
+  // Film and song in one dock: a single arrow button (like a browser's back/forward, there is only one way to go)
+  // and two dots, the lit one showing which is playing.
+  const dockSwitcher = () => {
+    const song = playing ? suspendedSong() : music.now ? { title: music.now.title, artist: music.now.artist } : null;
+    const film = playing ? { title: displayTitle } : parked;
+    if (!song || !film) return null;
+    const go = () => {
+      if (playing) { park(); void mpv("stop"); setTimeout(playSuspendedMusic, 120); return; }
+      if (!parked) return; const p = parked; setParked(null); keepMini.current = true; load(p.path);
+    };
+    const target = playing ? extraText("Şarkıya geç: ", "Switch to song: ") + song.title : extraText("Filme geç: ", "Switch to film: ") + film.title;
+    return <span className="dock-switch">
+      <button className="mu-ib" aria-label={target} title={target} onClick={go}><Icon d={playing ? "M15 18l-6-6 6-6" : "M9 18l6-6-6-6"} size={17} /></button>
+      <span className="dock-dots" aria-hidden="true"><i className={!playing ? "on" : ""} /><i className={playing ? "on" : ""} /></span>
+    </span>;
+  };
+  useEffect(() => { onMusicTakeover(() => parkRef.current()); return () => onMusicTakeover(null); }, []);
+  const close = () => { ++miniTransition.current;setMiniVideo(false);webRejectedUrls.current.clear();webAttempt.current=null;saveProgress(); progressReady.current=null; resumePending.current=null; progressRef.current=null; endFilmSitting(); setNextUp(null); mpv("stop"); setShowSync(false); leavePlayerFull(); setTimeout(resumeSuspendedMusic, 300); };
 
   // Mouse back button (and Alt+←): close what's on top, else go one step back.
   const goBack = () => {
@@ -1273,7 +1444,7 @@ export default function App() {
     const hit = imgCache.current.get(k);
     if (hit) { show(hit); pump(); return; }
     busy.current = true;
-    invoke<string>("seek_preview", { path, secs })
+    invoke<string>("seek_preview", { ...webPlaybackSource(path), secs })
       .then((file) => { const u = convertFileSrc(file); imgCache.current.set(k, u); show(u); })
       .catch(() => {})
       .finally(() => { busy.current = false; pump(); });
@@ -1301,7 +1472,7 @@ export default function App() {
   useEffect(() => {
     const path = sRaw.path;
     if (!path || isMusic) { invoke("preview_release").catch(() => {}); return; }
-    const t = setTimeout(() => invoke("seek_preview", { path, secs: 0 }).catch(() => {}), 2500);
+    const t = setTimeout(() => invoke("seek_preview", { ...webPlaybackSource(path), secs: 0 }).catch(() => {}), 2500);
     return () => clearTimeout(t);
   }, [sRaw.path]);
 
@@ -1381,6 +1552,17 @@ export default function App() {
     flash(tt("Adı değiştirildi: {0}", to.split(/[\\/]/).pop()!), "ok");
   };
   const [rematch, setRematch] = useState<Target | null>(null);
+  const [webIdentityNotice,setWebIdentityNotice]=useState<string|null>(null);
+  const webNoticeSeen=useRef(new Set<string>());
+  useEffect(()=>{const path=s.path;if(!playing||webLoading||!path||isYouTubeVideo(path)||!cleanWebPlayback(store.json("web-playback:"+path,null)))return;
+    if(webNoticeSeen.current.has(path))return;
+    const item=lib.itemFor(path);if(store.get("tmdbKey")&&(!item||(!item.meta&&!lib.unknown(item.key))))return;
+    // the film's own choice (⋯ menu on its page): this check can be turned off per film
+    if(item&&store.get("webNoticeOff:"+item.key)==="1")return;
+    webNoticeSeen.current.add(path);setWebIdentityNotice(path);
+  },[s.path,playing,webLoading,lib.items]);
+  useEffect(()=>{if(!webIdentityNotice)return;if(webIdentityNotice!==s.path||!playing){setWebIdentityNotice(null);return;}const timer=window.setTimeout(()=>setWebIdentityNotice(null),10000);return()=>clearTimeout(timer);},[webIdentityNotice,s.path,playing]);
+  const webNoticeItem=webIdentityNotice?(lib.itemFor(webIdentityNotice)||(()=>{const parsed=parseName(webIdentityNotice);return {key:groupKey(parsed),parsed,files:[{path:webIdentityNotice}],meta:null} as Item;})()):null;
   // A video added by hand (not from a library folder) whose file name TMDB didn't recognise:
   // Luna asks once for its name, then looks it up again with what the user writes.
   const [askName, setAskName] = useState<Item | null>(null);
@@ -1421,6 +1603,7 @@ export default function App() {
   }, []);
   const [query, setQuery] = useState("");
   const actions: Actions = {
+    ask:(it)=>{setChatTopic(it);setChat(true);},
     play: (p, start) => load(p, start),
     details: (k) => setDetailsKey(k),
     menu: (e, t) => { e.preventDefault(); e.stopPropagation(); setCardMenu({ x: e.clientX, y: e.clientY, t }); },
@@ -1522,7 +1705,9 @@ export default function App() {
 
   // Only this small subscriber sees every playback timestamp. App changes at progress/segment boundaries.
   clockTick.current=(time)=>{
-    const current=recordableProgress(s.path,s.path?srcName(s.path)??s.title:"",time,s.duration,progressReady.current,isMusic);
+    if(!pendingResumeReached(resumePending.current,s.path,time))return;
+    resumePending.current=null;
+    const current=recordableProgress(s.path,s.path?srcName(s.path)??s.title:"",time,s.duration,progressReady.current,isMusic||!!s.path&&isYouTubeVideo(s.path));
     progressRef.current=current;if(current)lastProgress.current=current;
     const step=String(s.path)+":"+Math.floor(time/5);
     if(current&&step!==progressClockStep.current){progressClockStep.current=step;pinFile(current.path);if(nearEnd(current.time,current.duration)&&!isFinished(current.path)){setFinished([current.path],true);askRating.current=current.path;}saveProgress();}
@@ -1531,10 +1716,10 @@ export default function App() {
   };
 
   return (
-    <div className={"root" + (playing ? " playing" : "") + (uiVisible ? "" : " idle") + (music.now && !playing ? " has-dock" : "")} data-mode={mode}
+    <div className={"root" + (playing&&!miniVideo ? " playing" : "") + (uiVisible ? "" : " idle") + (music.now && !playing ? " has-dock" : "") + (browserOpen && webAudible && ((music.now && !playing) || (playing && miniVideo)) ? " dock-away" : "")} data-mode={mode}
       onDoubleClick={(e) => playing && e.target === e.currentTarget && toggleFull()}
       onClick={(e) => playing && e.target === e.currentTarget && mpv("cycle", "pause")}
-      onContextMenu={(e) => { if (playing) { setShowTracks(false); setMenu({ x: e.clientX, y: e.clientY }); } }}
+      onContextMenu={(e) => { if (playing&&!miniVideo) { setShowTracks(false); setMenu({ x: e.clientX, y: e.clientY }); } }}
       onWheel={(e) => {
         // Mouse wheel over the video = volume, like VLC.
         if (!playing || e.target !== e.currentTarget) return;
@@ -1562,8 +1747,8 @@ export default function App() {
       )}
       {countdown != null && countdown > 0 && playing && <div className="countdown" key={countdown}>{countdown}</div>}
 
-      {(!playing || (mode === "film" && view === "recs")) && (mode !== "film" || !detailsItem) && (
-        <div className="shell" style={playing ? {visibility:"hidden",pointerEvents:"none"} : undefined} inert={playing || undefined} onScroll={(e) => e.currentTarget.classList.toggle("scrolled", e.currentTarget.scrollTop > 8)}>
+      {(!playing || miniVideo || (mode === "film" && view === "recs")) && (mode !== "film" || !detailsItem) && (
+        <div className="shell" style={playing&&!miniVideo ? {visibility:"hidden",pointerEvents:"none"} : undefined} inert={playing&&!miniVideo || undefined} onScroll={(e) => e.currentTarget.classList.toggle("scrolled", e.currentTarget.scrollTop > 8)}>
           <Header browserOpen={browserOpen} onBrowser={() => { setBrowserMounted(true); setBrowserOpen(o => !o); setBrowserPage(undefined); }} mode={mode} setMode={(m) => { setBrowserOpen(false); setBrowserPage(undefined); setModeState(m); store.set("mode", m); setQuery(""); setDetailsKey(null); setChatTopic(null); if (m === "music") setMusicView("home"); else if (m === "books") setBooksView("home"); else setView("home"); }}
             tabs={mode === "music" ? [["home", tt("Ana sayfa")], ["discover", tt("Keşfet")], ["library", tt("Kütüphanem")], ["taste", tt("Zevk profilim")], ["radio", tt("Radyo")], ["podcast", tt("Podcast")]]
               : mode === "books" ? [["home", tt("Ana sayfa")], ["discover", tt("Keşfet")], ["library", tt("Kitaplığım")], ["taste", tt("Zevk profilim")], ["audio", tt("Sesli kitaplar")]] : undefined}
@@ -1583,7 +1768,7 @@ export default function App() {
             </div>
           ) : (
           <div className="shell-body" key={view}>
-            {view === "home" && <Home items={lib.items} recent={recent} hasFolders={lib.folders.length > 0} a={actions}
+            {view === "home" && <Home active={!playing&&!browserOpen} items={lib.items} recent={recent} hasFolders={lib.folders.length > 0} a={actions}
               onAddFolder={addFolder}
               downloads={torrents.length > 0 && <DownloadsSection list={torrents} onPlay={playTorrent} onRemoving={torrentRemoving} onRemoved={torrentRemoved} />} />}
             {view === "movies" && <Browse title={tt("Filmler")} items={lib.items.filter((i) => i.parsed.kind === "movie")} query={query} a={actions} />}
@@ -1606,7 +1791,7 @@ export default function App() {
           )}
         </div>
       )}
-      {browserMounted && <Suspense fallback={null}><Browser items={lib.items} onLibraryOpen={key=>{setBrowserOpen(false);setBrowserPage(undefined);setModeState("film");store.set("mode","film");setQuery("");setDetailsKey(key);}} onAssistant={() => setChat(true)} onPlay={url => load(url)} active={browserOpen && !playing} onClose={() => { setBrowserOpen(false); setBrowserPage(undefined); }} onInvalidate={invalidateBrowserPage} onActiveTab={setBrowserTab} onPage={page => { setBrowserPage(page); setChat(true); }} /></Suspense>}
+      {browserMounted && <Suspense fallback={null}><Browser items={lib.items} onLibraryOpen={key=>{setBrowserOpen(false);setBrowserPage(undefined);setModeState("film");store.set("mode","film");setQuery("");setDetailsKey(key);}} onAssistant={() => setChat(true)} onPlay={(url,media) => load(url,false,true,media)} active={browserOpen&&(!playing||miniVideo)} onClose={() => { setBrowserOpen(false); setBrowserPage(undefined); }} onInvalidate={invalidateBrowserPage} onActiveTab={setBrowserTab} onPage={page => { setBrowserPage(page); setChat(true); }} /></Suspense>}
       <PlaybackClockRuntime tick={clockTick} identity={s.path}/>
       <LiveCaptionOverlay/>
       <Clocked step={5}>{time=>(<ShellRuntime s={{...sRaw,time}} film={playing} />)}</Clocked>
@@ -1622,7 +1807,7 @@ export default function App() {
       {quote && <QuoteCard src={quote} onClose={() => setQuote(null)} />}
       {panel === "calendar" && <CalendarModal items={lib.items} onOpen={(key) => { setModeState("film"); store.set("mode", "film"); setQuery(""); setDetailsKey(key); }} onClose={() => setPanel(null)} />}
       {panel === "clip" && (playing && s.path
-        ? <Suspense fallback={null}><ClipMaker path={s.path} title={lib.itemFor(s.path)?.meta?.title ?? s.title} time={s.time} duration={s.duration} subFile={subFile} onClose={() => setPanel(null)} /></Suspense>
+        ? <Suspense fallback={null}><Clocked>{time=><ClipMaker path={s.path!} title={lib.itemFor(s.path!)?.meta?.title ?? s.title} time={time} duration={s.duration} subFile={subFile} onClose={() => setPanel(null)} />}</Clocked></Suspense>
         : <PanelNeedsFilm onDone={() => setPanel(null)} flash={flash} />)}
       {panel === "scenes" && (playing && s.path && s.duration > 0
         ? <Suspense fallback={null}><Clocked>{time=>(<SceneGrid path={s.path!} duration={s.duration} time={time} cues={subCues} onSeek={(t) => void mpv("seek", t, "absolute")} onClose={() => setPanel(null)} />)}</Clocked></Suspense>
@@ -1630,7 +1815,7 @@ export default function App() {
       <Clocked>{time=>(<PlaybackRuntime s={{...sRaw,time}} film={playing} item={playing && sRaw.path ? lib.itemFor(sRaw.path) ?? null : null} />)}</Clocked>
 
       {/* over the collections page the real music bar comes along, on top of it (volume, seek, shuffle…) */}
-      {!playing && music.now && (mine ? createPortal(<div className="mu-dock-over"><Clocked>{time=>(<MusicDock mp={{...sRaw,time}} />)}</Clocked></div>, document.body) : <Clocked>{time=>(<MusicDock mp={{...sRaw,time}} />)}</Clocked>)}
+      {!playing && music.now && (mine ? createPortal(<div className="mu-dock-over"><Clocked>{time=>(<MusicDock mp={{...sRaw,time}} switcher={dockSwitcher()} />)}</Clocked></div>, document.body) : <Clocked>{time=>(<MusicDock mp={{...sRaw,time}} switcher={dockSwitcher()} />)}</Clocked>)}
       <MenuHost />
       {!playing && !clip && !tour && !setup && !countryIntro && <><UpdateBanner /><ReleaseNews /></>}
       {partLink === "music" && <MusicLinkDialog initial={musicLinkInit} onClose={() => { setPartLink(null); setMusicLinkInit(undefined); }} />}
@@ -1646,7 +1831,7 @@ export default function App() {
         </div>
       )}
       {partLink === "books" && <BookLinkDialog onClose={() => setPartLink(null)} />}
-      {!playing && mode === "film" && detailsItem && (
+      {(!playing || miniVideo) && mode === "film" && detailsItem && (
         <Details key={detailsItem.key} it={detailsItem} recent={recent} a={actions} onBack={() => setDetailsKey(null)}
           onAddSub={addSubtitle} download={detailsDownload} onAsk={() => setChat(true)} missingPanel={detailsMissingPanel} />
       )}
@@ -1655,13 +1840,30 @@ export default function App() {
       {m3uList && <M3uDialog list={m3uList} onClose={() => setM3uList(null)} onOpen={(src) => { setM3uList(null); load(src); }}
         onPlay={(c) => { setM3uList(null); channelName.current = c.name; load(c.url, false, true); }} />}
       {/* the assistant as a bubble at the bottom right: always at hand, out of the way while a film plays */}
+      {playing&&miniVideo&&(()=>{const yq=isYouTubeVideo(s.path||"")?{src:s.path!,title:displayTitle,yt:true,duration:s.duration}:null;const seekAt=(e:React.PointerEvent<HTMLDivElement>)=>{if(e.type==="pointerdown"?e.button!==0:e.buttons!==1)return;const r=e.currentTarget.getBoundingClientRect();void mpv("seek",Math.min(1,Math.max(0,(e.clientX-r.left)/r.width))*100,"absolute-percent");};return <div className="luna-video-dock mu-dock" data-revision={videoRatingRevision} onAnimationEnd={()=>window.dispatchEvent(new Event("resize"))}>
+        <div className="mu-dock-left"><div className="luna-video-surface" ref={miniSurface} role="button" tabIndex={0} title={extraText("Tam ekranda izle","Watch full screen")} aria-label={extraText("Tam ekranda izle","Watch full screen")} style={{cursor:"pointer"}} onClick={expandFull} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();expandFull();}}}/><span className="mu-dock-txt"><b className="ellipsis">{displayTitle}</b><span className="muted small ellipsis">{fmtTime(s.time)} / {fmtTime(s.duration)}</span></span>
+          {yq&&<><button className={"mu-ib"+(isLiked(yq.src)?" on":"")} aria-label={tt("Beğendim")} title={tt("Beğendim")} onClick={()=>{toggleLike(yq);setVideoRatingRevision(v=>v+1);}}><Icon d="M7 10v11H3V10zM7 11l5-8c1-1 3 0 2 3l-1 4h6c2 0 2 2 1 4l-2 6H7" size={17}/></button><button className={"mu-ib"+(isDisliked(yq.src)?" on":"")} aria-label={tt("Beğenmedim")} title={tt("Beğenmedim")} onClick={()=>{toggleDislike(yq);setVideoRatingRevision(v=>v+1);}}><Icon d="M7 14V3H3v11zM7 13l5 8c1 1 3 0 2-3l-1-4h6c2 0 2-2 1-4l-2-6H7" size={17}/></button></>}</div>
+        <div className="mu-dock-mid"><div className="mu-ctl">
+          <button className="mu-ib" aria-label={extraText("10 sn geri","Back 10 s")} title={extraText("10 sn geri","Back 10 s")} onClick={()=>void mpv("seek",-10,"relative")}><Icon d="M11 17l-5-5 5-5M18 17l-5-5 5-5" size={17}/></button>
+          <button className="mu-play" aria-label={s.paused?tt("Oynat"):tt("Duraklat")} onClick={()=>void mpv("cycle","pause")}><Icon d={s.paused?I.play:I.pause} fill size={18}/></button>
+          <button className="mu-ib" aria-label={extraText("10 sn ileri","Forward 10 s")} title={extraText("10 sn ileri","Forward 10 s")} onClick={()=>void mpv("seek",10,"relative")}><Icon d="M13 17l5-5-5-5M6 17l5-5-5-5" size={17}/></button>
+        </div><div className="mu-seek"><span>{fmtTime(s.time)}</span><div className="mu-bar" role="slider" tabIndex={0} aria-label={tt("Çalma konumu")} aria-valuemin={0} aria-valuemax={Math.max(0,Math.round(s.duration))} aria-valuenow={Math.max(0,Math.round(s.time))} onPointerDown={seekAt} onPointerMove={seekAt} onKeyDown={e=>{if(e.key==="ArrowLeft"||e.key==="ArrowRight"){e.preventDefault();e.stopPropagation();void mpv("seek",e.key==="ArrowLeft"?-5:5,"relative");}}}><div style={{width:(s.duration?Math.min(1,s.time/s.duration):0)*100+"%"}}/></div><span>{fmtTime(s.duration)}</span></div></div>
+        <div className="mu-dock-right">
+          {dockSwitcher()}
+          {yq&&<><button className="mu-ib" aria-label={extraText("Listeye ekle","Add to playlist")} title={extraText("Listeye ekle","Add to playlist")} onClick={e=>openMenu(e,loadMusicPlaylists().length?loadMusicPlaylists().map(p=>({label:p.name,act:()=>{saveMusicPlaylists(loadMusicPlaylists().map(row=>row.id===p.id?{...row,items:row.items.some(t=>t.src===yq.src)?row.items:[...row.items,yq]}:row));}})):[{label:extraText("Henüz liste yok","No playlists yet"),act:()=>{}}])}><Icon d="M4 6h11M4 12h11M4 18h7M18 15v6M15 18h6" size={17}/></button><SaveQueuePlaylist items={[yq]} lists={loadMusicPlaylists} save={saveMusicPlaylists}/></>}
+          <button className="mu-ib" aria-label={extraText("Büyüt","Expand")} title={extraText("Büyüt","Expand")} onClick={()=>setMiniVideo(false)}><Icon d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5" size={16}/></button>
+          <button className="mu-ib" aria-label={s.mute?tt("Sesi aç"):tt("Sesi kapat")} aria-pressed={s.mute} onClick={()=>void setProp("mute",!s.mute)}><Icon d={s.mute?I.mute:I.vol} size={16}/></button>
+          <input className="vol mu-vol" type="range" min="0" max="100" step="1" aria-label={tt("Ses")} value={Math.min(100,Math.max(0,s.mute?0:s.volume))} onChange={e=>{void setProp("volume",Number(e.target.value));if(s.mute)void setProp("mute",false);}}/>
+          <button className="mu-ib" aria-label={tt("Kapat")} title={tt("Kapat")} onClick={close}><Icon d={I.x} size={16}/></button>
+        </div></div>;})()}
+      {webRecovery&&<ExtraModal title={extraText("Kayıtlı video açılamadı","Saved video could not open")} close={()=>setWebRecovery(null)}><p>{extraText("Bu kaynaktaki video bağlantısı artık yüklenemiyor. Kaynak sayfasını açıp videoyu yeniden seçebilirsin; kayıtlı izleme konumun korunur.","This source's video link could not load. Open its page and select the video again; your saved playback position is preserved.")}</p><button className="primary" onClick={()=>{const url=webRecovery;setWebRecovery(null);window.dispatchEvent(new CustomEvent('luna-browser-open',{detail:{url}}));}}>{extraText("Kaynağı yenile","Refresh source")}</button></ExtraModal>}
       <SongRatePop />
       {!chat && !playing && <button className="ai-bubble" aria-label={tt("Luna Asistan")} title={tt("Luna Asistan · Alt+A")} onClick={() => setChat(true)}>
         <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-4-.9L3 20l1.1-4A8.4 8.4 0 1 1 21 11.5z" /><path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01" strokeWidth="2.6" /></svg>
       </button>}
       {palette && !playing && <CommandPalette commands={paletteCommands()} onClose={() => setPalette(false)} title={tt("Komut paleti")}
         placeholder={tt("Bir bölüm, sayfa, film ya da komut yaz…")} footer="Ctrl+K"/>}
-      {chat && <ChatPanel browserMode={browserOpen && !playing} onReadBrowserPage={browserOpen && !playing ? async()=>{const page=await readActiveBrowserPage();setBrowserPage(page);return page;} : undefined} onTranslatePage={browserOpen && !playing ? translateActiveBrowser : undefined} browserPage={browserOpen && !playing ? browserPage : undefined} browserTab={browserOpen && !playing ? browserTab : null} onClearBrowserPage={()=>{window.dispatchEvent(new Event("luna-browser-refresh-context"));invalidateBrowserPage();}} onRemove={assistantRemove} mode={mode} onMode={(m) => { setBrowserOpen(false); setBrowserPage(undefined); setModeState(m); store.set("mode", m); setDetailsKey(null); }} key={"chat:" + (browserOpen && !playing ? "web" : mode === "film" ? detailsItem?.key ?? chatTopic?.key ?? "general" : "general")} items={lib.items} recent={recent} viewing={mode === "film" ? detailsItem ?? chatTopic ?? undefined : undefined}
+      {chat && <ChatPanel browserMode={browserOpen && !playing} onReadBrowserPage={browserOpen && !playing ? async(options)=>{const page=await readActiveBrowserPage(options);setBrowserPage(page);return page;} : undefined} onTranslatePage={browserOpen && !playing ? translateActiveBrowser : undefined} browserPage={browserOpen && !playing ? browserPage : undefined} browserTab={browserOpen && !playing ? browserTab : null} onClearBrowserPage={()=>{window.dispatchEvent(new Event("luna-browser-refresh-context"));invalidateBrowserPage();}} onRemove={assistantRemove} mode={mode} onMode={(m) => { setBrowserOpen(false); setBrowserPage(undefined); setModeState(m); store.set("mode", m); setDetailsKey(null); }} key={"chat:" + (browserOpen && !playing ? "web" : mode === "film" ? detailsItem?.key ?? chatTopic?.key ?? "general" : "general")} items={lib.items} recent={recent} viewing={mode === "film" ? detailsItem ?? chatTopic ?? undefined : undefined}
         watching={playing ? { title: displayTitle, item: current } : undefined} onClose={() => { setChat(false); setChatTopic(null); }}
         onPlay={(p) => { setDetailsKey(null); load(p); }} onOpenSource={(src) => { setDetailsKey(null); setChat(false); openTorrent(src); }} />}
       {cardMenu && !playing && (
@@ -1701,10 +1903,16 @@ export default function App() {
         }} />
       )}
 
-      {playing && (
+      {playing&&webNoticeItem&&webIdentityNotice===s.path&&<div className="web-identity-notice" role="status">
+        {webNoticeItem.meta?.poster?<img src={IMG+"w185"+webNoticeItem.meta.poster} alt=""/>:<span className="web-identity-placeholder"><Icon d={I.film} size={26}/></span>}
+        <div><small>{extraText("Şu anda bunu izliyorsun","You are watching")}</small><strong>{webNoticeItem.meta?.title||webNoticeItem.parsed.title}{webNoticeItem.meta?.year?" · "+webNoticeItem.meta.year:""}</strong><small>{extraText("Eşleşme doğru değilse değiştirebilirsin.","You can change an incorrect match.")}</small></div>
+        <button className="chip" onClick={()=>{void setProp("pause",true);setRematch({path:webIdentityNotice!,item:webNoticeItem});setWebIdentityNotice(null);}}>{extraText("Değiştir","Change")}</button>
+      </div>}
+      {playing && !miniVideo && (
         <>
           <div className="top">
             <button className="nf" aria-label={tt("Geri")} onClick={close}><Icon d={I.arrowLeft} size={36} /></button>
+            <button className="nf" title={extraText("Küçült · çalma devam eder","Minimize · keep playing")} aria-label={extraText("Videoyu küçült","Minimize video")} onClick={()=>void minimizeVideo()}><span style={{fontSize:30}}>−</span></button>
             <WhisperPill onOpen={() => { if (s.path) setStudio({ tab: "create", path: s.path }); }} />
             <span className="grow" />
             <button className={"nf lockbtn" + (kbLock ? " on" : "")} aria-pressed={kbLock}
@@ -1742,6 +1950,7 @@ export default function App() {
               <PlaybackElapsed duration={s.duration} remaining/>
               {haves.length > 0 && downloadedPct < 100 && <span className="dl-pct" title={tt("İnen kısım")}>↓ {pctText(downloadedPct)}</span>}
             </div>
+            <div className="web-video-music-actions">{isYouTubeVideo(s.path||"")&&(()=>{const q={src:s.path!,title:displayTitle,yt:true,duration:s.duration};return <><button className={"chip"+(isLiked(q.src)?" on":"")} aria-label={tt("Beğendim")} onClick={()=>{toggleLike(q);setVideoRatingRevision(v=>v+1);}}><Icon d="M7 10v11H3V10zM7 11l5-8c1-1 3 0 2 3l-1 4h6c2 0 2 2 1 4l-2 6H7" size={20}/></button><button className={"chip"+(isDisliked(q.src)?" on":"")} aria-label={tt("Beğenmedim")} onClick={()=>{toggleDislike(q);setVideoRatingRevision(v=>v+1);}}><Icon d="M7 14V3H3v11zM7 13l5 8c1 1 3 0 2-3l-1-4h6c2 0 2-2 1-4l-2-6H7" size={20}/></button><button className="chip" onClick={e=>openMenu(e,loadMusicPlaylists().length?loadMusicPlaylists().map(p=>({label:p.name,act:()=>{saveMusicPlaylists(loadMusicPlaylists().map(row=>row.id===p.id?{...row,items:row.items.some(t=>t.src===q.src)?row.items:[...row.items,q]}:row));}})):[{label:extraText("Henüz liste yok","No playlists yet"),act:()=>{}}])}>{extraText("Listeye ekle","Add to playlist")}</button><SaveQueuePlaylist items={[q]} lists={loadMusicPlaylists} save={saveMusicPlaylists}/></>;})()}</div>
             <div className="controls">
               <div className="c-side">
                 <button className="nf" aria-label={s.paused ? tt("Oynat") : tt("Duraklat")} onClick={() => mpv("cycle", "pause")}>
@@ -1831,7 +2040,7 @@ export default function App() {
           <button className="quit-btn win" aria-label={tt("Pencere / tam ekran")} title={tt("Pencere modu / tam ekran")} onClick={() => toggleFull()}>
             <Icon d={I.full} size={18} />
           </button>
-          <button className="quit-btn" aria-label={tt("Programdan çık")} title={tt("Çık")} onClick={() => getCurrentWindow().close()}>
+          <button className="quit-btn" aria-label={tt("Programdan çık")} title={tt("Çık")} onClick={() => void getCurrentWindow().destroy()}>
             <Icon d={I.x} size={20} />
           </button>
         </div>
@@ -1864,6 +2073,7 @@ export default function App() {
         </div>
       )}
       {torrentDlg && <TorrentDialog initial={linkInit} onOpen={(src) => { setTorrentDlg(false); setLinkInit(undefined); load(src); }} onClose={() => { setTorrentDlg(false); setLinkInit(undefined); }} />}
+      {(webLoading||(playing&&!s.paused&&(s.buffering||s.seeking)))&&<div className="web-buffering" role="status"><span/>{extraText("Yükleniyor…","Buffering…")}{s.buffering&&typeof s.bufferPercent==="number"?` ${Math.round(s.bufferPercent)}%`:""}</div>}
       {tLoad && (
         <TorrentLoader phase={tLoad.phase} name={tLoad.name} stat={torrents.find((t) => t.id === tLoad.id)}
           onCancel={() => { tCancel.current++; setTLoad(null); mpv("stop"); }} />

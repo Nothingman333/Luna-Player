@@ -197,14 +197,15 @@ pub fn still(mpv_exe: &Path, file: &str, secs: f64, cache: &Path) -> Result<std:
 }
 
 /// A small frame at `secs` for the seek-bar hover preview (cached per file and second).
-pub fn frame_at(mpv_exe: &Path, file: &str, secs: u32, cache: &Path) -> Result<String, String> {
+pub fn frame_at(mpv_exe:&Path,file:&str,secs:u32,cache:&Path)->Result<String,String>{frame_at_with_headers(mpv_exe,file,secs,cache,None,None)}
+pub fn frame_at_with_headers(mpv_exe: &Path, file: &str, secs: u32, cache: &Path,referrer:Option<&str>,agent:Option<&str>) -> Result<String, String> {
     let key = crate::stable_cache::file_key("preview", file, b"");
     let dir = cache.join(key);
     let target = dir.join(format!("{secs}.jpg"));
     if target.exists() {
         return Ok(target.to_string_lossy().into_owned());
     }
-    let jpg = crate::preview::frame(mpv_exe, file, secs)?;
+    let jpg = crate::preview::frame_with_headers(mpv_exe, file, secs,referrer,agent)?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     // written beside and then renamed: the page may load the picture while it is still being written
     let tmp = scratch_dir(&dir, &secs.to_string()).with_extension("part");

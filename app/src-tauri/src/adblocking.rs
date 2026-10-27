@@ -1,10 +1,21 @@
 //! Network filtering for remote webviews only. Never evaluates filter-list code in Luna's UI.
 use adblock::{Engine, lists::{FilterSet, ParseOptions}, request::Request};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, path::PathBuf, sync::{LazyLock, Mutex}, time::{Duration, SystemTime}};
+use std::{collections::HashSet, path::PathBuf, sync::{LazyLock, Mutex, atomic::{AtomicBool,Ordering}}, time::{Duration, SystemTime}};
 use tauri::{AppHandle, Manager, Webview};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use windows_core::{HSTRING, Interface, PWSTR};
+// Native filtering is a fallback. An enabled uBlock already filters in the browser process.
+static EXTENSION_ACTIVE:AtomicBool=AtomicBool::new(false);
+pub fn extension_active(app:&AppHandle,on:bool){
+ if EXTENSION_ACTIVE.swap(on,Ordering::SeqCst)==on{return;}
+ for view in app.webviews().into_values().filter(|v|v.label().strip_prefix("luna-web-").and_then(|s|s.parse::<u32>().ok()).is_some()){
+  let _=view.with_webview(move|platform|{unsafe{if let Ok(core)=platform.controller().CoreWebView2(){
+   if on{let _=core.RemoveWebResourceRequestedFilter(&HSTRING::from("*"),COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);}
+   else{let _=core.AddWebResourceRequestedFilter(&HSTRING::from("*"),COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);}
+  }}});
+ }
+}
 const LISTS: [&str;2] = ["https://easylist.to/easylist/easylist.txt", "https://easylist.to/easylist/easyprivacy.txt"];
 const BUILTIN: &str = "||doubleclick.net^\n||google-analytics.com^\n||googlesyndication.com^\n||adservice.google.com^\n";
 #[derive(Default,Serialize,Deserialize)]
@@ -63,8 +74,9 @@ pub fn watch(view:&Webview)->Result<(),String>{
         let result=(||->windows_core::Result<()>{unsafe{
             let core=platform.controller().CoreWebView2()?;
             let environment=core.cast::<ICoreWebView2_2>()?.Environment()?;
-            core.AddWebResourceRequestedFilter(&HSTRING::from("*"),COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL)?;
+            if !EXTENSION_ACTIVE.load(Ordering::SeqCst){core.AddWebResourceRequestedFilter(&HSTRING::from("*"),COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL)?;}
             let handler=webview2_com::WebResourceRequestedEventHandler::create(Box::new(move|sender,args|{
+                if EXTENSION_ACTIVE.load(Ordering::SeqCst){return Ok(());}
                 let (Some(core),Some(args))=(sender,args)else{return Ok(())};
                 let mut context=COREWEBVIEW2_WEB_RESOURCE_CONTEXT::default();args.ResourceContext(&mut context)?;
                 // Never replace the top document with a blocked response.

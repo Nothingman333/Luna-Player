@@ -1,3 +1,4 @@
+import {publicReleaseNotes} from "./publicReleaseNotes";
 import {developerSessionActive} from "./devSession";
 import {visibleReleaseText,releaseChangeLine} from "./changeOrigin";
 import {RELEASE_HISTORY} from "./releaseHistory";
@@ -163,13 +164,19 @@ export function UpdateSettings({ onBackup }: { onBackup: () => void }) {
   );
 }
 
+const NL=String.fromCharCode(10);
 export function ReleaseNews(){
  const [developer,setDeveloper]=useState(developerSessionActive);
  const [video]=useState(()=>"/release-media/background-"+(Math.random()<.5?1:2)+".mp4");
  useEffect(()=>{const update=()=>setDeveloper(developerSessionActive());window.addEventListener("luna-dev-session",update);return()=>window.removeEventListener("luna-dev-session",update);},[]);
- const [open,setOpen]=useState(()=>store.get("releaseNewsSeen")!==APP_VERSION);
+ // Dev build only (Luna Dev), once per version: show the screen as if updating from 1.6.3, to check it. Never in releases.
+ const [open,setOpen]=useState(()=>{if(import.meta.env.DEV&&store.get("devNewsDemo")!==APP_VERSION){store.set("devNewsDemo",APP_VERSION);store.set("releaseNewsSeen","1.6.3");}return store.get("releaseNewsSeen")!==APP_VERSION;});
  if(!open)return null;
- const releases=unseenReleases(RELEASE_HISTORY,store.get("releaseNewsSeen"),APP_VERSION).map(row=>({...row,text:visibleReleaseText(row.text,developer)})).filter(row=>row.text.replace(/^#+.*$/gm,"").trim());
+ const unseen=unseenReleases(RELEASE_HISTORY,store.get("releaseNewsSeen"),APP_VERSION);
+ // Every version between the last one seen and this one, each with its own changes ([dev] lines only for developers).
+ const releases=unseen.map(row=>({...row,text:visibleReleaseText(row.text,developer)})).filter(row=>row.text.replace(/^#+.*$/gm,"").trim());
+ const seen=store.get("releaseNewsSeen");
+ const publicNotes=publicReleaseNotes(unseen,lang()==="en");
  const close=()=>{store.set("releaseNewsSeen",APP_VERSION);setOpen(false);};
- return <div className="modal-bg release-news-bg" onClick={e=>{if(e.target===e.currentTarget)close();}} onKeyDown={e=>{if(e.key==="Escape"){e.stopPropagation();close();}}}><section className="modal release-news" role="dialog" aria-modal="true" aria-labelledby="release-news-title"><video className="release-news-video" src={video} autoPlay loop muted playsInline preload="metadata" aria-hidden="true"/><div className="release-news-scrim"/><h2 id="release-news-title">{tt("Luna {0} · Neler yeni?",VERSION_LABEL)}</h2><div className="release-history">{releases.map(release=><section key={release.version}><h3>{release.version}</h3><p style={{whiteSpace:"pre-wrap"}}>{release.text.split("\n").map(line=>releaseChangeLine(line,lang()==="en")).join("\n")}</p></section>)}</div><div className="modal-actions"><button className="primary" autoFocus onClick={close}>{tt("Başlayalım")}</button></div></section></div>;
+ return <div className="modal-bg release-news-bg" onClick={e=>{if(e.target===e.currentTarget)close();}} onKeyDown={e=>{if(e.key==="Escape"){e.stopPropagation();close();}}}><section className="modal release-news" role="dialog" aria-modal="true" aria-labelledby="release-news-title"><video className="release-news-video" src={video} autoPlay loop muted playsInline preload="metadata" aria-hidden="true"/><div className="release-news-scrim"/><h2 id="release-news-title">{tt("Luna {0} · Neler yeni?",VERSION_LABEL)}</h2>{!developer?<>{seen&&unseen.length>1&&<p className="release-span">{tt("{0} sürümünden bu yana {1} güncelleme",seen,String(unseen.length))}</p>}<div className="release-history release-summary"><ul>{publicNotes.map(note=><li key={note}>{note}</li>)}</ul></div></>:<>{seen&&releases.length>1&&<p className="release-span">{tt("{0} sürümünden bu yana {1} güncelleme",seen,String(releases.length))}</p>}<div className="release-history release-timeline">{releases.map((release,n)=><section key={release.version} className={n===0?"latest":""}><h3><span className="release-ver">{release.version}</span>{n===0&&<span className="release-now">{tt("Şimdi")}</span>}</h3><ul>{release.text.split(NL).filter(line=>line.trim()&&!/^#/.test(line)).map((line,k)=><li key={k}>{releaseChangeLine(line.replace(/^\s*-\s*/,""),lang()==="en")}</li>)}</ul></section>)}</div></>}<div className="modal-actions"><button className="primary" autoFocus onClick={close}>{tt("Başlayalım")}</button></div></section></div>;
 }

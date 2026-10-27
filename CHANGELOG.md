@@ -1,3 +1,388 @@
+## 2.7.5CC — 2026-10-27
+
+- 2.7.3 ve 2.7.4 geri alındı: web videosunda çubuk davranışı 2.7.2 ile aynı.
+
+## 2.7.4CC — 2026-10-27
+
+- Web sesi başlayınca müzik çubuğu birden kaybolmuyor: bunu yapan eski bir gizleme kuralı kaldırıldı; çubuk sayfa hazır olunca kayarak gider.
+
+## 2.7.3CC — 2026-10-27
+
+- Web videosu başlarken siyah bar kalmaz: çubuk, sayfanın videoyu açarken yaşadığı ~1 saniyelik takılma geçtikten sonra kayar (sabit gecikme yerine sayfanın hazır olması beklenir, en çok 1,8 sn).
+
+## 2.7.2CC — 2026-10-27
+
+- Web videosu başlarken çubuk kısa bir an bekleyip sonra kayar: videonun açıldığı ilk anda ekran takılırken siyah bar görünmesin diye.
+
+## 2.7.0CC — 2026-10-27
+
+- Web videosu başlayınca çubuk kayarken solmuyor: içeriğiyle birlikte aşağı iner, arkasında siyah boş kutu kalmaz. Küçük film videosu kaymanın başında gizlenmez, çubukla birlikte iner.
+
+## 2.6.9CC — 2026-10-27
+
+- Web videosu başlayınca çubuğun aşağı kayışı yavaşladı ve yumuşadı; geri gelişi aynı kaldı.
+
+## 2.6.8CC — 2026-10-27
+
+- Web videosu başlayınca çubuk sayfanın arkasında birden kaybolmaz: kayma bitene kadar sayfadaki oyuk yerinde kalır, çubuk aşağı kayarak gider.
+
+## 2.6.7CC — 2026-10-27
+
+- Web videosu başlayınca küçük film oynatıcısı aşağı kayarak gider: video artık pencerenin alt kenarına yapışıp sonra birden kaybolmuyor.
+
+## 2.6.6CC — 2026-10-27
+
+- Web videosu başlayınca çubuk birden kaybolmaz, kayarak gider: sayfadaki oyuk çubuktan pencerenin altına kadar uzanır, video başlarken sayfa meşgul olsa da animasyon görünür.
+
+## 2.6.5CC — 2026-10-27
+
+- Web videosu başlayınca küçük film çubuğu giderken küçük video da çubukla birlikte aşağı kayar, birden kaybolmaz.
+
+## 2.6.4CC — 2026-10-27
+
+- Web’den açılan bir filmin sayfasındaki ⋯ menüsünde “Bunu izliyorsun” kontrolü o film için kapatılıp açılabilir.
+- Küçük film çubuğu web videosu durunca geri gelirken küçük video da çubukla birlikte kayar; yerinde birden belirmez.
+
+## 2.6.3CC — 2026-10-27
+
+- Web videosu durunca çubuk da gittiği gibi kayarak geri gelir.
+- Film ile şarkı arasında geçerken çubuk yalnız yerinde yumuşakça belirir; ardından aşağıdan yukarı ikinci bir hareket gelmez.
+
+## 2.6.2CC — 2026-10-27
+
+- Web sayfasında çubuk geri gelirken de kayarak gelir: sayfadaki oyuk animasyon boyunca her karede çubuğu izler.
+- Film ile şarkı arasında geçerken yeni çubuk aynı yerde yumuşakça belirir (aşağıdan zıplamaz).
+
+## 2.6.1CC — 2026-10-27
+
+- Web sayfasında müzik ve küçük film çubuğu sayfanın üstünde yüzer: çubuğun şekli sayfa penceresinden oyulur, altta siyah şerit kalmaz ve çubuk gelip giderken sayfa yeniden boyutlanmaz.
+
+## 2.6.0CC — 2026-10-27
+
+- Web sayfasında müzik ve küçük film çubukları yeniden görünür; yalnız web sayfası ses çalarken kayarak gizlenir, ses durunca geri gelir.
+
+## 2.5.9CC — 2026-10-27
+
+- Web sayfasında video başlayınca müzik çubuğu gizlenince altta kalan siyah boşluk kaldırıldı; sayfa tam yüksekliğe geçer.
+- Küçük film çubuğu da web videosu sesle başlayınca filmi duraklatır ve kayarak gizlenir; küçük video tarayıcının üstünde tek başına kalmaz. Film çubuğu görünürken web sayfası ona yer açar.
+
+## 2.5.8CC — 2026-10-27
+
+- Çubuktaki ses kaydırıcısı her zaman görünür.
+
+## 2.5.7CC — 2026-10-27
+
+- Çubuktaki ses kaydırıcısının üst üste binen eski kuralları temizlendi; tek kural: yeri hep ayrılı, hoparlöre gelince açılır, hoparlörden ve kaydırıcıdan ayrılınca kapanır.
+
+## 2.5.6CC — 2026-10-27
+
+- Çubuktaki ses kaydırıcısı fare hoparlörde ya da kaydırıcıdayken açık kalır, ikisinden de ayrılınca kapanır.
+- Web sayfasında video başlayıp müzik duraklayınca müzik çubuğu aşağı kayarak gizlenir ve sayfa tam yüksekliğini korur; müzik yeniden çalınca çubuk kayarak geri gelir.
+
+## 2.5.5CC — 2026-10-27
+
+- Neler yeni ekranı onaylanan tasarıma getirildi: bulanık videonun üstünde koyu mavi cam kart, sade başlık, ince zaman çizgisi üzerinde noktalı liste ve sade Başlayalım düğmesi.
+
+## 2.5.4CC — 2026-10-27
+
+- Neler yeni ekranı herkes için yeni tasarımda: daha ince başlık, altında "… sürümünden bu yana N güncelleme" satırı ve renkli noktalı liste; bulanık video arka plan korunur.
+
+## 2.5.2CC — 2026-10-27
+
+- Ses kaydırıcısı hoparlörün üzerine gelince aynı yerde belirir, yeri hep ayrılı olduğu için hiçbir şey kaymaz; hemen kaybolmaz.
+- Film ile şarkı arasında geçerken büyük oynatıcının bir an görünüp sayfanın yenileniyormuş gibi görünmesi kaldırıldı; film doğrudan küçük çubukta açılır.
+
+## 2.5.1CC — 2026-10-27
+
+- Çubuktaki ses ayarı açılır balon yerine ses düğmesinin yanında her zaman görünen kısa, ince bir kaydırıcı; fare altında hiçbir şey açılıp kapanmaz.
+
+## 2.5.0CC — 2026-10-27
+
+- Çubuktaki ses ayarı artık ses düğmesinin üstünde küçük bir balon olarak açılır; düğmeleri itmediği için çubuk fare altında titreyip bozulmaz.
+
+## 2.4.9CC — 2026-10-27
+
+- Küçültülmüş film varken YouTube şarkısı açınca film beklemeye alınmıyor, "filme geç" oku çıkmıyor ve film yeniden açılınca oynatıcı kayboluyordu; düzeltildi.
+
+## 2.4.8CC — 2026-10-27
+
+- Luna her açılışta Film bölümünde başlar.
+
+## 2.4.7CC — 2026-10-27
+
+- Küçük çubuktaki videoya tıklamak filmi büyütüp tam ekranda açar.
+
+## 2.4.6CC — 2026-10-27
+
+- Küçük film çubuğu müzik tarafında da filmin turuncu rengini kullanır. Geçiş noktaları kendi renginde: şarkı yeşil, film turuncu; beklerken soluk, çalarken tam renk.
+
+## 2.4.5CC — 2026-10-27
+
+- Çubuktaki ses kaydırıcısı artık yalnız ses düğmesinin üzerine gelince açılır; filme/şarkıya geç okuna giderken çubuk genişlemez.
+
+## 2.4.4CC — 2026-10-27
+
+- Film ile şarkı arasında geçiş artık çubuğun içinde: tek ok düğmesi ve hangisinin çaldığını gösteren iki nokta. Çubuğun üstündeki sekmeler kaldırıldı.
+- Küçültülmüş filme şarkıdan geri dönünce oynatıcının tamamen kaybolması düzeltildi (film yanlışlıkla müzik sayılıyordu); film küçük oynatıcıda devam eder.
+
+## 2.4.3CC — 2026-10-27
+
+- Küçük video çubuğu müzik çubuğuyla aynı şekilde: ortada, tek satır, ~780px, zaman çizgisi üst kenarda, küçük video kapak yerinde. Şarkı/film sekmeleri arasında geçiş yumuşak.
+
+## 2.4.2CC — 2026-10-27
+
+- Tam ekrandayken filmi küçük oynatıcıya almak (−) artık tam ekrandan çıkarmaz; büyütünce film yine tam ekranda devam eder.
+
+## 2.4.1CC — 2026-10-27
+
+- Tam ekrandayken filmden Esc ile çıkmak artık tam ekranı kapatmaz; tam ekrandan yalnız F11 ile çıkılır (oynatıcının kendi açtığı tam ekran film kapanınca kapanır).
+
+## 2.4.0CC — 2026-10-27
+
+- Pencerenin büyütme (□) düğmesi yeniden doğrudan tam ekrana geçer; tam ekranda farenin ekranın üst ortasına gidince çıkış düğmeleri görünür.
+
+## 2.3.9CC — 2026-10-27
+
+- Luna son kapanıştaki boyutla değil, her açılışta 1152×684 boyutunda ve ortada açılır.
+- Arkadaş puanlarındaki buçuklu yıldız artık gerçek yarım yıldız olarak çizilir; boş yıldızlar soluk görünür.
+- Müzik çubuğu tek satır ve ~780px: solda şarkı, sağda bütün düğmeler yan yana. Ses kaydırıcısı ses simgesinin üzerine gelince açılır.
+
+## 2.3.8CC — 2026-10-27
+
+- Luna 1152×684 boyutunda, ekranın ortasında açılır.
+- Müzik çubuğu artık tam genişlikte değil: ortada, en fazla 980px genişliğinde kompakt bir çubuk.
+
+## 2.3.7CC — 2026-10-27
+
+- Müzik çubuğu daha kompakt: aynı düğmeler, yarı yükseklik. Zaman çizgisi üst kenarda ince bir çizgi; üzerine gelince kalınlaşır ve tutamaç çıkar. Süre şarkı bilgisinin yanında yazar.
+
+## 2.3.6CC — 2026-10-27
+
+- Film küçültülmüşken müzik açınca alt çubuk artık kaybolmaz: son açılan çalar, film kaldığı yerde bekler. Alt çubuğun üstündeki ♪ şarkı / ▶ film sekmeleriyle ikisi arasında geçilir.
+- Arkadaş puanları penceresi afişin içine sığar, cam görünümündedir; uzun yorumlar pencerede kaydırılır.
+- Bu akşam ne izlesem: arkadaş seçimi düğmesi yalnız Önerilenler seçiliyken yumuşakça görünür.
+
+## 2.3.5CC — 2026-10-27
+
+- Ana sayfa vitrininde Detaylar ve “Bu akşam ne izlesem?” düğmeleri aynı görünür; parlak bir resim üstünde düğme artık griye dönmez.
+
+## 2.3.4CC — 2026-10-27
+
+- Film kartlarının düğmeleri her yerde Öneriler tasarımında: afişin alt kısmında tek sıra. Arkadaş fotoğrafları artık düğmeleri kapatmaz; üzerine gelince sıranın sonuna geçer.
+- Büyük film ızgaralarında kartlar daha hızlı: arkadaş puanları tek seferde hazırlanır, düğmeler yalnız kartın üzerine gelince oluşturulur.
+
+## 2.3.3CC — 2026-10-27
+
+- Ortak film kartı: Keşfet, ana sayfa satırları, Filmler ve Öneriler kartlarında filmi izleyen arkadaşların fotoğrafları ve puanları görünür; fotoğraflara gelince herkesin yıldızı açılır.
+- Kartların üzerine gelince her yerde aynı hızlı düğmeler çıkar: Oynat, Fragman, Detay, Sonra izle, İzledim ve Diğer menüsü.
+
+## 2.3.2CC — 2026-10-27
+
+- Öneri listelerindeki afiş kartlarına Sonra izle ve İzledim düğmeleri eklendi.
+
+## 2.3.1CC — 2026-10-27
+
+- Keşfet kategorilerinde birden fazla tür birlikte seçilebilir.
+- Kategori sonuçları sınırlı bir sırada kalmaz; aşağı kaydırdıkça o kategorideki yeni filmler yüklenir.
+
+## 2.3.0C — 2026-10-27
+
+- Keşfet kategori menüsü okunabilir cam görünümüne uyarlandı; dışarı tıklama ve Escape ile kapanır.
+- Başka bir öneri hazırlanırken mevcut film görünür kalır. Afiş değiştiren hızlı döngü kaldırıldı; özet ve oyuncular için yer ayrılarak kartın boyut sıçraması azaltıldı.
+
+## 2.2.9C — 2026-10-27
+
+- Küçük video oynatıcısında pencere boyutlandırma ve görünüm geçişleri sırasında görüntünün ana arayüzü kaplamasına karşı yerel video alanı ayrıldı.
+- Küçültme tam ekrandan çıkış tamamlandıktan sonra yapılır. Küçük oynatıcı pencere kenarından yukarı alındı; ses kontrolünü gizleyen müzik çubuğu kuralları ayrıldı.
+
+## 2.2.8CC — 2026-10-27
+
+- Küçük video oynatıcısı müzik çubuğuyla aynı düzende: solda video ve başlık, ortada oynat/duraklat, 10 sn geri/ileri ve tıklanabilir ilerleme çubuğu, sağda ses ve kapat.
+
+## 2.2.7C — 2026-10-27
+
+- Küçük oynatıcı açıkken film detayına girildiğinde oluşan siyah ekran düzeltildi. Aynı film veya başka bir film oynatıldığında büyük görünüm açılır.
+- Küçük oynatıcıya ses seviyesi ve sessize alma kontrolleri eklendi. Tam ekrandan çıkınca pencere ekranın çalışma alanına oturtulur.
+
+## 2.2.6C — 2026-10-27
+
+- Küçük video modu pencere yeniden boyutlandırılırken korunur; geçici ölçü hatası videoyu büyütmez.
+- Pencereyi büyütmek otomatik tam ekrana geçirmez. Oynatıcı kontrolleri, ses/altyazı ve diğer pencereler dar ve kısa ekranlara uyar.
+
+## 2.2.5C — 2026-10-27
+
+- Kopya film afişlerinde her dosyanın çözünürlük ve SRT yan dosya bilgisi görünür; eksik çözünürlük bilgisi açıkça belirtilir.
+- Keşfet kategori menüsü film/dizi, kategori ve süre gruplarıyla yenilendi.
+- Yandex sonuç bağlantıları normal tıklamada doğrudan açılır; yeni sekme kısayolları korunur.
+
+## 2.2.4C — 2026-10-27
+
+- Kopya filmler daha belirgin bir afiş destesi, çerçeve ve kopya rozetiyle gösterilir; üzerine gelince kopyalar yana açılır.
+
+## 2.2.3C — 2026-10-27
+
+- Küçük video oynatıcısının boş görüntüsü düzeltildi; kontroller ve süre bilgisi bir araya getirildi.
+- Kayıtlı web videosu açılamadığında sessizce tarayıcıya geçmek yerine kaynak yenileme seçeneği sunulur; izleme konumu korunur.
+- Ana sayfa düğmeleri eşleştirildi; kopya filmlerin üst üste afişleri belirginleştirildi.
+
+## 2.2.2C — 2026-10-27
+
+- Web’den açılan filmler kapatılıp Filmler bölümünden yeniden açıldığında kaldığın yer korunur. Baştan başla seçeneği aynı şekilde çalışır.
+
+## 2.2.1C — 2026-10-27
+
+- Web’de gezinirken reklam engellemenin oluşturduğu gereksiz yük azaltıldı; sayfa yükleme deneyimi iyileştirildi.
+
+## 2.1.9C
+
+- Kopya film afişleri kapalıyken tek başlık ve bilgi satırı gösterir; yana açıldığında her kopyanın bilgileri görünür.
+- Reklam engelleyici geçici sorgu hatasında açık durumunu korur; yeniden kurulum başlatmaz.
+
+## 2.1.8C
+
+- Web sekmeleri ve bölümler arasında geçişte arka plan sesi korunur. YouTube parçaları ve playlistler mevcut müzik aktarım penceresinden seçilir.
+- Video için küçük oynatıcı, beğenme ve playlist seçenekleri eklendi. Oynatıcı ses oturumu Luna Player adıyla gösterilir.
+
+## 2.1.7
+
+- Reklam engelleyici eklenti yönetimi, asistan balonu yerine yalnız gerçek web sekmesinin profilini kullanır.
+
+- YouTube playlist aktarımı tek videoyu çalmak yerine mevcut şarkı seçme ve liste oluşturma penceresini kullanır. Aktarım oku hafifçe vurgulanır.
+- Ana sayfadaki film kopyaları üst üste toplanıp yana açılır. Web başlıklarındaki sezon ve bölüm bilgileri dizi olarak ayrıştırılır.
+- Kategoriler, mevcut Keşfet görünümünün içeriklerini filtreleyen açılır menüdür. Ana sayfanın seçim düğmesi ortak cam görünümünü kullanır.
+
+## 2.1.6
+
+- Arkadaş önerileri bütün listeyi beklemez: kayıtlı TMDB tür ve süre bilgileri önce kullanılır; eksikler küçük gruplar halinde, uygun aday bulunana kadar yüklenir.
+- Öneriler yüklenirken afişler yumuşak bir sıralama animasyonuyla bekleme durumunu gösterir.
+
+## 2.1.4
+
+- Rust tarayıcı modülünün dosya açıklaması düzeltildi; E0753 derleme hatası giderildi.
+- Klip başlangıç ve bitiş alanları dakika:saniye veya saat:dakika:saniye biçiminde gösterilir ve düzenlenir. Geçersiz zamanlar kaydedilmez.
+
+## 2.1.5
+
+- Web filmlerinin değişen akış adresleri ve oynatıcı yönlendirmelerinde devam kaydı korundu; devam konumuna ulaşılmadan sıfır saniye kaydedilmesi engellendi. Film kopyaları ortak ilerleme gösterir ve katalogda yana açılan afiş gruplarında toplanır.
+- Luna Web Araçlar bölümüne kullanıcının sağladığı uBlock Origin Lite Manifest V3 paketiyle aç/kapat düğmesi eklendi. Otomatik oynatma yalnız ses kaynaklarını ve 8 saniyeden kısa klipleri atlar. Playlist bağlantıları mevcut müzik içe aktarma ekranını açar.
+- HDR kaynağı ve oynatıcının renk çıkışı ayrı gösterilir; HDR çıkış politikası ekranın otomatik bildirilen yeteneklerini izler.
+- Arkadaş önerileri seçilen kişilerin içe aktarılmış kayıtlarını kullanır; eksik tür ve süre bilgileri TMDB ile tamamlanır. Arkadaş puanları ilgili kişinin film değerlendirme sayfasını açar. TMDB puanları açıkça etiketlenir.
+
+## 2.1.3
+
+- Web aktarımının geçici sessize alması kullanıcı sekme tercihinden ayrıldı. Kaynak sayfa, iç içe oynatıcı kareleri ve yeniden başlatma girişimleri native kare kontrolüyle durdurulur.
+- HLS ana manifestleri otomatik seçimde önceliklidir. Uzantısız medya adresleri de boyut/süre sınırıyla incelenir; yalnız ses codec'i taşıyan kaynaklara çözünürlük etiketi verilmez.
+- Video açılırken vid=auto dosyaya özel uygulanır. Yalnız ses çıkan Web kaynağında başka video kaynağı sınırlı sayıda denenir; uygun kaynak yoksa seçim ekranına dönülür.
+- YouTube'da mevcutsa HDR video ve ayrı ses birlikte tercih edilir. Görüntü paneli kaynak HDR/SDR durumu ile ekran çıkışını ayrı gösterir.
+- Ana sayfadaki Bu akşam ne izlesem düğmesi slayt göstergelerinin soluna, mevcut sayfa düğmelerinin stiliyle taşındı.
+
+## 2.1.2
+
+- YouTube videoları film kütüphanesi ve devam listesinden ayrıldı; önceki filmin altyazı ve parça durumu yeni videoya taşınmaz. Eski kayıtlar silinmez.
+- Web kaynaklarında ayrı ses grubu bulunan HLS kalite seçenekleri ilgili ses akışıyla birlikte açılır. YouTube görüntü ve sesini birlikte alan sayfa oynatıcısını kullanır.
+- Kalite bilgisi oynatılan akışın çözünürlüğünden alınır; doğrulanmış PQ/HLG içeriğinde HDR etiketi gösterilir. Kare içindeki oynatma sinyali otomatik açılmada kullanılır.
+- Yalnız Web filmlerinde afiş/ad içeren 10 saniyelik eşleştirme bildirimi ve Değiştir düğmesi eklendi. Film detaylarının menüsünden de Web eşleşmesi değiştirilebilir.
+
+## 2.1.1C — 2026-10-25
+
+- Web Araçlar menüsüne en uygun kaynağı otomatik seçme ve oynayan web videolarını Luna’da otomatik açma seçenekleri eklendi; varsayılanları kapalıdır. Ses akışları ve tespit edilen reklam önizlemeleri video seçiminden ayıklanır.
+- Kaynak açılamadığında, zaman aşımında veya video motoru hatasında tarayıcıya ve kaynak seçimine dönülür. Luna’da video açılırken sayfadaki video duraklatılır; site tarafından yeniden başlatılması aktarım boyunca engellenir.
+- Webden açılan YouTube bağlantıları görüntülü oynatıcıyı kullanır. Site başlıklarındaki izle ekleri temizlenir; film için sayfada belirtilen çıkış yılı TMDB eşleştirmesine eklenir.
+
+## 2.1.0C — 2026-10-25
+
+- Web kaynak seçiminde HLS ana listesindeki gerçek çözünürlükler okunur; çok kaliteli akışlarda çözünürlük aralığı gösterilir. Bilgi bulunamayan kaynaklar Kalite bilinmiyor olarak belirtilir.
+- Oynatıcı kalite alanı açık videonun gerçek çözünürlüğünü gösterir; belirsiz Akış etiketleri açıklayıcı hale getirildi.
+
+## 2.0.9C — 2026-10-25
+
+- Webde Luna’da oynat, birden fazla video kaynağı bulduğunda süre, kalite ve kaynak bilgileriyle seçim penceresi açar. Tek kaynak doğrudan açılır; seçim iptal edilirse oynatma başlamaz.
+
+## 2.0.8C — 2026-10-25
+
+- Kaynak videolar süre ve çözünürlüğe göre sıralanır; reklam olarak tanınan ve kısa kaynaklar ana videonun önüne geçmez. Erişilebilir gömülü oynatıcıların video bilgileri de değerlendirilir.
+- Kalite listesi ekranın sınırlarına göre açılır; boş/sayısal kalite etiketleri düzenlendi. Uzun altyazı adlarının diğer sütuna taşması giderildi.
+- Klip karelerinde yüklenme durumu gösterilir. Web sahne ızgarası daha az ağ isteğiyle ve yakın zamandaki kareleri önce yükleyerek açılır; önizlemede düşük HLS kalitesi kullanılır.
+- Webden gelen film adı, site ve izleme eklerinden temizlenip mevcut otomatik TMDB eşleştirmesine verilir.
+
+## 2.0.7C — 2026-10-25
+
+- Tarayıcı videolarında film adı kaynak sayfasından alınır. Devam kaydı sayfa kimliğini, kaynak adresini, referrer bilgisini ve erişilebilir ses/altyazıları saklar; yeniden açılışta oynatma bağlamı geri yüklenir.
+
+- İnternet videosu açılırken ve ileri sarma sırasında yüklenme göstergesi eklendi. Önizleme, sahne ızgarası ve klip aktarımı kaynak adresi ile gerekli HTTP başlıklarını kullanır; klip penceresindeki sıkışma düzeltildi.
+- Tarayıcıda erişilebilir JW/HLS kaynaklarının yakalanması genişletildi; kaynak birden fazla kalite sunuyorsa Görüntü panelinden seçilebilir. Açılamayan videolarda tekrar deneme açıklaması gösterilir.
+- Luna’da video başladığında tarayıcıdaki video duraklatılır. Tarayıcı sesi müziği duraklatır ve müzik çubuğunu gizler; video tam ekranında Luna çubukları gizlenir.
+- Akşam önerisinde konu, otomatik çeviri ve oyuncular gösterilir; afişten ayrıntılar açılır. Arkadaş puanları cam temaya uyar; ana sayfa düğmesi ve asistan müzik kontrolleri yeniden hizalandı.
+
+## 2.0.6C — 2026-10-25
+
+- Ana sayfada Bu akşam ne izlesem düğmesi, önerileri devam kartıyla aynı alanda yumuşak geçişle açar; sayfaya yeniden gelince devam kartı gösterilir. Arkadaş seçimine yuvarlak profil fotoğrafları eklendi.
+- Tarayıcıdan video açılmasını engelleyen oynatıcı referrer doğrulaması düzeltildi; yalnız güvenli HTTP(S) kaynak adreslerine izin verilir.
+
+## 2.0.4C — 2026-10-25
+
+- Yanıt biçimi ve tarayıcı arama motoru seçimleri Luna temasına uygun, klavyeyle kullanılabilen menülere dönüştürüldü. Başlangıç araması ile adres çubuğu birbirinden ayrıldı.
+- Letterboxd profil fotoğraflarında Gravatar desteği ve yeni fotoğraf ayrıştırıcısıyla yeniden deneme eklendi.
+- Tarayıcıda diğer siteler için Luna’da oynat erişimi açıldı; erişilebilir video, HLS/DASH, ses ve altyazı kaynakları mevcut oynatıcıya aktarılır.
+
+## 2.0.3C — 2026-10-25
+
+- Öneriler filtre değişince ekranda kalır; gösterilen filmler 8 saat sonra yeniden aday olabilir, yeni filmler önce gelir. Arkadaş puanlarının yanında kayıtlı yorumlar görünür.
+- Tarayıcı asistanı YouTube videosunu sağlayıcıya göre özetler: Gemini video bağlantısını, diğerleri alınabilen altyazıyı kullanır. Özet isteği YouTube simgesi ve özel bekleme animasyonu ile gösterilir.
+- Tarayıcı yeni sekme bağlantılarını tekrar sormadan açar; asistan bağlantıları varsayılan tarayıcıya gider.
+- Geniş asistanda yanıt biçimi üst çubuğa taşındı; müzik kontrolleri, şarkı önizleme düğmeleri ve genişleyen liste onayı eklendi. Film ayrıntıları ekran boyutuna uyar.
+
+## 2.0.2C — 2026-10-25
+
+- Sistem ve bakım için ayrı bir sistem simgesi kullanılır.
+- Kütüphane önerileri tükenince yeniden döner; filtreler uygun seçenek bırakmazsa kütüphaneden alternatif gösterilir.
+- Bu akşam ne izlesem bölümüne arkadaş seçimi olan Önerilenler kaynağı eklendi. Seçilen filmin önerenleri, varsa kişisel puanları ve notları gösterilir.
+
+## 2.0.1C — 2026-10-25
+
+- Öneriler kişi bölümüne Fotoğrafı yenile ve Fotoğraf seç eklendi; site erişimi engellense bile yerel profil fotoğrafı kullanılabilir ve başarısız yenilemede mevcut fotoğraf korunur.
+
+## 2.0.0C — 2026-10-25
+
+- Arkadaş ortalaması /5 gösterilir; üzerine gelince kimin kaç puan verdiği ve puansız izlemeler görünür. Bu bölüm Öneriler film ayrıntılarında da yer alır.
+- Bağlı Letterboxd profillerinin fotoğrafları erişilebildiğinde yüklenir; fotoğraflardan profillere gidilir. Öneriler kişi kartları ve kişi başlığına da profil erişimi eklendi.
+
+## 1.9.9C — 2026-10-25
+
+- Film detaylarında kalan süre toplam sürenin yanında dakika olarak gösterilir. Alttaki eski süre satırı kaldırıldı.
+- Bu filmi izleyen arkadaşlar Önerilerdeki izleme/beğeni/puan kayıtlarından bulunur; üst üste duran ad simgeleri üzerine gelince yana açılır.
+
+## 1.9.8C — 2026-10-25
+
+- Asistan yanıtlarındaki küçük film simgesi yalnız kütüphanede bulunan filmlerde gösterilir; diğer bilinen filmlerin üzerine gelince açılan seçenekler korunur.
+
+## 1.9.7C — 2026-10-25
+
+- Asistan yanıtlarında film adlarının yanındaki beğeni emojisi ve Kütüphanende etiketi tek küçük film simgesinde birleştirildi; durum bilgileri ipucunda, işlemler simgenin menüsünde korunur.
+
+## 1.9.6C — 2026-10-25
+
+- Filmlere beğeni, beğenmeme veya puan vermek izlenmiş kaydını da oluşturur; seçimi kaldırmak izleme geçmişini silmez.
+- Asistana izlediğini söylediğin filmler yanıtın yanında sırayla değerlendirilir: beğeni, 10 üzerinden puan ve isteğe bağlı not Gönder ile mevcut deftere kaydedilir.
+- Keşfet içerik uyarısı yıldızı afişin sağ üst köşesine taşındı; bulanık görselin üzerinde net kalır.
+
+## 1.9.5C — 2026-10-25
+
+- Görünüm ve erişilebilirlik seçenekleri Oynatma ve bağlantılar içine, Luna Web seçenekleri Genel içine taşındı; iki ayrı sekme kaldırıldı.
+- Bu akşam ne izlesem kartına mevcut beğeni/puanlama sistemini kullanan afiş üstü beğen/beğenme ve afiş altı Asistana sor düğmeleri eklendi. Üst kısayollar ortalandı.
+
+## 1.9.4C — 2026-10-25
+
+- Geniş asistandaki koleksiyon onay paneli kullanılabilir alana yayılır; film, müzik ve kitap grupları sığdıkça yan yana yerleşir. Liste yüksekliği pencereyle büyür, küçük asistanın kompakt görünümü korunur.
+
+## 1.9.3C — 2026-10-25
+
+- Genel ayarları sadeleştirildi: görünüm/erişilebilirlik, sistem/bakım ve web seçenekleri ilgili bölümlere ayrıldı; atlama/ses oynatmaya, donanım Upscaler’a taşındı. Ayar kartlarının yüzeyleri eşitlendi.
+- Sohbet araması, dizini ve üç nokta yalnız geniş asistanda, film adının karşısındaki üst satırda yer alır. Kopyalama/indirme üç noktada; menü katmanları okunaklıdır.
+- Tanıtımın Film/Müzik/Kitap vurguları aynı zaman çizelgesine alındı; fazladan kenarlık ve eksik kitap çizgileri düzeltildi, geçişler hafifletildi.
+- Keşfet'teki bulanık afişlerin adında kırmızı içerik uyarısı yıldızı gösterilir; puan ve etiketler net kalır.
+- AI token sayacı yanıt geldikçe güncellenir. Elle token bütçesi giriş alanı kaldırıldı; kalan hesap kotası alınamadığında açıkça belirtilir.
+
 ## 1.9.2C — 2026-10-24
 
 - Müzik zevk profili kayıtlarında mevcut kapaklar gösterilir. Film, kitap ve müzikte konu önemi /5 olarak okunur.
@@ -5,7 +390,6 @@
 - Genel arama cam görünümü, kapak/afiş ve mevcut puan, süre ve tür bilgileriyle düzenlendi.
 - Ana sayfa önerileri gösterilmiş filmleri hatırlar, tekrar önermez ve Sonra izle listesine kaydedilebilir.
 - Yenilik ekranındaki Başlayalım yanındaki koyu şerit kaldırıldı.
-- [dev] F3, kilit açıldıktan sonra doğrudan ekran görüntüsü alan seçimini başlatır; Alt+D not panelini açar.
 
 ## 1.9.1C — 2026-10-24
 
@@ -26,20 +410,13 @@
 ## 1.8.8C — 2026-10-24
 
 - Kitaptan çıkışta kapanmış Foliate sayfa belgelerine erişim düzeltildi.
-- [dev] Geliştirici notlarına çözüldü işareti ve seçili notu silme eklendi; intro tekrarı ve uygulama oturumu boyunca açık kalma sağlandı.
 - Dışarıdan kapsamı yalnız kütüphane dışındaki filmleri önerir. Genel arama kütüphane, öneriler, TMDB film/dizi, kitap ve müzik sonuçlarını ayırır.
 - F11 bildirimi üst ortaya taşındı; arka plan resimleri galerisi ve yerel token bütçesine göre kalan yüzde eklendi.
 - Güncelleme ekranında kullanıcı videolarından rastgele, karartılmış ve bulanık arka plan oynatılır.
-- [dev] Geliştirici değişiklik notları yalnız açık geliştirici oturumunda görünür.
 
 ## 1.8.7C — 2026-10-24
 
-- [dev] Geliştirici notları panoya kopyalama veya rapor kaydetme sonrasında görüntü ve çizimleriyle kalıcı, kapalı listeye eklenir. Ayrı not ekleme ve eski kaydı yeniden açma eklendi.
 - Kütüphanede / Fark etmez seçimi Benim için seç yanında iki belirgin, kayar göstergeli düğme oldu.
-
-## 1.8.6C — 2026-10-24
-
-- [dev] Ekran alanı seçiminde fareyi bırakınca görüntü doğrudan not paneline döner; ikinci onay kaldırıldı. İptal, bozuk görüntü ve yakalama zaman aşımı akışları düzeltildi.
 
 ## 1.8.5C — 2026-10-24
 
@@ -47,21 +424,14 @@
 
 ## 1.8.4C — 2026-10-24
 
-- [dev] Geliştirici notları sağ üstte kompakt panel oldu; karartma kaldırıldı. Seçili alan yakalama ve resmi panoya kopyalama eklendi.
 - Bu akşam ne izlesem bölümüne tek düğmeyle Kütüphanede / Fark etmez kapsam seçimi eklendi; süre seçenekleri korundu.
 
 ## 1.8.3C — 2026-10-24
 
 - EPUB sayfa notlarına okuyucu sayfası eklendi; defterden alınan notlar sayfa etiketini korur. Eski notların kayıtlı konumu okuyucuda ziyaret edilince sayfa etiketi tamamlanır.
 
-## 1.8.3CC — 2026-10-24
-
-- [dev] Geliştirici araçları yalnız sahibinin geliştirici şifresiyle açılır; ilk açılışta şifre belirleme adımı kaldırıldı.
-
 ## 1.8.2C — 2026-10-24
 
-- [dev] F3 geliştirici girişi, yerel şifre kurulumu ve 30 dakikalık kilitli oturum eklendi.
-- [dev] Alt+D not ve ekran görüntüsü paneli, Luna/tüm ekran çekimi, çizim/alan işaretleme ve okunabilir rapor dosyaları eklendi.
 - Dış kaynaklı yenilik maddeleri kaynak etiketiyle kaynaklarını sonunda gösterir; eski bilinmeyen kayıtlar tahminle etiketlenmez.
 
 ## 1.8.1C — 2026-10-24
@@ -128,12 +498,6 @@
 - JustWatch sonuçları ve önbelleği yalnız seçilen ülkeye aittir; farklı ülkeye geri düşmez. F11 bildirimi küçültülüp üst gezinme çubuğundan uzaklaştırıldı.
 - Yerel, yayımlanmamış sürüm. Kontroller ve sınırlar: docs/LUNA-1.7.2C-UI.md. Commit/push/release/kurulum paketi yok; push Claude’da.
 
-## 1.7.1C — Luna 2 PDF arayüz ve kullanım düzeltmeleri
-
-Kullanıcının onluk devir kuralıyla önceki yerel 1.6.11C numarası 1.7.1C olarak düzeltildi; özellikler aynı.
-
-UP/ses/altyazı düzeni, donanım/RAM rehberi, yerel AI token sayacı, elle altyazı arama, kompakt stüdyo, menü/yorum/afiş konumu, dizi bölüm sayıları ve sürüm yenilik penceresi. Ayrıntı ve sınırlar: docs/LUNA-1.6.11C-PDF.md.
-
 ## 1.6.10C — 2026-10-23 (local, unreleased)
 - Merge the cumulative beta source package over local 1.6.9C without reverting SQLite, Foliate, playback clock, native safety or lazy views.
 - Add saved library filters/comparison, browser tab groups and notebook improvements, assistant/taste/text fixes and native book/frame fixes.
@@ -173,7 +537,6 @@ UP/ses/altyazı düzeni, donanım/RAM rehberi, yerel AI token sayacı, elle alty
 - **Backups:** the one-file backup carries the web history and settings like the rest of your data (it is your own file). "Clear browsing data" removes the history from the app; make a new backup afterwards if you keep old ones.
 - Checks: `npm run test:web-plus` (31 checks on the models and the native-side guards), `npm run test:find-page` (10 checks of the find script in a real Chromium: what it skips, that the page is never changed, wrap-around, limits; caught a collapsed-range bug in the first version), `npm run test:web-ui` (17 end-to-end flows in a real Chromium with a mocked native layer). The last two are local tools and need Playwright.
 
-
 ## Unreleased — Luna Web "moonlight" pass: command palette, quick searches, history, pinned tabs, a livelier start page, Listen (not yet released)
 
 - **Command palette (Ctrl+K):** one box for everything. In Web: this page's commands (reading view, translate, favourite, zoom, pin, copy link …), open tabs, favourites, history, search engines and quick searches; an address or a search typed into it is offered too. In the library (Film, Music, Books): jump to any part or page, open Settings, Collections, History, the assistant, "open a file / link", the tour, or any film or series you own (opens its details). Case, accents and the Turkish İ/ı do not matter; one short word also matches letters in order ("rdv" finds Reading view).
@@ -190,7 +553,6 @@ UP/ses/altyazı düzeni, donanım/RAM rehberi, yerel AI token sayacı, elle alty
 
 ## Unreleased — Luna Web: reading view, smarter address bar, per-site zoom, search engines, recent visits, tab menu (not yet released)
 
-- **Reading view (F9, the book button in the address bar, or Tools › Reading view):** the page's text in a calm reader drawn by Luna: Night, Sepia and Paper themes, text size (also Ctrl +/−), serif or sans, narrow or wide page, a contents list from the page's headings, minutes and words, a reading progress line, lists and tables kept. **Find inside it with Ctrl+F** (F3 / Enter for the next match, Shift for the previous one; accents, case and the Turkish İ/ı do not matter, table cells included). Copy the whole text or hand it to the assistant ("Ask Luna"). No link in it is live and no page script runs; the page layer is hidden while it is open, and Esc or F9 brings the page back with the keyboard on the book button. A long page or one read while loading says so. The choices are remembered.
 - **Zoom remembered per site:** zoom a site once (Ctrl +/−, the Tools menu or the page's own Ctrl+wheel) and its pages open at that zoom again; other sites open at 100 %; Ctrl+0 forgets it. Up to 200 sites, on this computer only.
 - **Continue reading on the start page:** pages in your reading list that you have not finished, newest first, with how far you got; a click opens the page where you stopped.
 - **Address suggestions:** while you type, the address bar offers open tabs ("Switch to tab"), favourites and recently visited pages that contain every typed word (accents, case and the Turkish dotted/dotless i do not matter). The typed text always comes first, as an address to open or a web search. Up/Down, Enter and Esc work; the list is an accessible combobox (listbox, active option announced) and the page layer underneath is cut out like the tools menu, so the list is never hidden behind the page.
@@ -485,7 +847,6 @@ Bug pass.
 - **Esc closes windows:** Esc now closes the window on top everywhere, as a click beside it does. Before, many didn't close on Esc (open link, subtitle search, confirmations, the music link…). A window over the film or a book closes alone; the film keeps playing.
 - **Reader › comics in Luna Dev:** CBZ comics stayed on "…" and never showed a page in the development build (React's double mount left a "closed" flag set). The installed build wasn't affected.
 - **Reader › Esc in the search box:** closes the panel now (a note being written is still not thrown away by Esc). The contents button opens on the contents again, not on the last search.
-- (Dev only: the browser mock can now deliver events and acts as a small mpv, so playback can be tried there.)
 
 ## 1.3.7CC — 2026-10-21 (beta, not built yet: tried with Luna Dev.cmd)
 
@@ -600,7 +961,6 @@ Bug pass.
 
 ## 1.1.6CC — 2026-10-21 (beta, not built yet: tried with Luna Dev.cmd)
 
-- **Luna updates itself (new):** a while after opening (at most twice a day) Luna looks at its GitHub releases; when a new version is out a card at the bottom says "Luna 1.2.0 is ready" with **Update**, What's new, Later and Skip this version. Update downloads it, checks the signature, installs it and reopens Luna; your data stays. The portable zip and the developer build open the download page instead.
 - **Settings › General › Updates:** check now, "Tell me when a new version is out", and **Get beta versions too** (off by default; turning it on warns that betas may have bugs and offers to back up first).
 - The version number in Settings now really follows the changes (it had stayed at 1.1.1 since 1.1.1CC).
 
@@ -783,6 +1143,3 @@ A large correctness and packaging release.
 - GPL-3.0 license, third-party notices (mpv GPLv2+, yt-dlp Unlicense, fonts OFL).
 - Build documentation for fetching mpv and producing both packages.
 
-## 0.2.3 and earlier
-
-See the git history and the previous GitHub releases.

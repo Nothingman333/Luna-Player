@@ -6,9 +6,10 @@ export const TRANSLATION_LANGUAGES = ["Türkçe", "English", "Deutsch", "França
 export type TranslationRow = { id: number; text: string };
 export type TranslationSummary = { applied: number; skipped: number; truncated?: boolean };
 let translator: ((target: string) => Promise<TranslationSummary>) | null = null;
-let reader: (() => Promise<BrowserPage>) | null = null;
+export type BrowserReadOptions={provider?:string;videoSummary?:boolean};
+let reader: ((options?:BrowserReadOptions) => Promise<BrowserPage>) | null = null;
 export function registerBrowserReader(handler: typeof reader) { reader = handler; }
-export async function readActiveBrowserPage(): Promise<BrowserPage | undefined> { return reader ? reader() : undefined; }
+export async function readActiveBrowserPage(options?:BrowserReadOptions): Promise<BrowserPage | undefined> { return reader ? reader(options) : undefined; }
 export function registerBrowserTranslator(handler: typeof translator) { translator = handler; }
 export async function translateActiveBrowser(target: string) {
   if (!translator) throw new Error("Önce Web bölümünde bir sayfa aç.");

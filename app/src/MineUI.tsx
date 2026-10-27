@@ -4,7 +4,7 @@ import { SeriesTracker } from "./Extras";
 import { CItem,CKind,Collection,MineTab,STACK,addToCollection,collectionId,collectionsChanged,loadCollections,loadFilmHistory,saveCollections,subs } from "./Mine";
 // Collections (a theme across films, music and books: "everything Dune") and one history of
 // what was watched, listened to and read. Both open from the top bar in every part of Luna.
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl } from "./linkOpen";
 import { useEffect,useRef,useState } from "react";
 import { createPortal } from "react-dom";
 import { Book,fetchBook,loadBookLibrary,loadReadHistory,requestOpenBook } from "./Books";

@@ -23,7 +23,7 @@ import literata600x from "@fontsource/literata/files/literata-latin-ext-600-norm
 import dyslexic400 from "@fontsource/opendyslexic/files/opendyslexic-latin-400-normal.woff2?url";
 import dyslexic700 from "@fontsource/opendyslexic/files/opendyslexic-latin-700-normal.woff2?url";
 import { open } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl } from "./linkOpen";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useEffect,useRef,useState } from "react";
 import { createPortal } from "react-dom";

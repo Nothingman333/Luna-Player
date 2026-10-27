@@ -11,9 +11,11 @@ export function filmLoadOptions(input: {
       && position.time > 10 && position.time < position.duration - 30 ? position.time : 0;
   const speed = finite(input.subSpeed, 1);
   const options = [`start=${start}`, `sub-delay=${finite(input.delay)}`, `audio-delay=${finite(input.audioDelay)}`,
-    `sub-speed=${speed > 0.5 && speed < 2 ? speed : 1}`, "secondary-sid=no"];
+    `sub-speed=${speed > 0.5 && speed < 2 ? speed : 1}`, "secondary-sid=no", "vid=auto"];
   if (Number.isInteger(input.pref?.aid) && input.pref!.aid! > 0) options.push(`aid=${input.pref!.aid}`);
   if (input.pref?.sid === "no") options.push("sid=no");
   else if (Number.isInteger(input.pref?.sid) && Number(input.pref?.sid) > 0) options.push(`sid=${input.pref!.sid}`);
+  if(!options.some(o=>o.startsWith("aid=")))options.push("aid=auto");
+  if(!options.some(o=>o.startsWith("sid=")))options.push("sid=auto");
   return options.join(",");
 }

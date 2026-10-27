@@ -3,7 +3,7 @@ const src=path.join(__dirname,'../src');
 function load(name){if(name==="@ctrl/video-filename-parser")return require(name);const m={exports:{}};new Function('module','exports',ts.transpileModule(fs.readFileSync(path.join(src,name+'.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(m,m.exports);return m.exports;}
 const {filmLoadOptions}=load('filmLoadOptions'),{createSnapshotWriter}=load('snapshotWriter');
 const defaults={fromStart:false,position:{time:42,duration:200},delay:'-0.25',audioDelay:'0.1',subSpeed:1,pref:{aid:2,sid:'no'}};
-assert.equal(filmLoadOptions(defaults),'start=42,sub-delay=-0.25,audio-delay=0.1,sub-speed=1,secondary-sid=no,aid=2,sid=no');
+assert.equal(filmLoadOptions(defaults),'start=42,sub-delay=-0.25,audio-delay=0.1,sub-speed=1,secondary-sid=no,vid=auto,aid=2,sid=no');
 assert(filmLoadOptions({...defaults,fromStart:true}).startsWith('start=0,'));
 assert(filmLoadOptions({...defaults,fromStart:true,jump:19}).startsWith('start=19,'));
 assert(filmLoadOptions({...defaults,position:{time:190,duration:200}}).startsWith('start=0,'));

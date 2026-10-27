@@ -100,7 +100,7 @@ test('X08', 'wiring: close-to-tray is opt-in, library rescans are triggered by t
   assert(/TRAY_MODE: AtomicBool = AtomicBool::new\(false\)/.test(sh)); assert(/api\.prevent_close\(\)/.test(sh) && /if window\.label\(\) == "main" && tray_mode\(\)/.test(sh));
   assert(/Create\(_\) \| EventKind::Remove\(_\)/.test(sh));
   for (const f of ['src/library.ts', 'src/Music.tsx', 'src/Books.tsx']) assert(/luna-rescan/.test(read(f)), f + ' ignores luna-rescan');
-  const scr = read('src/Screens.tsx'); assert(/<ShellSettings\s*\/>/.test(scr) && /<SoundWebSettings\s*\/>/.test(scr));
+  const scr = read('src/Screens.tsx'); assert(/<ShellSettings\s*\/>/.test(scr) && /<SoundWebSettings section="web"\s*\/>/.test(scr) && /<SoundWebSettings section="sound"\s*\/>/.test(scr));
   const app = read('src/App.tsx'); assert(/<ShellRuntime\b/.test(app) && /<LibraryHealth\b/.test(app) && /<ClipMaker\b/.test(app) && /<SceneGrid\b/.test(app));
 });
 

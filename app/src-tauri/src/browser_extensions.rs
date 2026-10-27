@@ -1,13 +1,40 @@
 //! Extension package preparation and actual WebView2 profile management.
-use std::{collections::{HashMap,HashSet},path::PathBuf,sync::{Arc,Mutex,atomic::{AtomicBool,AtomicU64,Ordering}}};
+use std::{collections::{HashMap,HashSet},path::PathBuf,sync::{Arc,Mutex,atomic::{AtomicU64,AtomicBool,Ordering}}};
 use tauri::{AppHandle,Manager,Webview};
 use serde_json::{Value,json};
 use crate::extension_package::{self as package,Preview};
-#[derive(Default)]pub struct Extensions{pending:Mutex<HashMap<String,PathBuf>>,attempted:Mutex<HashSet<String>>,busy:AtomicBool}
+pub struct Extensions{pending:Mutex<HashMap<String,PathBuf>>,attempted:Mutex<HashSet<String>>,busy:tokio::sync::Semaphore}
+impl Default for Extensions{fn default()->Self{Self{pending:Mutex::default(),attempted:Mutex::default(),busy:tokio::sync::Semaphore::new(1)}}}
+#[path="browser_extension_policy.rs"]
+mod policy;
+static AUDIT_STARTED:AtomicBool=AtomicBool::new(false);
+/// Profile audit is asynchronous and never delays navigation. No source files are removed.
+pub fn audit_profile(app:AppHandle){
+ if AUDIT_STARTED.swap(true,Ordering::SeqCst){return;}
+ tauri::async_runtime::spawn(async move{
+  let state=app.state::<Extensions>();
+  let result=async{let _guard=lock(&state).await?;reconcile(&app).await}.await;
+  match result{Ok(count)=>crate::browser::dlog(&app,&format!("extension profile audit: redundant blockers disabled={count}")),Err(_)=>{AUDIT_STARTED.store(false,Ordering::SeqCst);crate::browser::dlog(&app,"extension profile audit unavailable; native fallback retained");}}
+ });
+}
+async fn reconcile(app:&AppHandle)->Result<usize,String>{
+ let rows=runtime(app,"list".into(),String::new(),None,false).await?;
+ let list=rows.as_array().ok_or("Invalid extension list")?;
+ let duplicates=policy::duplicate_blockers(list.iter().filter_map(|r|Some((r["id"].as_str()?,r["name"].as_str()?,r["enabled"].as_bool()?))));
+ for id in &duplicates{runtime(app,"enable".into(),id.clone(),None,false).await?;}
+ // Update the fallback only from confirmed runtime state, never from the requested toggle value.
+ let confirmed=runtime(app,"list".into(),String::new(),None,false).await?;
+ sync_filter(app,&confirmed);
+ Ok(duplicates.len())
+}
+fn sync_filter(app:&AppHandle,rows:&Value){
+ if let Some(rows)=rows.as_array(){crate::adblocking::extension_active(app,rows.iter().any(|r|r["name"].as_str()==Some("uBlock Origin Lite")&&r["enabled"].as_bool()==Some(true)));}
+}
 static NEXT:AtomicU64=AtomicU64::new(1);
 fn trusted(caller:&Webview)->Result<(),String>{if caller.label()=="main"{Ok(())}else{Err("Luna ana penceresi gerekli".into())}}
-struct Guard<'a>(&'a AtomicBool);impl Drop for Guard<'_>{fn drop(&mut self){self.0.store(false,Ordering::SeqCst);}}
-fn lock(state:&Extensions)->Result<Guard<'_>,String>{if state.busy.swap(true,Ordering::SeqCst){Err("Başka bir eklenti işlemi sürüyor".into())}else{Ok(Guard(&state.busy))}}
+async fn lock(state:&Extensions)->Result<tokio::sync::SemaphorePermit<'_>,String>{
+ tokio::time::timeout(std::time::Duration::from_secs(25),state.busy.acquire()).await.map_err(|_|"Eklenti sırası zaman aşımına uğradı".to_string())?.map_err(|_|"Eklenti yöneticisi kapandı".to_string())
+}
 async fn runtime_version(app:&AppHandle)->Result<String,String>{
  let view=app.get_webview("main").ok_or("Luna penceresi kapandı")?;let(tx,rx)=tokio::sync::oneshot::channel();
  view.with_webview(move|platform|{use windows_core::Interface;use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_2;
@@ -17,7 +44,7 @@ async fn runtime_version(app:&AppHandle)->Result<String,String>{
 }
 #[tauri::command]
 pub async fn browser_extension_prepare(app:AppHandle,caller:Webview,source:String,kind:String)->Result<Preview,String>{
- trusted(&caller)?;let state=app.state::<Extensions>();let _guard=lock(&state)?;
+ trusted(&caller)?;let state=app.state::<Extensions>();let _guard=lock(&state).await?;
  if state.pending.lock().map_err(|e|e.to_string())?.len()>=8{return Err("Önce bekleyen eklenti önizlemesini kapat.".into());}
  let token=format!("{:x}-{:x}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?.as_nanos(),NEXT.fetch_add(1,Ordering::Relaxed));
  let root=app.path().app_local_data_dir().map_err(|e|e.to_string())?.join("web-extension-packages");std::fs::create_dir_all(&root).map_err(|e|e.to_string())?;
@@ -33,7 +60,7 @@ pub async fn browser_extension_prepare(app:AppHandle,caller:Webview,source:Strin
    if response.content_length().is_some_and(|n|n>package::PACKAGE_LIMIT){return Err("Mağaza paketi 32 MB sınırını aşıyor".into());}
    let mut data=Vec::new();while let Some(chunk)=response.chunk().await.map_err(|e|e.to_string())?{if data.len()+chunk.len()>package::PACKAGE_LIMIT as usize{return Err("Mağaza paketi çok büyük".into());}data.extend_from_slice(&chunk);}
    (Some(data),format!("https://chromewebstore.google.com/detail/{id}"),Some(id))
-  }else if kind=="file"{let path=PathBuf::from(&source);let data=package::bounded_read(&path,package::PACKAGE_LIMIT)?;(Some(data),"Yerel ZIP/CRX paketi".into(),None)}
+  }else if kind=="bundled"&&source=="ublock"{(Some(include_bytes!("../resources/ublock-origin-lite.zip").to_vec()),"uBlock Origin Lite 2026.1021.1354 · Kullanıcının ZIP paketi".into(),None)}else if kind=="file"{let path=PathBuf::from(&source);let data=package::bounded_read(&path,package::PACKAGE_LIMIT)?;(Some(data),"Yerel ZIP/CRX paketi".into(),None)}
   else if kind=="folder"{(None,"Yerel eklenti klasörü".into(),None)}else{return Err("Geçersiz kaynak türü".into());};
   let target=dest.clone();let tok=token.clone();
   tauri::async_runtime::spawn_blocking(move||{let signed=data.as_ref().is_some_and(|data|data.starts_with(b"Cr24"));let bytes=if let Some(data)=data{package::unpack(&data,&target,expected.as_deref())?}else{package::copy_folder(std::path::Path::new(&source),&target)?};package::preview(&target,tok,origin,bytes,signed)}).await.map_err(|e|e.to_string())?
@@ -48,7 +75,7 @@ unsafe fn describe(e:&webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebVie
  Ok(json!({"id":webview2_com::take_pwstr(id),"name":webview2_com::take_pwstr(name),"enabled":enabled.as_bool()}))
 }
 async fn runtime(app:&AppHandle,action:String,id:String,path:Option<PathBuf>,enabled:bool)->Result<Value,String>{
- let view=app.webviews().into_values().find(|v|v.label().starts_with("luna-web-")).ok_or("Eklentileri yönetmek için önce Luna içinde bir web sekmesi aç.")?;
+ let view=app.webviews().into_values().find(|v|v.label().strip_prefix("luna-web-").and_then(|id| id.parse::<u32>().ok()).is_some()).ok_or("Eklentileri yönetmek için önce Luna içinde bir web sekmesi aç.")?;
  let(tx,rx)=tokio::sync::oneshot::channel();let tx:Answer=Arc::new(Mutex::new(Some(tx)));let fail=tx.clone();
  view.with_webview(move|platform|{
   use windows_core::Interface;
@@ -78,7 +105,7 @@ async fn runtime(app:&AppHandle,action:String,id:String,path:Option<PathBuf>,ena
 }
 #[tauri::command]
 pub async fn browser_extension_manage(app:AppHandle,caller:Webview,action:String,id:Option<String>,enabled:Option<bool>)->Result<Value,String>{
- trusted(&caller)?;let state=app.state::<Extensions>();let _guard=lock(&state)?;
+ trusted(&caller)?;let state=app.state::<Extensions>();let _guard=lock(&state).await?;
  if !matches!(action.as_str(),"list"|"enable"|"remove"|"install"|"discard"){return Err("Geçersiz işlem".into());}
  let id=id.unwrap_or_default();
  if action=="discard"{if let Some(path)=state.pending.lock().map_err(|e|e.to_string())?.remove(&id){if !state.attempted.lock().map_err(|e|e.to_string())?.remove(&id){let _=trash::delete(path);}}return Ok(Value::Null);}
@@ -86,6 +113,12 @@ pub async fn browser_extension_manage(app:AppHandle,caller:Webview,action:String
  if action=="install"{state.attempted.lock().map_err(|e|e.to_string())?.insert(id.clone());}
  let result=runtime(&app,action.clone(),id.clone(),path,enabled.unwrap_or(false)).await;
  if action=="install"&&result.is_ok(){state.pending.lock().map_err(|e|e.to_string())?.remove(&id);state.attempted.lock().map_err(|e|e.to_string())?.remove(&id);}
+ if let Ok(value)=&result{
+  if action=="list"{sync_filter(&app,value);}
+  else if matches!(action.as_str(),"enable"|"remove"|"install"){
+   if let Ok(rows)=runtime(&app,"list".into(),String::new(),None,false).await{sync_filter(&app,&rows);}
+  }
+ }
  // On an uncertain install result keep its immutable source: a late WebView2 callback may have installed it.
  result
 }

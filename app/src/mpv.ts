@@ -22,7 +22,7 @@ export type MpvState = {
   title: string;
   time: number;
   duration: number;
-  paused: boolean;
+  paused: boolean;buffering?:boolean;seeking?:boolean;bufferPercent?:number;
   subDelay: number;
   volume: number;
   mute: boolean;
@@ -72,6 +72,7 @@ export const mpv = (...args: unknown[]) => invoke("mpv_command", { args });
 export const setProp = (name: string, value: unknown) => mpv("set_property", name, value);
 
 const keyOf: Record<string, keyof MpvState> = {
+  "paused-for-cache":"buffering",seeking:"seeking","cache-buffering-state":"bufferPercent",
   "time-pos": "time",
   duration: "duration",
   pause: "paused",
@@ -107,14 +108,19 @@ export function useMpv(onEvent?: (name: string, ev: any) => void) {
   useEffect(() => {
     const un = listen<any>("mpv", ({ payload }) => {
       if (payload.event === "property-change") {
-        if(payload.name==="time-pos"){publishPlaybackTime(payload.data);return;}
+        if(payload.name==="time-pos"){
+          // A missing position means the file is unloading, not that the viewer sought to zero.
+          // Invalidate recording before publishing the UI clock reset.
+          if(typeof payload.data!=="number"||!Number.isFinite(payload.data))cb.current?.("time-cleared",payload);
+          publishPlaybackTime(payload.data);return;
+        }
         const key = keyOf[payload.name];
         if (!key) return;
         const fallback = initial[key];
-        setState((s) => { const value = payload.data ?? fallback; return Object.is(s[key], value) ? s : { ...s, [key]: value }; });
+        setState((s) => { const value = payload.data ?? fallback;if(key==="path"&&value!==s.path)return {...s,path:value,sub:null,tracks:[],subText:"",secondarySid:"no",duration:0}; return Object.is(s[key], value) ? s : { ...s, [key]: value }; });
       } else {
         cb.current?.(payload.event, payload);
-        if(payload.event==="start-file")publishPlaybackTime(0);
+        if(payload.event==="start-file"){publishPlaybackTime(0);setState(s=>({...s,sub:null,tracks:[],subText:"",secondarySid:"no",duration:0}));}
       }
     });
     // Observe only once we listen, so the initial values aren't missed.

@@ -5,7 +5,7 @@ const root = path.resolve(__dirname, '..');
 function load(file, env = {}) {
   const m = { exports: {} };
   const js = ts.transpileModule(fs.readFileSync(path.join(root, file), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
-  new Function('exports', 'module', 'require', ...Object.keys(env), js)(m.exports, m, () => ({}), ...Object.values(env));
+  new Function('exports', 'module', 'require', ...Object.keys(env), js)(m.exports, m, (name) => name === "./webFilmName" ? load("src/webFilmName.ts") : ({}), ...Object.values(env));
   return m.exports;
 }
 const extras = load('src/extrasModel.ts'), play = load('src/playbackModel.ts'), web = load('src/browserModel.ts');
@@ -167,3 +167,5 @@ let failed = 0;
 for (const t of tests) { try { t.run(); console.log('PASS', t.name); } catch (e) { failed++; console.error('FAIL', t.name, e.stack); } }
 console.log(JSON.stringify({ total: tests.length, passed: tests.length - failed, failed }));
 process.exitCode = failed ? 1 : 0;
+
+require("./playback-stop-regression.cjs");

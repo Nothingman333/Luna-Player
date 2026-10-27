@@ -494,3 +494,7 @@
 
 /* Every page command belongs inside the tools popover. Keep the chrome one row. */
 .browser-tools-anchor{align-self:center}.browser-tools-pop.extra-browser-tools{overflow-y:auto;max-width:calc(100vw - 32px)}.browser-tools-pop .browser-menu-action{min-height:38px;line-height:1.45}.browser-tools-pop .browser-menu-action>svg{flex:none}.browser-tools-pop .browser-menu-action>small{flex:none;margin-left:auto;white-space:nowrap}.browser-tools-pop .browser-language-label{gap:10px}.browser-language-label select{min-width:0;max-width:65%}
+
+.browser-start-search .luna-select-trigger{background:rgba(255,255,255,.04);color:var(--text);box-shadow:none}.browser-start-search .luna-select-options button{color:var(--text);background:transparent;box-shadow:none}.browser-start-search .luna-select-options button:hover,.browser-start-search .luna-select-options button[aria-selected=true]{background:rgba(var(--acc-rgb),.12)}.browser-play-luna:disabled{opacity:.6;cursor:wait}
+
+.browser-playlist-import{color:var(--accent);animation:playlistBreath 3s ease-in-out infinite}@keyframes playlistBreath{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 15%,transparent);background:color-mix(in srgb,var(--accent) 12%,transparent)}}@media(prefers-reduced-motion:reduce){.browser-playlist-import{animation:none}}

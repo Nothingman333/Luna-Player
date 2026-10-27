@@ -116,9 +116,18 @@ export function diarySet(title: string, year: string | undefined, patch: Partial
   if (y && !cur.year) cur.year = y;
   const next = { ...cur, ...patch, at: Date.now() };
   for (const f of Object.keys(patch) as (keyof DiaryEntry)[]) if (patch[f] === undefined) delete next[f];
+  // A new personal vote/rating also records that this title was watched. Clearing a vote does not undo watching.
+  const evaluated = patch.vote === "like" || patch.vote === "dislike" || (typeof patch.rating === "number" && Number.isFinite(patch.rating) && patch.rating >= 1 && patch.rating <= 10);
+  if (evaluated) next.watched = cur.watched ?? Date.now();
   d[k] = next;
-  store.set("diary", JSON.stringify(d));
+  if (!store.set("diary", JSON.stringify(d))) return false;
+  if (next.watched) {
+    const label = next.year ? `${next.title} (${next.year})` : next.title;
+    const seen = loadSeen();
+    if (!has(seen, label)) store.set("seenList", JSON.stringify([...seen, label]));
+  }
   listeners.forEach((f) => f());
+  return true;
 }
 /** Moves the older, scattered records (library thumbs, ticks, recommendation votes) into the diary once. */
 export function migrateDiary() {
@@ -569,11 +578,16 @@ export function setTaste(it: Item, patch: Partial<TasteEntry>) {
   t[k] = { ...cur, ...patch, at: Date.now() };
   if (!t[k].vote && !t[k].want) delete t[k];
   saveTaste(t);
+  if (patch.vote === "like" || patch.vote === "dislike") {
+    const title = it.meta?.title ?? it.parsed.title, year = it.meta?.year ?? (it.parsed.year ? String(it.parsed.year) : undefined);
+    const entry = diaryGet(title, year);
+    if (!entry?.watched || entry.vote !== patch.vote) diarySet(title, year, { vote: patch.vote });
+  }
 }
 export const THUMB = "M7 10v11H3V10zM7 10l4-8a3 3 0 0 1 3 3v4h6a2 2 0 0 1 2 2.3l-1.4 8A2 2 0 0 1 18.6 21H7";
 export const THUMB_DOWN = "M17 14V3h4v11zM17 14l-4 8a3 3 0 0 1-3-3v-4H4a2 2 0 0 1-2-2.3l1.4-8A2 2 0 0 1 5.4 3H17";
 
-export function TasteButtons({ it }: { it: Item }) {
+export function TasteButtons({ it, votesOnly=false }: { it: Item; votesOnly?:boolean }) {
   const { taste } = useTaste();
   const e = taste[tasteKey(it)];
   const title = it.meta?.title ?? it.parsed.title;
@@ -595,18 +609,18 @@ export function TasteButtons({ it }: { it: Item }) {
   };
   return (
     <>
-      <button className={"act" + (later ? " on" : "")} data-tip={later ? tt("Sonra izle listesinden çıkar") : tt("Sonra izle")}
+      {!votesOnly&&<button className={"act" + (later ? " on" : "")} data-tip={later ? tt("Sonra izle listesinden çıkar") : tt("Sonra izle")}
         aria-label={tt("Sonra izle")} onClick={toggleLater}>
         <Icon d={later ? I.check : I.plus} size={20} />
-      </button>
+      </button>}
       <span className="vote-wrap">
-        <button className={"act" + (d?.vote === "like" ? " on" : "")} aria-label={tt("Beğendim")} data-tip={d?.vote === "like" && d.rating ? tt("Beğendim · {0}/10", d.rating) : tt("Beğendim")} onClick={() => vote("like")}>
+        <button className={"act" + (d?.vote === "like" ? " on" : "")} aria-pressed={d?.vote === "like"} aria-label={tt("Beğendim")} data-tip={d?.vote === "like" && d.rating ? tt("Beğendim · {0}/10", d.rating) : tt("Beğendim")} onClick={() => vote("like")}>
           <Icon d={THUMB} size={20} />{d?.vote === "like" && d.rating ? <span className="vote-n">{d.rating}</span> : null}
         </button>
         {ask === "like" && <RateAsk title={title} year={year} vote="like" onDone={() => setAsk(null)} />}
       </span>
       <span className="vote-wrap">
-        <button className={"act" + (d?.vote === "dislike" ? " on bad" : "")} aria-label={tt("Beğenmedim")} data-tip={d?.vote === "dislike" && d.rating ? tt("Beğenmedim · {0}/10", d.rating) : tt("Beğenmedim")} onClick={() => vote("dislike")}>
+        <button className={"act" + (d?.vote === "dislike" ? " on bad" : "")} aria-pressed={d?.vote === "dislike"} aria-label={tt("Beğenmedim")} data-tip={d?.vote === "dislike" && d.rating ? tt("Beğenmedim · {0}/10", d.rating) : tt("Beğenmedim")} onClick={() => vote("dislike")}>
           <Icon d={THUMB_DOWN} size={20} />{d?.vote === "dislike" && d.rating ? <span className="vote-n">{d.rating}</span> : null}
         </button>
         {ask === "dislike" && <RateAsk title={title} year={year} vote="dislike" onDone={() => setAsk(null)} />}

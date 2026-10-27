@@ -29,7 +29,7 @@ export function pinnedMarkdown(messages:AssistantMessage[],title:string){
  return blocks.length?`# ${heading} — 📌\n\n`+blocks.join("\n---\n\n"):"";
 }
 export function assistantFollowups(mode:string,browser:boolean,tr:boolean){
- if(browser)return tr?["Bu sayfayı özetle","Önemli noktaları açıkla","Sayfayı Türkçeye çevir"]:["Summarize this page","Explain the key points","Translate this page into English"];
+ if(browser)return tr?["Bu sayfayı özetle","Videoyu özetle","Önemli noktaları açıkla","Sayfayı Türkçeye çevir"]:["Summarize this page","Summarize this video","Explain the key points","Translate this page into English"];
  if(mode==="books")return tr?["Yalnız kitaplığımdan öner","Daha kısa bir kitap öner","Bu konuyu derinleştir"]:["Recommend only from my books","Suggest a shorter book","Explore this topic further"];
  if(mode==="music")return tr?["Arşivimden benzer parçalar bul","Daha sakin bir şey öner","Bu sanatçıyı anlat"]:["Find similar tracks in my library","Suggest something calmer","Tell me about this artist"];
  return tr?["Sadece kütüphanemdekiler","Daha hafif bir şey öner","Neden bana uygun olduğunu açıkla"]:["Only from my library","Suggest something lighter","Explain why it suits me"];

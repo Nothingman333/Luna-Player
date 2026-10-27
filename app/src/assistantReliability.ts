@@ -87,6 +87,8 @@ export function cleanChatMessage<T extends { role: string; text: string }>(m: T)
   list("links", (x) => isObj(x) && isText(x.url) && isText(x.label));
   list("hop", (x) => HOPS.includes(x));
   list("choices", (x) => isObj(x) && Number.isFinite(x.id) && isText(x.title));
+  list("reviews", (x) => isObj(x) && isText(x.title) && x.title.trim().length > 0 && (x.year === undefined || isText(x.year)) && (x.poster == null || isText(x.poster)));
+  if ("reviewIndex" in o && (!Number.isInteger(o.reviewIndex) || o.reviewIndex < 0 || o.reviewIndex > (o.reviews?.length ?? 0))) o.reviewIndex = 0;
   list("libChoices", (x) => isObj(x) && isText(x.path) && isText(x.title));
   if ("act" in o && !(isObj(o.act) && isText(o.act.kind) && isText(o.act.url))) delete o.act;
   if ("film" in o && !(isObj(o.film) && Number.isFinite(o.film.id) && isText(o.film.title))) delete o.film;

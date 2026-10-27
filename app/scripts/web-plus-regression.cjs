@@ -223,13 +223,13 @@ test('Native key hook takes only the listed Luna combinations and never AltGr', 
   const fn = rs.slice(rs.indexOf('fn page_shortcut'), rs.indexOf('fn page_shortcut') + 1800);
   assert(fn.includes('(true, false, false)') && fn.includes('(true, true, false)')); assert(fn.includes('_ => None'));
   assert(!/0x43\s*=>/.test(fn) && !/0x56\s*=>/.test(fn) && !/0x58\s*=>/.test(fn), 'Ctrl+C / V / X stay with the page');
-  const emitted = new Set([...rs.matchAll(/Some\("([a-z0-9+]+)"\)/g)].map(m => m[1]));
+  const emitted = new Set([...fn.matchAll(/Some\("([a-z0-9+]+)"\)/g)].map(m => m[1]));
   const handled = new Set([...tsx.matchAll(/case "([a-z0-9+]+)"/g)].map(m => m[1]));
   for (const name of emitted) assert(handled.has(name) || /^ctrl\+[1-9]$/.test(name), 'unhandled native shortcut: ' + name);
 });
-test('Mute is kept natively per tab and a hidden tab is always muted', () => {
-  assert(rs.includes('"mute" | "unmute"')); assert(rs.includes('mute(&view, user_muted(id))'));
-  const hide = rs.slice(rs.indexOf('"hide" =>'), rs.indexOf('"hide" =>') + 200); assert(hide.includes('mute(&view, true)'));
+test('Mute is kept natively per tab; a hidden tab keeps background audio unless muted or held', () => {
+  assert(rs.includes('"mute" | "unmute"')); assert(rs.includes('mute(&view, user_muted(id))') || rs.includes('mute(&view, user_muted(id)||playback::held(id))'));
+  const hide = rs.slice(rs.indexOf('"hide" =>'), rs.indexOf('"hide" =>') + 200); assert(hide.includes('mute(&view, user_muted(id)||playback::held(id))'));
   assert(rs.includes('set_user_muted(id, false);'), 'closing a tab forgets its mute');
 });
 test('The find script never writes into the page and never touches fields or scripts', () => {

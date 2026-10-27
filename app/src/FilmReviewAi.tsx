@@ -5,7 +5,7 @@ import {savedFilmAnalysis} from "./filmAnalysisStorage";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "./nativeCore";
 import { listen } from "@tauri-apps/api/event";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl } from "./linkOpen";
 import { store } from "./library";
 import { tt, locale } from "./i18n";
 import { goPlace } from "./Mine";

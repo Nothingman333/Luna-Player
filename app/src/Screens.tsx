@@ -1,3 +1,8 @@
+import {buildGroups} from "./filmCatalogModel";
+import {cleanWebPlayback,isYouTubeVideo,mediaQualityLabel} from "./browserMediaModel";
+import { CardActions, CardFriendLine, CardFriends } from "./FilmCardExtras";
+import { FriendsWatched } from "./FriendsWatched";
+import { remainingMinutes } from "./friendsWatchedModel";
 import {MediaGallery} from "./MediaGallery";
 import {CountrySelect} from "./CountrySelect";
 import {AiUsageSettings} from "./AiUsageSettings";
@@ -15,7 +20,7 @@ import { openPanel } from "./paletteExtras";
 import { TonightPicker } from "./TonightPicker";
 import { OnThisDay } from "./OnThisDay";
 import { useTint } from "./posterTint";
-import { GeneralExtras, BulkRelink, PlaybackPreferences, SeriesTracker, ExtraModal, extraText } from "./Extras";
+import { A11ySettings, CacheSettings, BulkRelink, PlaybackPreferences, SeriesTracker, ExtraModal, extraText } from "./Extras";
 import { ExtrasSettings } from "./ExtrasSettings";
 import { defaultSubLangs, lang, setLang, tt, DEC } from "./i18n";
 import { BUILD_AGENT, BUILD_AGENT_NAMES, VERSION_LABEL } from "./version";
@@ -32,7 +37,7 @@ import { PluginSettings } from "./Web";
 import { AddonSettings } from "./Addons";
 import { SourceSettings } from "./Opds";
 import { UpscalerSettings } from "./Upscaler";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl } from "./linkOpen";
 import { fmtTime } from "./mpv";
 import { SubAppearance } from "./PlayerMenu";
 import { FilmCatalogView, reasonText, remainingLabel } from "./FilmCatalog";
@@ -113,6 +118,7 @@ export function resumeTarget(it: Item, recent: Recent[]) {
 /** What the right-click menu on a card acts on. */
 export type Target = { path: string; item?: Item };
 export type Actions = {
+  ask?: (it:Item)=>void;
   play: (path: string, fromStart?: boolean) => void;
   details: (key: string) => void;
   menu: (e: React.MouseEvent, t: Target) => void;
@@ -124,7 +130,7 @@ export type Actions = {
   copies?: (it: Item) => string[];
 };
 
-export function Badges({ path, big, compact }: { path?: string; big?: boolean; compact?: boolean }) {
+export function Badges({ path, big, compact, copyDetails }: { path?: string; big?: boolean; compact?: boolean; copyDetails?: boolean }) {
   // Reads the cached result, or waits for the background probe of this file.
   const info = useMediaInfo(path);
   const [, bump] = useState(0);
@@ -134,11 +140,16 @@ export function Badges({ path, big, compact }: { path?: string; big?: boolean; c
   const list = compact ? all.filter((b) => /^(4K|8K|2K|1080p|720p|480p|SD)$|HDR|HLG|Dolby/.test(b)).slice(0, 2) : all;
   // a subtitle file next to the video (or one added by hand)
   if (path && (sidecarSubs(path) > 0 || store.get("extSub:" + path))) list.push("SRT");
+  const webCopy=copyDetails&&path?cleanWebPlayback(store.json("web-playback:"+path,null)):null;
+  const webVariant=webCopy?.variants?.find(v=>v.url===webCopy.streamUrl);
+  const webQuality=webVariant?mediaQualityLabel(webVariant):"";
+  if(webQuality&&/^[0-9]+p(?:–[0-9]+p)?$/.test(webQuality)&&!list.some(b=>/^(4K|8K|2K|1080p|720p|480p|SD)$/.test(b)))list.unshift(webQuality);
+  if(copyDetails){if(!list.some(b=>/^(4K|8K|2K|[0-9]+p(?:–[0-9]+p)?|SD)$/.test(b)))list.unshift(extraText("Çözünürlük bilinmiyor","Resolution unknown"));if(!list.includes("SRT"))list.push(webCopy?.subtitles.length?extraText("Web altyazısı var","Web subtitles available"):extraText("SRT yan dosya yok","No SRT sidecar"));}
   if (!list.length) return null;
   return (
     <div className={"badges" + (big ? " big" : "")}>
       {list.map((b) => (
-        <span key={b} className={"qb" + (/HDR|HLG|Dolby/.test(b) ? " hdr" : b === "4K" ? " uhd" : b === "SRT" ? " srt" : "") + (!info && b !== "SRT" ? " guess" : "")} title={b === "SRT" ? tt("Altyazı dosyası var") : !info ? extraText("Dosya adından tahmin; dosya henüz okunmadı", "Guessed from the file name; the file has not been read yet") : undefined}>{b}</span>
+        <span key={b} className={"qb" + (/HDR|HLG|Dolby/.test(b) ? " hdr" : b === "4K" ? " uhd" : b === "SRT" ? " srt" : "") + (!info && b !== "SRT" ? " guess" : "")} title={b === "SRT" ? tt("Altyazı dosyası var") : webQuality===b?extraText("Web kaynağının kalite bilgisi","Quality reported by the web source"): !info ? extraText("Dosya adından tahmin; dosya henüz okunmadı", "Guessed from the file name; the file has not been read yet") : undefined}>{b}</span>
       ))}
     </div>
   );
@@ -277,9 +288,9 @@ function PosterBase({ it, a, copyCount, episodes, resume, reason, watched, stamp
   const mine = !!resume && !!resume.path && resume.itemKey === it.key && files.some((f) => f.path === resume.path);
   const target = mine ? resume!.path! : first?.path;
   const title = facts.title || it.parsed.title, year = facts.year || "";
-  const left = !done && resume?.path ? (mine ? (tv ? epLabel(resume.episode?.season, resume.episode?.episode) + " · " : "") + tt("{0} kaldı", remainingLabel(resume)) : extraText("Başka kopyada devam ediyor", "Continues in another copy")) : "";
+  const left = !done && resume?.path ? (tv ? epLabel(resume.episode?.season, resume.episode?.episode) + " · " : "") + tt("{0} kaldı", remainingLabel(resume)) : "";
   const seen = tv && !done && resume && !resume.path && resume.watched > 0 ? extraText(`${resume.watched}/${resume.total} bölüm izlendi`, `${resume.watched}/${resume.total} episodes watched`) : "";
-  const fraction = mine && !done ? Math.max(0, Math.min(1, resume!.fraction)) : 0;
+  const fraction = resume?.path && !done ? Math.max(0, Math.min(1, resume!.fraction)) : 0;
   return (
     <button className="poster" onClick={() => a.details(it.key)}
       onContextMenu={(e) => { if (target) a.menu(e, { path: target, item: it }); }}>
@@ -292,17 +303,21 @@ function PosterBase({ it, a, copyCount, episodes, resume, reason, watched, stamp
         {poster ? <img src={poster} alt="" loading="lazy" onLoad={(e) => e.currentTarget.classList.add("loaded")} onError={() => { posterFailures.fail(poster); again((x) => x + 1); }} />
           : thumb && thumb !== badThumb ? <img src={thumb} alt="" onLoad={(e) => e.currentTarget.classList.add("loaded")} onError={() => { setBadThumb(thumb); if (first) store.remove("thumb:" + first.path); }} />
           : <span className="poster-fallback">{title}</span>}
-        {first && <div className="poster-badges"><Badges path={first.path} compact /></div>}
+        {first && <div className="poster-badges"><Badges path={first.path} compact copyDetails={n>1} /></div>}
         {status && <span className="library-state-chip">{status === "remote" ? extraText("İndirilmedi", "Not downloaded") : extraText("Dosya yok", "File missing")}</span>}
+        {!tv && n > 1 && <span className="library-copy-badge" title={tt("Bu filmden {0} kopya var; detaylarda hangisini izleyeceğini seçersin",n)}><Icon d="M8 3h12v14M4 7h12v14H4z" size={15}/>{tt("{0} kopya",n)}</span>}
+        {!!title && <CardFriends t={{ title, year: year ? String(year) : undefined, id: m?.id, kind: tv ? "tv" : "movie" }} />}
+        <CardActions t={{ title, year: year ? String(year) : undefined, id: m?.id, kind: tv ? "tv" : "movie" }} onDetail={() => a.details(it.key)} onPlay={target ? () => a.play(target) : undefined} />
         {fraction > 0 && <div className="progress library-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(fraction * 100)} aria-label={extraText("Kaldığın yer", "Where you stopped")}><div style={{ width: fraction * 100 + "%" }} /></div>}
       </div>
       <div className="card-title" title={title}>{title}</div>
       <div className="muted small">
         {tv ? <span title={files.length > (episodes || 0) && episodes ? extraText(`${files.length} dosya; bazı bölümlerin birden çok kopyası var`, `${files.length} files; some episodes have more than one copy`) : undefined}>{tt("{0} bölüm", episodes || it.files.length)}</span> : year}
         {!tv && facts.runtime > 0 && <span className="library-card-runtime"> · {Math.round(facts.runtime)} {extraText("dk", "min")}</span>}
-        {!tv && n > 1 && <span className="copies-n" title={tt("Bu filmden {0} kopya var; detaylarda hangisini izleyeceğini seçersin", n)}>{year ? " · " : ""}{tt("{0} kopya", n)}</span>}
+        {!tv && n > 1 && <span className="copies-n" title={tt("Bu filmden {0} kopya var; detaylarda hangisini izleyeceğini seçersin", n)}>{tt("{0} kopya", n)}</span>}
       </div>
       {(left || seen) && <div className={"library-resume" + (left && !mine ? " is-other" : "")} title={tv && resume && resume.total ? extraText(`${resume.watched}/${resume.total} bölüm izlendi`, `${resume.watched}/${resume.total} episodes watched`) : undefined}>{left || seen}</div>}
+      {!!title && <CardFriendLine t={{ title, year: year ? String(year) : undefined, id: m?.id, kind: tv ? "tv" : "movie" }} />}
       {reason && <div className="library-match-reason" title={reasonText(reason)}>{reasonText(reason)}</div>}
     </button>
   );
@@ -371,16 +386,16 @@ function HeroBg({ on, path, backdrop }: { on: boolean; path: string; backdrop?: 
     style={url ? { backgroundImage: `url("${url}")` } : undefined} />;
 }
 
-function HeroSlider({ slides, a }: { slides: Slide[]; a: Actions }) {
+function HeroSlider({ slides, a, paused=false,onChoose }: { slides: Slide[]; a: Actions;paused?:boolean;onChoose?:()=>void }) {
   const [i, setI] = useState(0);
   const [hover, setHover] = useState(false);
   const n = slides.length;
   const go = (d: number) => setI((x) => (x + d + n) % n);
   useEffect(() => {
-    if (hover || n < 2) return;
+    if (paused || hover || n < 2) return;
     const id = setTimeout(() => go(1), 7000);
     return () => clearTimeout(id);
-  }, [i, hover, n]);
+  }, [i, hover, n, paused]);
   // (one index for the text and the picture, also after the list got shorter)
   const cur = Math.min(i, n - 1);
   const s = slides[cur];
@@ -424,14 +439,14 @@ function HeroSlider({ slides, a }: { slides: Slide[]; a: Actions }) {
         <>
           <button className="hero-arrow l" aria-label={tt("Önceki")} onClick={(e) => { e.stopPropagation(); go(-1); }}><Icon d={I.left} size={28} /></button>
           <button className="hero-arrow r" aria-label={tt("Sonraki")} onClick={(e) => { e.stopPropagation(); go(1); }}><Icon d={I.right} size={28} /></button>
-          <div className="hero-dots" onClick={(e) => e.stopPropagation()}>
+        </>
+      )}
+      <div className="hero-navigation">{onChoose&&<button className="ghost hero-choose" onClick={e=>{e.stopPropagation();onChoose();}}><Icon d={I.search} size={18}/>{tt("Bu akşam ne izlesem?")}</button>}{n>1&&<div className="hero-dots" onClick={(e) => e.stopPropagation()}>
             {slides.map((sl, k) => (
               <button key={k} aria-label={tt("{0}. öğe", k + 1)} className={"hero-dot" + (k === cur ? " on" : "") + (sl.kind === "new" ? " new" : "")}
                 onClick={() => setI(k)}>{k === cur && <span className="hero-dot-fill" style={{animationPlayState:hover?"paused":"running"}} />}</button>
             ))}
-          </div>
-        </>
-      )}
+          </div>}</div>
     </section>
   );
 }
@@ -459,9 +474,11 @@ export async function pickFolder(): Promise<string | null> {
   return typeof d === "string" ? d : null;
 }
 
-export function Home({ items, recent, hasFolders, a, onAddFolder, downloads }: {
-  items: Item[]; recent: Recent[]; hasFolders: boolean; a: Actions; onAddFolder: (k: FolderKind) => void; downloads?: React.ReactNode;
+export function Home({ items, recent, hasFolders, a, onAddFolder, downloads,active=true }: {
+  items: Item[]; recent: Recent[]; hasFolders: boolean; a: Actions; onAddFolder: (k: FolderKind) => void; downloads?: React.ReactNode;active?:boolean;
 }) {
+  const [tonight,setTonight]=useState(false);
+  useEffect(()=>{if(!active)setTonight(false);},[active]);
   const itemOf = (p: string) => items.find((i) => i.files.some((f) => f.path === p));
   const continuing = recent.filter((r) => pct(r) < 95 && !isFinished(r.path)).slice(0, 12);
   const finishedItems = items.filter((i) => i.files.length && i.files.every((f) => isFinished(f.path)));
@@ -480,17 +497,18 @@ export function Home({ items, recent, hasFolders, a, onAddFolder, downloads }: {
 
   return (
     <div className="page">
-      {slides.length ? <HeroSlider slides={slides} a={a} /> : !hasFolders ? <FolderAsk onAdd={onAddFolder} big /> : (
+      <div className={"home-feature"+(tonight?" choosing":"")}>{(tonight||!slides.length)&&<button type="button" className="home-feature-toggle" aria-expanded={tonight} aria-controls="home-tonight" onClick={()=>setTonight(v=>!v)}><Icon d={tonight?I.left:I.search} size={16}/>{tonight?extraText("Devam kartına dön","Back to continue"):tt("Bu akşam ne izlesem?")}</button>}<div className={"home-feature-panel"+(!tonight?" active":"")} aria-hidden={tonight} inert={tonight}>
+      {slides.length ? <HeroSlider slides={slides} a={a} paused={tonight} onChoose={()=>setTonight(true)} /> : !hasFolders ? <FolderAsk onAdd={onAddFolder} big /> : (
         <section className="hero empty">
           <h1>{tt("Bir video sürükle bırak")}</h1>
           <div className="muted">{tt("ya da “Dosya aç”a bas. Altyazı yoksa otomatik bulunur.")}</div>
         </section>
       )}
+      </div><div id="home-tonight" className={"home-feature-panel"+(tonight?" active":"")} aria-hidden={!tonight} inert={!tonight}><TonightPicker items={items} recent={recent} onPlay={p=>{setTonight(false);a.play(p);}} onDetails={k=>{setTonight(false);a.details(k);}} onAsk={a.ask}/></div></div>
       {slides.length > 0 && !hasFolders && <FolderAsk onAdd={onAddFolder} />}
 
       {downloads}
 
-      <TonightPicker items={items} recent={recent} onPlay={(p) => a.play(p)} onDetails={(k) => a.details(k)} />
       <OnThisDay items={items} onOpen={(k) => a.details(k)} />
 
       {continuing.length > 0 && (
@@ -522,7 +540,7 @@ function PosterRow({ title, items, a }: { title: string; items: Item[]; a: Actio
   return (
     <section className="row">
       <h2>{title}</h2>
-      <div className="grid">{items.map((it) => <Poster key={it.key} it={it} a={a} />)}</div>
+      <div className="grid">{buildGroups(items).map(g=><div className={"library-copy-stack"+(g.members.length>1?" has-copies":"")} key={g.id} style={{"--copy-count":g.members.length} as React.CSSProperties}>{g.members.map((it,index)=><div className="library-comparable" key={it.key} style={{"--copy-index":index} as React.CSSProperties}><Poster it={it} a={a} copyCount={g.members.length}/></div>)}</div>)}</div>
     </section>
   );
 }
@@ -740,9 +758,11 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
 
   const extSub = store.get("extSub:" + file.path);
   const hasSub = store.get("hasSub:" + file.path) === "1" || sidecarSubs(file.path) > 0;
-  const playLabel = rec ? (isTv ? tt("{0} · Devam et", epLabel(file.season, file.episode)) : tt("Devam et"))
+  const playLabel = (rec||(!isTv&&recent.some(r=>filmPaths.includes(r.path)&&r.time>10))) ? (isTv ? tt("{0} · Devam et", epLabel(file.season, file.episode)) : tt("Devam et"))
     : isTv ? tt("{0} · Oynat", epLabel(file.season, file.episode)) : tt("Oynat");
   const longText = (m?.overview.length ?? 0) > 260;
+  const sharedRec=isTv?rec:recent.find(r=>filmPaths.includes(r.path))??store.json<Recent|null>("film-position:"+m?.id,null)??rec;
+  const minutesLeft = remainingMinutes(sharedRec);
 
   return (
     <div className={"details page-anim" + (tint ? " tinted" : "")} style={tint ? ({ "--tint-rgb": tint } as React.CSSProperties) : undefined}>
@@ -767,6 +787,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
             {m && m.year ? <span>{m.year}</span> : null}
             {m && m.seasons > 0 ? <span>{m.seasons}  {tt("sezon")}</span> : null}
             {m && m.runtime > 0 ? <span>{formatRuntime(m.runtime, tt("sa"), tt("dk"))}</span> : null}
+            {minutesLeft !== null && <span className="d-remaining">{extraText(`${minutesLeft} dakika kaldı`, `${minutesLeft} minute${minutesLeft === 1 ? "" : "s"} left`)}</span>}
             {m?.genres?.length ? <span>{m.genres.slice(0, 3).join(", ")}</span> : null}
           </div>
           <FilmMetadataPanel item={it} menuOnly/>
@@ -793,7 +814,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
             </div>
           ) : <p className="overview muted">{tt("Özet ve oyuncular için ayarlardan TMDB anahtarını gir.")}</p>}
           <div className="hero-actions">
-            <button className="primary light" onClick={() => a.play(file.path)}><Icon d={I.play} fill size={18} /> {playLabel}</button>
+            <button className="primary light" onClick={() => {if(sharedRec&&sharedRec.path!==file.path)window.dispatchEvent(new CustomEvent("luna-open-note",{detail:{path:file.path,time:sharedRec.time}}));else a.play(file.path);}}><Icon d={I.play} fill size={18} /> {playLabel}</button>
             {rec && <button className="ghost" onClick={() => a.play(file.path, true)}>{tt("Baştan başla")}</button>}
             <span className="act-sep" aria-hidden="true" />
             <button className={"act" + (allDone || (isTv && isFinished(file.path)) ? " on good" : "")}
@@ -814,16 +835,16 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
                 <Icon d={I.chat} size={20} />
               </button>
             )}
-            <button className="act" data-tip={tt("Diğer seçenekler")} aria-label={tt("Diğer seçenekler")} onClick={(e) => openMenu(e,[{label:tt("Altyazı ekle"),act:()=>onAddSub(file.path)},{label:extraText("Dosya ve altyazı bilgisi","File and subtitle information"),act:()=>setExtraPanel("file")},{label:extraText("Bilgileri düzenle","Edit metadata"),act:()=>window.dispatchEvent(new CustomEvent("luna-edit-metadata",{detail:it.key}))},{label:extraText("Bu dosyanın hatırlanan tercihleri","Remembered preferences for this file"),act:()=>setExtraPanel("preferences")},...(!isTv&&m&&m.id>0?[{label:extraText("Film serilerini takip et","Follow film collections"),act:()=>setExtraPanel("series")}]:[]),"sep",{label:tt("Dosya seçenekleri"),act:()=>a.menu(e,{path:file.path,item:it})}])}>
+            <button className="act" data-tip={tt("Diğer seçenekler")} aria-label={tt("Diğer seçenekler")} onClick={(e) => openMenu(e,[...(copies.length>1?[{label:extraText("Hatırlanan sürüm seçimini sıfırla","Reset preferred version"),act:()=>{store.remove("lunaPreferredCopy:"+(m?.id?m.kind+":"+m.id:it.key));setPick(null);rerender(n=>n+1);}}]:[]),...(cleanWebPlayback(store.json("web-playback:"+file.path,null))&&!isYouTubeVideo(file.path)&&a.rematch?[{label:extraText("Web filmi eşleşmesini değiştir","Change web movie match"),act:()=>a.rematch!({path:file.path,item:it})},{label:store.get("webNoticeOff:"+it.key)==="1"?extraText("Web’de “Bunu izliyorsun” kontrolünü aç","Turn on the web “You are watching” check"):extraText("Web’de “Bunu izliyorsun” kontrolünü kapat","Turn off the web “You are watching” check"),act:()=>{if(store.get("webNoticeOff:"+it.key)==="1")store.remove("webNoticeOff:"+it.key);else store.set("webNoticeOff:"+it.key,"1");rerender(n=>n+1);}}]:[]),{label:tt("Altyazı ekle"),act:()=>onAddSub(file.path)},{label:extraText("Dosya ve altyazı bilgisi","File and subtitle information"),act:()=>setExtraPanel("file")},{label:extraText("Bilgileri düzenle","Edit metadata"),act:()=>window.dispatchEvent(new CustomEvent("luna-edit-metadata",{detail:it.key}))},{label:extraText("Bu dosyanın hatırlanan tercihleri","Remembered preferences for this file"),act:()=>setExtraPanel("preferences")},...(!isTv&&m&&m.id>0?[{label:extraText("Film serilerini takip et","Follow film collections"),act:()=>setExtraPanel("series")}]:[]),"sep",{label:tt("Dosya seçenekleri"),act:()=>a.menu(e,{path:file.path,item:it})}])}>
               <Icon d={I.more} size={22} />
             </button>
           </div>
           <MatchBadge kind={m?.kind??it.parsed.kind} id={m?.id}/>
-          {copies.length>1&&<button className="chip" onClick={()=>{store.remove("lunaPreferredCopy:"+(m?.id?m.kind+":"+m.id:it.key));setPick(null);rerender(n=>n+1);}}>{extraText("Hatırlanan sürüm seçimini sıfırla","Reset preferred version")}</button>}
+
           {missingPanel}
 
           {download}
-          <div className="muted small">{rec&&rec.duration>0?tt("{0} kaldı",fmtTime(Math.max(0,rec.duration-rec.time))):extraText("Henüz başlanmadı","Not started")}</div>
+          <FriendsWatched title={m?.title ?? it.parsed.title} year={m?.year ?? (it.parsed.year ? String(it.parsed.year) : undefined)} kind={m?.kind ?? it.parsed.kind} id={m?.id} aliases={[it.parsed.title]}/>
         </div>
       </section>
 
@@ -1054,9 +1075,10 @@ export function Rematch({ it, onPick, onCustom, onClose }: {
   );
 }
 
-type SetSec = "general" | "keys" | "subs" | "upscaler" | "addons" | "downloads" | "extras" | "backup";
+type SetSec = "system" | "general" | "keys" | "subs" | "upscaler" | "addons" | "downloads" | "extras" | "backup";
 const SET_ICONS: Record<SetSec, string> = {
   general: I.gear,
+  system:"M3 4h18v12H3zM8 21h8M12 16v5M7 10h2l2-3 2 6 2-3h2",
   keys: "M15 7a4 4 0 1 1-3.9 4.9L3 20v-3h3v-3h3l1.1-1.1A4 4 0 0 1 15 7zM16.5 10.5h.01",
   subs: I.subs,
   upscaler: "M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4zM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z",
@@ -1143,7 +1165,7 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
     return () => {clearTimeout(id);modelGeneration.current++;};
   }, [prov, base, otherKey]);
   const [modelsMsg, setModelsMsg] = useState(tt("Önce API anahtarını gir"));
-  const [sec, setSecState] = useState<SetSec>(() => (store.get("setSec") as SetSec) || "general");
+  const [sec, setSecState] = useState<SetSec>(() => {const saved=store.get("setSec");return saved==="appearance"?"extras":saved==="web"?"general":(saved as SetSec)||"general";});
   const setSec = (s: SetSec) => { setSecState(s); store.set("setSec", s); };
   const loadModels = () => {
     if (!gemKey.trim()) return;
@@ -1200,13 +1222,14 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
     catch (error) { alert(tt("Ayarlar kaydedilemedi: {0}", String(error))); }
   };
   const secs: [SetSec, string, string][] = [
-    ["general", tt("Genel"), tt("Dil, tam ekran, tanıtım")],
+    ["general", tt("Genel"), extraText("Dil, ülke, web ve güncelleme","Language, country, web and updates")],
+    ["system", extraText("Sistem ve bakım","System and maintenance"), extraText("Windows, önbellek ve tanılama","Windows, cache and diagnostics")],
     ["keys", tt("Hesaplar ve anahtarlar"), tt("TMDB, OpenSubtitles, asistan")],
     ["subs", tt("Altyazı"), tt("Diller ve görünüm")],
     ["upscaler", tt("Upscaler"), tt("Lossless Scaling ile yapay zekâ")],
     ["addons", tt("Eklentiler"), tt("Stremio, arama eklentileri, kitap kaynakları")],
     ["downloads", tt("İndirmeler"), tt("Torrent klasörü")],
-    ["extras", tt("Oynatma ve bağlantılar"), tt("SponsorBlock, scrobble, komutlar")],
+    ["extras", tt("Oynatma ve bağlantılar"), extraText("Görünüm, ses ve bağlantılar","Appearance, sound and integrations")],
     ["backup", tt("Yedekleme"), tt("Tek dosya, istersen buluta")],
   ];
   const cur = secs.find((x) => x[0] === sec) ?? secs[0];
@@ -1267,35 +1290,22 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                       <div className="set-hint">{tt("Bu ürün TMDB API'sini kullanır ama TMDB tarafından onaylanmış ya da sertifikalandırılmış değildir. Film afişleri ve bilgileri TMDB'den gelir.")}</div>
                     </div>
                   </div>
-                  <UpdateSettings onBackup={() => setSec("backup")} />
-                  <HardwareCapabilities />
-                  <GeneralExtras/>
-                  <StudioSettings/>
-                  <ShellSettings/>
-                  <SoundWebSettings/>
-                  <DiagnosticsCard/>
-                  <div className="set-card">
-                    <label className="look-check">
-                      <input type="checkbox" checked={autoFull} onChange={(e) => setAutoFull(e.target.checked)} />
-                      {tt("Oynatınca tam ekran başlat")}
-                    </label>
-                  </div>
-                  <div className="set-card">
-                    <label className="look-check">
-                      <input type="checkbox" defaultChecked={store.get("uiFit") !== "0"} onChange={(e) => { store.set("uiFit", e.target.checked ? "1" : "0"); window.dispatchEvent(new Event("luna-fit")); }} />
-                      {tt("Görünümü ekrana uydur")}
-                    </label>
-                    <div className="set-hint">{tt("Küçük ya da büyütülmüş ekranlarda (Windows ölçeği %125, %150…) Luna biraz küçülür; yazılar ve boşluklar 1920 genişliğindeki ekrandaki gibi yerleşir, üst çubuk sığar.")}</div>
-                  </div>
-                  <div className="set-card">
+                  <SoundWebSettings section="web"/>                  <div className="set-card">
                     <label className="look-check">
                       <input type="checkbox" defaultChecked={store.get("clipOffer") !== "0"} onChange={(e) => { store.set("clipOffer", e.target.checked ? "1" : "0"); invoke("clipboard_offer", { on: e.target.checked }).catch(() => {}); }} />
                       {tt("Bağlantı kopyalayınca “İçe aktar” öner")}
                     </label>
                     <div className="set-hint">{tt("Başka bir yerde Spotify, YouTube, torrent, podcast ya da kitap bağlantısı kopyaladığında üstte 30 saniyeliğine küçük bir öneri çıkar. Panodaki başka hiçbir şey okunmaz ya da saklanmaz.")}</div>
-                  </div>
+                  </div><UpdateSettings onBackup={() => setSec("backup")} />
+
+
+
+
                 </>
               )}
+
+              {sec === "system" && <><ShellSettings/><CacheSettings/><DiagnosticsCard/><DiagnosticTools /><section className="set-card"><h3>{extraText("Hata ayıklama", "Debugging")}</h3><p className="set-hint">{extraText("Canlı olayları filtrele, hata ayrıntılarını incele ve paylaşmak istediğin kayıtları kopyala.", "Filter live events, inspect error details and copy the records you want to share.")}</p><div className="backup-row"><DebugLauncher /></div></section></>}
+
               {sec === "keys" && (
                 <>
                   <AiUsageSettings />
@@ -1436,7 +1446,7 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                   </div>
                 </>
               )}
-              {sec === "upscaler" && <div className="set-card"><UpscalerSettings /></div>}
+              {sec === "upscaler" && <><HardwareCapabilities/><div className="set-card"><UpscalerSettings /></div></>}
               {sec === "addons" && (
                 <>
                   <div className="set-card"><AddonSettings /></div>
@@ -1444,8 +1454,19 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                   <div className="set-card"><SourceSettings /></div>
                 </>
               )}
-              {sec === "extras" && <ExtrasSettings />}
-              {sec === "backup" && <><BackupSettings /><BulkRelink /><DiagnosticTools /><section className="set-card"><h3>{extraText("Hata ayıklama", "Debugging")}</h3><p className="set-hint">{extraText("Canlı olayları filtrele, hata ayrıntılarını incele ve paylaşmak istediğin kayıtları kopyala.", "Filter live events, inspect error details and copy the records you want to share.")}</p><div className="backup-row"><DebugLauncher /></div></section></>}
+              {sec === "extras" && <><A11ySettings/>                  <div className="set-card">
+                    <label className="look-check">
+                      <input type="checkbox" defaultChecked={store.get("uiFit") !== "0"} onChange={(e) => { store.set("uiFit", e.target.checked ? "1" : "0"); window.dispatchEvent(new Event("luna-fit")); }} />
+                      {tt("Görünümü ekrana uydur")}
+                    </label>
+                    <div className="set-hint">{tt("Küçük ya da büyütülmüş ekranlarda (Windows ölçeği %125, %150…) Luna biraz küçülür; yazılar ve boşluklar 1920 genişliğindeki ekrandaki gibi yerleşir, üst çubuk sığar.")}</div>
+                  </div>                  <div className="set-card">
+                    <label className="look-check">
+                      <input type="checkbox" checked={autoFull} onChange={(e) => setAutoFull(e.target.checked)} />
+                      {tt("Oynatınca tam ekran başlat")}
+                    </label>
+                  </div><StudioSettings/><SoundWebSettings section="sound"/><ExtrasSettings /></>}
+              {sec === "backup" && <><BackupSettings /><BulkRelink /></>}
               {sec === "downloads" && (
                 <div className="set-card">
                   <div className="field">

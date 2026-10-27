@@ -12,7 +12,7 @@ import "./QueueTools.css";
 // with the picture track off.
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl } from "./linkOpen";
 import { useEffect,useRef,useState } from "react";
 import { createPortal } from "react-dom";
 import "./BookMusic.css";
@@ -330,6 +330,8 @@ listen<any>("mpv", ({ payload }) => {
 /** Every address music was loaded from (also the found YouTube ones): such a path in mpv is music. */
 const musicPaths = new Set<string>(store.json<string[]>("musicStreamPaths", []));
 /** The address mpv really plays can differ from the item's (a podcast episode redirects to a CDN): remembered as music too. */
+/** A path opened as a film is never music (undoes a wrong mark from the moment a song replaced it). */
+export function unmarkMusicPath(p: string) { musicPaths.delete(p); }
 export function markMusicPath(p: string | null) {
   if (!p || musicPaths.has(p)) return;
   musicPaths.add(p);
@@ -346,6 +348,9 @@ function loadCurrent(preserveIntent = false) {
   if (!preserveIntent) { selectionResume=null; wantsPlayback = true; P.paused = false; }
   const c = P.queue[P.index];
   if (!c) return;
+  // a film on the shared player steps aside (it waits in the dock) before anything else: a YouTube song first waits
+  // for its address, and in that time the film must already be parked, not taken for music
+  try { beforeMusicTakeover?.(); } catch {}
   musicPaths.add(c.src);
   P.loading = true;
   // the audio only: no cover art as a "video", no window
@@ -472,6 +477,19 @@ export function prevTrack(time: number) {
   if (time > 4 || P.index === 0) { mpv("seek", 0, "absolute"); return; }
   P.index--;
   loadCurrent();
+}
+/** Called just before a song loads into the shared player, so the app can park a film that was playing. */
+let beforeMusicTakeover: (() => void) | null = null;
+export function onMusicTakeover(fn: (() => void) | null) { beforeMusicTakeover = fn; }
+/** The song waiting while a film plays (for the dock's tabs), or null. */
+export function suspendedSong(): { title: string; artist?: string; cover?: string | null } | null {
+  const c = suspended?.queue[suspended.index];
+  return c ? { title: c.title, artist: c.artist, cover: c.cover } : null;
+}
+/** Switch back to the waiting song and play it. */
+export function playSuspendedMusic() {
+  resumeSuspendedMusic();
+  setTimeout(() => pauseMusic(false), 250);
 }
 /** Where the music was when a film took over: it comes back, paused, when the film is closed. */
 let suspended: { queue: QItem[]; original: QItem[]; index: number; shuffle: boolean; from: string; time: number } | null = null;
@@ -971,7 +989,7 @@ async function pageQuery(url: string): Promise<string | null> {
 /** The songs of a Spotify playlist or album, from Spotify's embed page (no account, up to 100 songs).
  *  Nothing is downloaded: each song is found on YouTube by mpv when its turn comes (ytdl://ytsearch1:). */
 /** `more`: the ids of the songs after the first 100 (the embed page stops there), read one by one later. */
-type SpList = { name: string; by: string; url: string; cover?: string; tracks: QItem[]; total?: number; more?: string[] };
+type SpList = { source?:"YouTube"|"Spotify"; name: string; by: string; url: string; cover?: string; tracks: QItem[]; total?: number; more?: string[] };
 async function spotifyList(url: string): Promise<SpList | null> {
   const m = url.match(/open\.spotify\.com\/(?:intl-[a-z-]+\/)?(playlist|album)\/([A-Za-z0-9]+)/i);
   if (!m) return null;
@@ -1054,11 +1072,11 @@ export function SpotifyMove({ url, onDone }: { url: string; onDone: (name: strin
   return <div className="sp-in-chat"><SpotifyImport list={list} onDone={(id) => onDone(list.name, id)} onCancel={() => setCancelled(true)} /></div>;
 }
 
-function SpotifyImport({ list, onDone, onCancel }: { list: SpList; onDone: (id: string) => void; onCancel: () => void }) {
+function SpotifyImport({ list, onDone, onCancel,onPlay }: { list: SpList; onDone: (id: string) => void; onCancel: () => void;onPlay?:()=>void }) {
   // "Aramayı durdur": the songs not searched yet stay unmatched; the list can be made from what was found
   const stopped = useRef(false);
   const [halted, setHalted] = useState(false);
-  const [rows, setRowsState] = useState<ShiftRow[]>(() => list.tracks.map((sp) => ({ sp, on: true })));
+  const [rows, setRowsState] = useState<ShiftRow[]>(() => list.tracks.map((sp) => ({ sp, hit:list.source==="YouTube"?{url:sp.src,title:sp.title,channel:sp.artist??"",thumb:sp.cover??undefined,duration:sp.duration}:undefined, on: true })));
   const rowsRef = useRef(rows);
   const setRows = (f: (r: ShiftRow[]) => ShiftRow[]) => setRowsState((r) => (rowsRef.current = f(r)));
   const upd = (i: number, p: Partial<ShiftRow>) => setRows((r) => r.map((x, j) => (j === i ? { ...x, ...p } : x)));
@@ -1069,6 +1087,7 @@ function SpotifyImport({ list, onDone, onCancel }: { list: SpList; onDone: (id: 
       while (alive && !stopped.current) {
         if (next < rowsRef.current.length) {
           const i = next++;
+          if(rowsRef.current[i].hit!==undefined)continue;
           const sp = rowsRef.current[i].sp;
           const hits = await shiftSearch(sp, 3);
           // a box the user unticked while this was searching stays unticked
@@ -1124,7 +1143,7 @@ function SpotifyImport({ list, onDone, onCancel }: { list: SpList; onDone: (id: 
     const id = Date.now().toString(36);
     const items: QItem[] = chosen.map((r) => ({ src: r.hit!.url, page: r.sp.page, title: r.sp.title, artist: r.sp.artist, album: r.sp.album,
       cover: r.sp.album ? list.cover : r.hit!.thumb ?? list.cover, duration: r.sp.duration ?? r.hit!.duration, yt: true }));
-    saveMusicPlaylists([{ id, name: list.name, from: "Spotify", url: list.url, cover: list.cover, at: Date.now(), items }, ...loadMusicPlaylists()]);
+    saveMusicPlaylists([{ id, name: list.name, from: list.source??"Spotify", url: list.url, cover: list.cover, at: Date.now(), items }, ...loadMusicPlaylists()]);
     onDone(id);
   };
   return (
@@ -1138,7 +1157,7 @@ function SpotifyImport({ list, onDone, onCancel }: { list: SpList; onDone: (id: 
         <label className="sp-all"><input type="checkbox" checked={allOn} onChange={() => setRows((r) => r.map((x) => ({ ...x, on: !allOn && !!x.hit })))} /> {tt("Hepsi")}</label>
       </div>
       {cut && !searching ? <div className="plugin-msg small">{tt("Bu listede {0} şarkı var, ama Spotify'dan sadece {1} tanesi okunabildi. Liste bu {1} şarkıyla oluşur.", cut, rows.length)}</div> : null}
-      <div className="sp-list" ref={listRef}>
+      <div className={"sp-list"+(list.source==="YouTube"?" youtube-list":"")} ref={listRef}>
         {rows.map((r, i) => (
           <div key={i} data-i={i} className={"sp-item" + (r.on ? "" : " off") + (r.hit === null ? " missing" : "")}>
             <div className="sp-row">
@@ -1171,6 +1190,7 @@ function SpotifyImport({ list, onDone, onCancel }: { list: SpList; onDone: (id: 
       <div className="muted small">{tt("Hiçbir şey indirilmez: liste YouTube linklerinden oluşur, şarkılar oradan çalınır (yt-dlp ile). Ne dinlediğin senin sorumluluğunda.")}</div>
       <div className="modal-actions">
         <button className="chip" onClick={() => { stopped.current = true; onCancel(); }}>{tt("İptal")}</button>
+        {!searching&&chosen.length>0&&<button className="chip" onClick={()=>{playQueue(chosen.map(r=>ytItem(r.hit!)));if(onPlay)onPlay();else onCancel();}}>{extraText("Seçilenleri çal","Play selected")}</button>}
         {searching && <button className="chip" onClick={halt}>{tt("Aramayı durdur")}</button>}
         {!searching && missing.length > 0 && <button className="chip" onClick={goMissing}>{tt("Bulunamayan şarkıya git ({0})", missing.length)}</button>}
         <button className="primary" disabled={searching || !chosen.length} onClick={save}>
@@ -1182,6 +1202,7 @@ function SpotifyImport({ list, onDone, onCancel }: { list: SpList; onDone: (id: 
 
 export function MusicLinkDialog({ onClose, initial }: { onClose: () => void; initial?: string }) {
   const [v, setV] = useState(initial ?? "");
+  const [importKind,setImportKind]=useState(false);
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
   const [choices, setChoices] = useState<{ q: string; hits: YtHit[] } | null>(null);
@@ -1189,8 +1210,10 @@ export function MusicLinkDialog({ onClose, initial }: { onClose: () => void; ini
   // an answer that comes after the window was closed (or after a newer try) does nothing
   const run = useRef(0);
   useEffect(() => () => { run.current = -1; }, []);
-  const go = async () => {
-    const t = v.trim();
+  const go = async (kind?:"track"|"playlist") => {
+    let t = v.trim();
+    if(isYouTube(t)){const u=new URL(/^https?:/.test(t)?t:"https://"+t);if(u.searchParams.has("list")&&(u.searchParams.has("v")||u.hostname==="youtu.be")&&!kind){setImportKind(true);return;}if(kind==="track"){u.searchParams.delete("list");u.searchParams.delete("index");t=u.href;}}
+    setImportKind(false);
     if (!t) return;
     const my = ++run.current;
     const stale = () => run.current !== my;
@@ -1204,12 +1227,19 @@ export function MusicLinkDialog({ onClose, initial }: { onClose: () => void; ini
         setList(l);
         return;
       }
+      if (isYouTube(t) && new URL(/^https?:/.test(t)?t:"https://"+t).searchParams.has("list")) {
+        setBusy(tt("Listedeki şarkılar okunuyor…"));
+        const u=new URL(/^https?:/.test(t)?t:"https://"+t);const playlist="https://www.youtube.com/playlist?list="+encodeURIComponent(u.searchParams.get("list")!);
+        const hits=await invoke<YtHit[]>("yt_info",{url:playlist});if(stale())return;
+        if(!hits.length)throw Error(tt("Bu bağlantıda çalınacak bir şey yok"));
+        setList({source:"YouTube",name:extraText("YouTube listesi","YouTube playlist"),by:hits[0].channel??"",url:playlist,cover:hits[0].thumb,tracks:hits.map(ytItem),total:hits.length});return;
+      }
       if (isYouTube(t)) {
         setBusy(tt("Bağlantı okunuyor…"));
         const l = await invoke<YtHit[]>("yt_info", { url: /^https?:/.test(t) ? t : "https://" + t });
         if (stale()) return;
         if (!l.length) throw new Error(tt("Bu bağlantıda çalınacak bir şey yok"));
-        playQueue(l.map(ytItem)); onClose(); return;
+        setList({source:"YouTube",name:l[0].title,by:l[0].channel??"",url:t,cover:l[0].thumb,tracks:l.map(ytItem),total:l.length}); return;
       }
       if (AUDIO_URL.test(t)) { playQueue([{ src: t, title: decodeURIComponent(t.split("/").pop()!.split("?")[0]) }]); onClose(); return; }
       let q = t;
@@ -1245,9 +1275,10 @@ export function MusicLinkDialog({ onClose, initial }: { onClose: () => void; ini
           <input autoFocus value={v} onChange={(e) => setV(e.target.value)} placeholder={tt("https://… ya da şarkı adı")} />
           <button className="primary sm" disabled={!v.trim() || !!busy}>{tt("Aç")}</button>
         </form>
+        {importKind&&<div className="modal-actions"><button className="chip" onClick={()=>void go("track")}>{extraText("Yalnız bu parça","This track only")}</button><button className="primary" onClick={()=>void go("playlist")}>{extraText("Tüm playlist","Entire playlist")}</button></div>}
         {busy && <div className="sp-wait"><span className="muted small pulse">{busy}</span><button className="chip sm" onClick={() => { run.current++; setBusy(""); }}>{tt("İptal")}</button></div>}
         {err && <div className="plugin-msg small err">{err}</div>}
-        {list && <SpotifyImport key={list.name + list.tracks.length} list={list} onDone={(id) => { onClose(); openPlaylist?.(id); }} onCancel={() => setList(null)} />}
+        {list && <SpotifyImport key={list.name + list.tracks.length} list={list} onDone={(_id) => { onClose(); }} onCancel={() => setList(null)} onPlay={onClose}/>}
         {choices && (
           <>
             <div className="mu-ask">{tt("Bu mu? “{0}” için YouTube'da bulunanlar:", choices.q)}</div>
@@ -1302,7 +1333,7 @@ async function lyricsFor(q: QItem): Promise<{ synced: Line[]; plain: string } | 
 
 // ---------- mini player (bottom of every page while music plays) ----------
 type MP = Pick<MpvState, "time" | "duration" | "paused" | "eof" | "title" | "volume" | "path">;
-export function MusicDock({ mp }: { mp: MP }) {
+export function MusicDock({ mp, switcher }: { mp: MP; switcher?: React.ReactNode }) {
   const m = useMusic();
   const c = m.now;
   // the end of a song: the next one (or the same, on repeat one)
@@ -1355,7 +1386,7 @@ export function MusicDock({ mp }: { mp: MP }) {
         <button className="mu-dock-now" onClick={() => setView(true)} title={tt("Şimdi çalıyor")}
           onContextMenu={(e) => { if (!c.radio) openMenu(e, songActions(c, () => pauseMusic(false))); }}>
           <Cover src={c.radio ? c.favicon : c.cover} name={c.album ?? c.title} size={48} radius={8} icon={c.radio ? RADIO_ICON : NOTE} />
-          <span className="mu-dock-txt"><b className="ellipsis">{onAir ?? c.title}</b><span className="muted small ellipsis">{m.loading ? <span className="mu-loading-t">{tt("Yükleniyor…")}</span> : c.radio ? (onAir ? c.title : c.artist) : [c.artist, c.album].filter(Boolean).join(" · ")}</span></span>
+          <span className="mu-dock-txt"><b className="ellipsis">{onAir ?? c.title}</b><span className="muted small ellipsis">{m.loading ? <span className="mu-loading-t">{tt("Yükleniyor…")}</span> : c.radio ? (onAir ? c.title : c.artist) : [c.artist, c.album, mp.duration > 0 ? `${fmtTime(mp.time)} / ${fmtTime(mp.duration)}` : ""].filter(Boolean).join(" · ")}</span></span>
         </button>
         {!c.radio && <LikeBtn q={c} />}
         </div>
@@ -1376,6 +1407,7 @@ export function MusicDock({ mp }: { mp: MP }) {
           {!c.radio && <Seek mp={mp} />}
         </div>
         <div className="mu-dock-right">
+          {switcher}
           {!c.radio && <button className={"mu-ib mu-ly" + (m.view ? " on" : "")} aria-label={tt("Sözler")} title={tt("Sözler")} onClick={() => setView(!m.view)}><Icon d={LYRICS} size={17} /></button>}
           <button className="mu-ib" aria-label={mp.volume > 0 ? tt("Sesi kapat") : tt("Sesi aç")} title={mp.volume > 0 ? tt("Sesi kapat") : tt("Sesi aç")}
             onClick={() => { if (mp.volume > 0) { lastVol.current = mp.volume; setProp("volume", 0); } else setProp("volume", lastVol.current || 70); }}><Icon d={mp.volume === 0 ? I.mute : I.vol} size={16} /></button>

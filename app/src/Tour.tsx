@@ -64,7 +64,7 @@ const ALL: Slide[] = [
     tips: [{ t: tt("Üst çubukta Film / Müzik / Kitap") }, { t: tt("Ortak geçmiş: izlediğin, dinlediğin, okuduğun her şey") }],
     scene: ({ posters }) => (
       <div className="ts ts-modes">
-        <div className="sw"><i className="pill" />
+        <div className="sw"><i className="mode-highlight" aria-hidden="true" />
           <span className="m0"><Icon d={FILM_D} size={14} /> {tt("Film")}</span>
           <span className="m1"><Icon d={MUSIC_D} size={14} /> {tt("Müzik")}</span>
           <span className="m2"><Icon d={BOOK_D} size={14} /> {tt("Kitap")}</span>

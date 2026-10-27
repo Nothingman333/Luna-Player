@@ -231,3 +231,37 @@
 .quiz-result-open{display:flex;align-items:center;gap:12px;flex:1;min-width:0;border:0;padding:0;text-align:left;background:transparent;color:var(--text);cursor:pointer}.quiz-result-open>img{width:46px;height:68px;object-fit:cover;border-radius:6px;flex:none}.quiz-result-open span{min-width:0;overflow-wrap:anywhere}.quiz-watched{display:flex;align-items:center;justify-content:center;gap:5px;flex:none}.quiz-options .chip{line-height:1.5;padding:14px}.quiz-result-open:focus-visible{outline:2px solid var(--accent);outline-offset:4px;border-radius:6px}@media(max-width:480px){.quiz-result{gap:8px}.quiz-watched{padding:7px 8px;font-size:11px}}
 
 .taste-quiz .quiz-options .chip{height:auto;min-height:84px;display:flex;align-items:center;justify-content:flex-start;white-space:normal;overflow-wrap:anywhere;line-height:1.5;padding:16px;text-align:left;max-width:100%;min-width:0}.taste-quiz .quiz-options .quiz-none{grid-column:1/-1;min-height:42px;justify-content:center}.tn-acts{flex-wrap:wrap}
+
+/* Center the shortcuts above both columns; keep poster actions on the existing taste system. */
+.tn{row-gap:16px}.tn>.tn-head-actions{grid-column:1/-1;justify-content:center;justify-self:center;width:100%;margin:0}.tn-poster-column{flex:none;width:150px;display:flex;flex-direction:column;align-items:stretch;gap:10px}.tn-poster-frame{position:relative}.tn-poster-votes{position:absolute;top:7px;left:7px;right:7px;display:flex;justify-content:space-between;pointer-events:none;z-index:2}.tn-poster-votes .vote-wrap{position:static;pointer-events:auto}.tn-poster-votes .act{display:grid;place-items:center;width:32px;height:32px;min-width:32px;padding:0;border-radius:50%;color:var(--text);background:rgba(14,14,18,.84);border:1px solid #ffffff40;box-shadow:0 2px 8px #0005;cursor:pointer}.tn-poster-votes .act.on{color:var(--accent);border-color:var(--accent)}.tn-poster-votes .act.bad{color:#ff5a5a;border-color:#ff5a5a}.tn-poster-votes .vote-n{min-width:16px;height:16px;font-size:9px}.tn-poster-votes .rate-ask{pointer-events:auto;left:0;transform:none;top:calc(100% + 9px);width:260px;max-width:calc(100vw - 80px);flex-wrap:wrap;justify-content:center;border-radius:14px;white-space:normal}.tn-poster-votes .rate-ask>span{width:100%;text-align:center;margin:0}.tn-ask-assistant{width:100%;height:auto;min-height:32px;justify-content:center;font-size:12px;padding:7px 8px;white-space:normal;line-height:1.3}
+@media(max-width:640px){.tn-poster-column{width:100px}.tn-poster-votes{left:4px;right:4px;top:4px}.tn-poster-votes .act{width:29px;height:29px;min-width:29px}.tn-poster-votes .act svg{width:17px;height:17px}}
+
+.tn-scope.three{grid-template-columns:repeat(3,1fr)}.tn-scope.three>span{width:calc((100% - 8px)/3)}.tn-friend-settings{display:grid;place-items:center;padding:9px}.tn-friend-option{display:flex;align-items:center;gap:10px;padding:9px 0}.tn-friend-notes{display:flex;flex-direction:column;gap:8px;font-size:13px;color:var(--muted)}.tn-friend-notes b{color:var(--accent-soft)}.tn-friend-notes p{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+
+.tn-friend-option{display:flex!important;flex-direction:row!important;align-items:center!important;justify-content:flex-start!important;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.025);margin:8px 0!important;cursor:pointer}.tn-friend-option input{width:16px!important;flex:none;accent-color:var(--accent);margin:0!important}.tn-friend-option .friend-photo{width:42px;height:42px;flex:none;border-radius:50%;overflow:hidden}.tn-friend-option .friend-photo img{width:100%;height:100%;object-fit:cover}.tn-friend-option>span:last-child{flex:1}
+
+.tn-friend-option .friend-photo{display:grid;place-items:center;background:linear-gradient(145deg,rgba(var(--acc-rgb),.28),rgba(255,255,255,.06));border:1px solid var(--line);font-weight:600;color:var(--text);font-size:14px}
+
+/* Keep poster loading visible without changing the recommendation card's geometry. */
+.tn-fan.is-loading img { animation: tnSort 1.6s cubic-bezier(.4,0,.2,1) infinite; animation-delay:calc(var(--i) * -.24s); will-change:transform; }
+@keyframes tnSort { 0%,100% { transform:translate(-50%,-50%) translateX(calc((var(--i) - 1) * 70px)) rotate(calc((var(--i) - 1) * 9deg)); opacity:.65; } 50% { transform:translate(-50%,-58%) translateX(calc((var(--i) - 1) * 88px)) rotate(calc((var(--i) - 1) * 13deg)); opacity:1; } }
+@media(prefers-reduced-motion:reduce){.tn-fan.is-loading img{animation:none;will-change:auto}}
+
+/* Reserve the result area through loading, title changes, translation and cast arrival. */
+.tn .tn-out,.tn .tn-out:has(.tn-fan){position:relative;height:424px;min-height:424px;min-width:0}
+.tn-result{height:100%;animation:tnResultIn .24s ease-out both;align-items:center}
+.tn-info{max-height:100%;overflow-y:auto;scrollbar-width:thin;padding:3px 6px 3px 0;flex:1}
+.tn-info h3{line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tn-metadata{height:194px;overflow:hidden;contain:layout}
+.tn-metadata .tn-overview{height:63px;margin:8px 0;line-height:21px}
+.tn-metadata .tn-cast{height:71px;margin:8px 0;overflow:hidden}
+.tn-metadata .tn-cast small{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tn-friend-notes p{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tn-pending{position:absolute;right:0;bottom:0;z-index:2;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:16px;background:rgba(15,16,20,.92);border:1px solid #ffffff20;color:var(--text);font-size:12px;pointer-events:none}
+.tn-pending>span{width:14px;height:14px;border:2px solid #ffffff30;border-top-color:var(--accent);border-radius:50%;animation:tnWait 1s linear infinite}
+.tn-fan.is-loading img{animation:tnSort 2.2s ease-in-out infinite;animation-delay:calc(var(--i) * -.3s)}
+@keyframes tnResultIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@keyframes tnWait{to{transform:rotate(360deg)}}
+@media(max-width:640px){.tn .tn-out,.tn .tn-out:has(.tn-fan){height:440px;min-height:440px}.tn-metadata .tn-overview{height:63px}.tn-result{gap:14px}}
+.tn{transition:none}
+@media(prefers-reduced-motion:reduce){.tn-result,.tn-pending>span,.tn-fan.is-loading img{animation:none!important}}

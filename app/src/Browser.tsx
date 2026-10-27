@@ -1,3 +1,11 @@
+import {browserCommandQueue} from "./browserCommandQueue";
+import {createPortal} from "react-dom";
+import {BrowserAdBlock} from "./BrowserAdBlock";
+import {BrowserMediaPicker} from "./BrowserMediaPicker";
+import type {WebMediaTrack} from "./browserMediaModel";
+import {getCurrentWindow} from "@tauri-apps/api/window";
+import {automaticVideoSources,playlistAddress,playableVideoSources,mainVideoVariants,isYouTubeVideo,webQualitySources,cleanWebMedia,mediaAddress} from "./browserMediaModel";
+import type {WebMediaTransfer} from "./browserMediaModel";
 import { appStorage as localStorage } from "./appStorage";
 import {makeResolver,validTemplate} from "./webSearch";
 import { SitePreferencesPanel, RecoveryPanel, PageLibrarySignal } from "./BrowserDaily";
@@ -68,21 +76,17 @@ function shortcutName(e: KeyboardEvent): string {
 const dlog = (...parts: unknown[]) => { if (isTauri()) void invoke("debug_log", { lines: [parts.map(p => typeof p === "string" ? p : JSON.stringify(p)).join(" ")] }).catch(() => {}); };
 type FindResult = { count: number; index: number; capped: boolean };
 // One native mutation at a time, including cleanup after React StrictMode's effect replay.
-let operations = Promise.resolve();
-function native<T>(command: string, args: Record<string, unknown>, allowed:()=>boolean=()=>true): Promise<T> {
-  const job = operations.then(() => {if(!allowed())throw Error("Operation canceled before execution");return invoke<T>(command, args);});
-  operations = job.then(() => {}, () => {});
-  return job;
-}
+const native=browserCommandQueue(invoke);
 export type ActiveWebTab = { id?: number; revision?: number; title: string; url: string; loading: boolean };
 const hostOf = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return url; } };
 export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, onActiveTab, onPlay, items = [], onLibraryOpen, onVideoFullscreen }: {
   /** Plays a video page or media address in Luna's own player (mpv + yt-dlp). */
-  onPlay?: (url: string) => void; items?: Item[]; onLibraryOpen?: (key:string)=>void; onVideoFullscreen?: (on:boolean)=>void;
+  onPlay?: (url: string, media?:WebMediaTransfer) => void; items?: Item[]; onLibraryOpen?: (key:string)=>void; onVideoFullscreen?: (on:boolean)=>void;
   onAssistant?: () => void; active: boolean; onClose: () => void; onPage: (page: BrowserPage) => void; onInvalidate: () => void;
   onActiveTab?: (tab: ActiveWebTab | null) => void;
 }) {
   const [tabs, setTabs] = useState<WebTab[]>([]), [selected, setSelected] = useState<number | null>(null);
+  const [startQuery,setStartQuery]=useState("");
   const [address, setAddress] = useState(""), [error, setError] = useState("");
   const [creating, setCreating] = useState(false), [reading, setReading] = useState(false);
   const [needsRoom, setNeedsRoom] = useState(false);
@@ -175,6 +179,14 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
   }, [active]);
   const current = tabs.find(t => t.id === selected);
   const fullscreen=active&&selected!==null&&fullTabs.has(selected),cinema=!!current&&(focusMode||fullscreen);
+  const forcedFull=useRef(false);
+  useEffect(()=>{let stale=false;if(fullscreen)void getCurrentWindow().isFullscreen().then(on=>{if(!on&&!stale){forcedFull.current=true;void getCurrentWindow().setFullscreen(true).catch(showError);}}).catch(showError);else if(forcedFull.current){forcedFull.current=false;void getCurrentWindow().setFullscreen(false).catch(showError);}return()=>{stale=true;};},[fullscreen]);
+  const [backgroundAudio,setBackgroundAudio]=useState<number|null>(null);
+  const [backgroundPaused,setBackgroundPaused]=useState(false);
+  useEffect(()=>{const row=Object.entries(tabNative).find(([id,state])=>state.audio&&!mutedTabs.includes(Number(id)));if(row){setBackgroundAudio(Number(row[0]));setBackgroundPaused(false);}},[tabNative,mutedTabs]);
+  const audible=Object.entries(tabNative).some(([id,state])=>state.audio&&!mutedTabs.includes(Number(id)));
+  useEffect(()=>{document.documentElement.classList.toggle("browser-audio-active",audible);window.dispatchEvent(new CustomEvent("luna-browser-audio",{detail:audible}));return()=>{document.documentElement.classList.remove("browser-audio-active");window.dispatchEvent(new CustomEvent("luna-browser-audio",{detail:false}));};},[audible]);
+  useEffect(()=>{const pause=(e:Event)=>{const id=(e as CustomEvent<number>).detail;if(known.current.has(id))void native("browser_action",{id,action:"pause-media"}).catch(()=>{});};window.addEventListener("luna-web-playing",pause);return()=>window.removeEventListener("luna-web-playing",pause);},[]);
   useEffect(()=>{document.documentElement.classList.toggle("luna-web-video-fullscreen",fullscreen);onVideoFullscreen?.(fullscreen);return()=>{document.documentElement.classList.remove("luna-web-video-fullscreen");onVideoFullscreen?.(false);};},[fullscreen,onVideoFullscreen]);
   const storePage=(()=>{try{const url=new URL(current?.url||"");return url.protocol==="https:"&&["chromewebstore.google.com","chrome.google.com"].includes(url.hostname)&&/\/[a-p]{32}\/?$/.test(url.pathname);}catch{return false;}})();
   const nowNative: TabNative = (current && tabNative[current.id]) || freshNative();
@@ -317,16 +329,18 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
   }
   const syncRef = useRef(syncUrl); syncRef.current = syncUrl;
   const transcripts = useRef(new Map<string, string>()).current;
-  async function capturePage(plain = false): Promise<BrowserPage> {
+  async function capturePage(plain = false, options?:{provider?:string;videoSummary?:boolean}): Promise<BrowserPage> {
     if (chosen.current === null || !shown.current) throw new Error("Önce bir web sayfası aç.");
     const id = chosen.current, revision = revisions.current.get(id) || 0;
     const selection=selectedText.current;
-    if(!plain&&selection&&selection.id===id&&selection.revision===revision&&selection.page.url===tabsRef.current.find(t=>t.id===id)?.url)return selection.page;
-    const page = await native<Omit<BrowserPage, "capturedAt">>("browser_read", { id });
+    if(!plain&&!options?.videoSummary&&selection&&selection.id===id&&selection.revision===revision&&selection.page.url===tabsRef.current.find(t=>t.id===id)?.url)return selection.page;
+    const tab=tabsRef.current.find(t=>t.id===id);
+    if(options?.videoSummary&&options.provider==="gemini"&&tab)return {title:tab.title,url:tab.url,text:"",truncated:false,capturedAt:Date.now()};
+    const page = await native<Omit<BrowserPage, "capturedAt">>("browser_read", { id }).catch(error=>{if(!options?.videoSummary||!tab)throw error;return {title:tab.title,url:tab.url,text:"",truncated:false};});
     if (!alive.current || !shown.current || chosen.current !== id || revision !== (revisions.current.get(id) || 0)) throw new Error("Sayfa değişti; yeniden oku.");
     const clean = cleanBrowserPage(page, !!tabsRef.current.find(t => t.id === id)?.loading);
     // A YouTube video: what is said in it (its subtitles, fetched once per video) instead of only the page around it.
-    if (!plain && /^https:\/\/(www\.|m\.)?youtube\.com\/(watch|shorts\/)|^https:\/\/youtu\.be\//.test(clean.url)) {
+    if (!plain && !(options?.videoSummary&&options.provider==="gemini") && /^(?:https:\/\/(?:www\.|m\.)?youtube\.com\/(?:watch|shorts\/|live\/)|https:\/\/youtu\.be\/)/.test(clean.url)) {
       let said = transcripts.get(clean.url);
       if (said === undefined) {
         said = await invoke<string>("yt_transcript", { url: clean.url }).catch(() => "");
@@ -334,13 +348,13 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
 
       }
       if (!alive.current || !shown.current || chosen.current !== id || revision !== (revisions.current.get(id) || 0)) throw new Error("Sayfa değişti; yeniden oku.");
-      if (said) return { ...clean, text: label("Videonun altyazısı (konuşulanlar):\n", "The video's subtitles (what is said):\n") + said.slice(0, 40000) + "\n\n" + label("Sayfa metni:\n", "Page text:\n") + clean.text.slice(0, 4000), truncated: said.length > 40000 || clean.truncated, capturedAt: Date.now() };
+      if (said) return { ...clean, transcript:true, text: label("Videonun altyazısı (konuşulanlar):\n", "The video's subtitles (what is said):\n") + said.slice(0, 40000) + "\n\n" + label("Sayfa metni:\n", "Page text:\n") + clean.text.slice(0, 4000), truncated: said.length > 40000 || clean.truncated, capturedAt: Date.now() };
     }
     return { ...clean, capturedAt: Date.now() };
   }
   const readerRef = useRef(capturePage); readerRef.current = capturePage;
   useEffect(() => {
-    registerBrowserReader(active && selected !== null ? () => readerRef.current() : null);
+    registerBrowserReader(active && selected !== null ? options => readerRef.current(false,options) : null);
     return () => registerBrowserReader(null);
   }, [active, selected]);
   async function readPage() {
@@ -532,15 +546,15 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
   }
   // ---- address suggestions -------------------------------------------------------------------------
   const suggestions = useMemo(() => focusSource && addressEdited
-    ? webSuggestions(address, { tabs: tabs.filter(t => t.id !== selected), bookmarks, history }, engine, Date.now(), lang() === "tr") : [],
-  [focusSource, addressEdited, address, tabs, selected, bookmarks, history, engine]);
+    ? webSuggestions(focusSource==="start"?startQuery:address, { tabs: tabs.filter(t => t.id !== selected), bookmarks, history }, engine, Date.now(), lang() === "tr") : [],
+  [focusSource, addressEdited, startQuery, address, tabs, selected, bookmarks, history, engine]);
   function removeSuggestion(s: Suggestion) { if (s.kind === "history") commitHistory(removeVisit(historyRef.current, s.url)); }
   function pickSuggestion(s: Suggestion) {
     setAddressEdited(false); setSuggestAt(-1);
     if (s.kind === "tab") { chooseTab(s.id); return; }
     if (s.kind === "bang") {
       if (s.query) void action("navigate", "!" + s.key + " " + s.query);
-      else { addressDirty.current = true; setAddress("!" + s.key + " "); setAddressEdited(true); }
+      else { addressDirty.current = true; if(focusSource==="start")setStartQuery("!"+s.key+" ");else setAddress("!" + s.key + " "); setAddressEdited(true); }
       return;
     }
     void action("navigate", s.kind === "search" ? engineRef.current.search(s.query) : s.url);
@@ -558,6 +572,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
   const suggestList = <SuggestList items={suggestions} active={suggestAt} pick={pickSuggestion} hover={setSuggestAt} remove={removeSuggestion}/>;
   const topList = useMemo(() => selected === null ? topSites(history, Date.now(), 8, hiddenSites) : [], [selected === null, history, hiddenSites]);
   const restoreList = selected === null ? missingWebTabs(lastSession, tabs, 8) : [];
+  useEffect(()=>{if(!active)return;const consume=()=>{const url=store.get("pendingDevWatch");if(!url)return;store.remove("pendingDevWatch");setToolsOpen(false);void add(url);};let timer=window.setTimeout(consume,0);const open=()=>{clearTimeout(timer);timer=window.setTimeout(consume,0);};window.addEventListener("luna-browser-open",open);return()=>{clearTimeout(timer);window.removeEventListener("luna-browser-open",open);};},[active]);
   function openReadingFrom(url: string, progress: number) { pendingScroll.current = { id: null, url, progress }; void action("navigate", url); }
   // ---- find in page --------------------------------------------------------------------------------
   function closeFind() {
@@ -613,12 +628,35 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
       .catch(showError);
   }
   function reloadTab(id: number) { stopping.current.delete(id); revisions.current.set(id, (revisions.current.get(id) || 0) + 1); void native("browser_action", { id, action: "reload" }).catch(showError); }
-  function playInLuna(tab: { id: number; url: string }) {
-    if (!onPlay) return;
-    onPlay(tab.url);
-    // The page may still be playing the same video: silence it while Luna plays (Ctrl+M or the badge turns it back on).
-    if (!mutedTabs.includes(tab.id)) { toggleMute(tab.id, true); setBrowserNotice(label("Luna oynatıyor; sayfanın sesi kapatıldı.", "Luna is playing it; the page was muted.")); }
+  const [mediaBusy,setMediaBusy]=useState(false);const mediaJob=useRef(0);
+  const [autoPick,setAutoPick]=useState(()=>store.get('webAutoPick')==='1'),[autoOpen,setAutoOpen]=useState(()=>store.get('webAutoOpen')==='1');
+  const autoSeen=useRef(new Set<string>()),mediaBusyRef=useRef(false);mediaBusyRef.current=mediaBusy;
+
+  const [mediaChoice,setMediaChoice]=useState<{tab:{id:number;url:string};revision:number|undefined;media:ReturnType<typeof cleanWebMedia>;rows:WebMediaTrack[];failed?:boolean}|null>(null);
+  const lastMediaRequest=useRef<typeof mediaChoice>(null),[mediaRecovery,setMediaRecovery]=useState<typeof mediaChoice>(null);
+  useEffect(()=>{setMediaChoice(null);if(active&&current)void native('browser_action',{id:current.id,action:'resume-media'}).catch(()=>{});},[active,selected,current?.url]);
+  useEffect(()=>{const fail=(event:Event)=>{const id=(event as CustomEvent<{id:number}>).detail?.id,request=lastMediaRequest.current;if(request?.tab.id===id){setBrowserNotice(label('Bu dosyayı oynatamadım. Başka bir video seç.','Could not play this file. Choose another video.'));setMediaRecovery({...request,failed:true});}};window.addEventListener('luna-web-open-failed',fail);return()=>window.removeEventListener('luna-web-open-failed',fail);},[]);
+  useEffect(()=>{if(active&&mediaRecovery){if(current?.id===mediaRecovery.tab.id&&current.url===mediaRecovery.tab.url)setMediaChoice(mediaRecovery);setMediaRecovery(null);}},[active,mediaRecovery,current?.id,current?.url]);
+  async function startMedia(tab:{id:number;url:string},media:ReturnType<typeof cleanWebMedia>,source?:WebMediaTrack){
+    const revision=revisions.current.get(tab.id);const choices=playableVideoSources(media.media);lastMediaRequest.current={tab,revision,media,rows:choices.length?choices:[{url:source?.url||tab.url}]};
+    await native('browser_action',{id:tab.id,action:'pause-media'}).catch(()=>{});
+    if(!alive.current||chosen.current!==tab.id||tabsRef.current.find(t=>t.id===tab.id)?.url!==tab.url||revisions.current.get(tab.id)!==revision)return;
+    const variants=mainVideoVariants(webQualitySources(media.media,tab.url),source);if(source&&!variants.some(v=>v.url===source.url))variants.unshift(source);
+    onPlay?.(source?.url||tab.url,{referer:source?.referer||tab.url,agent:source?.agent,sourceTabId:tab.id,releaseYear:media.releaseYear,variants,pageUrl:tab.url,title:media.title||tabsRef.current.find(t=>t.id===tab.id)?.title||tab.url,subtitles:isYouTubeVideo(tab.url)?[]:media.subtitles.filter(t=>!source?.frameUrl||!t.frameUrl||t.frameUrl===source.frameUrl),audio:source?.audioUrl?[{url:source.audioUrl,referer:source.referer,agent:source.agent}]:[]});
+    // Native pause-media uses a temporary mute; it must not alter the user mute preference.
   }
+  async function playInLuna(tab:{id:number;url:string},automatic=false){
+    if(!onPlay||mediaBusyRef.current)return;const job=++mediaJob.current,revision=revisions.current.get(tab.id);setMediaBusy(true);
+    try{let media:ReturnType<typeof cleanWebMedia>={pagePlaying:false,title:'',releaseYear:undefined,media:[],subtitles:[],audio:[],variants:[]};
+      if(!/\.(?:mp4|webm|mkv|m3u8|mpd|mp3|flac|m4a|ogg|opus|wav|aac)(?:[?#]|$)/i.test(tab.url))try{media=cleanWebMedia(await native('browser_media',{id:tab.id}));}catch{setBrowserNotice(label('Kaynak okunamadı; sayfa bağlantısı oynatıcıyla denenecek.','Could not read the source; trying the page in the player.'));}
+      if(!alive.current||job!==mediaJob.current||chosen.current!==tab.id||revision!==revisions.current.get(tab.id)||tabsRef.current.find(t=>t.id===tab.id)?.url!==tab.url)return;
+      if(isYouTubeVideo(tab.url)){await startMedia(tab,{...media,media:[],subtitles:[],audio:[]});return;}
+      const rows=automatic?automaticVideoSources(media.media):playableVideoSources(media.media);if(automatic&&!rows.length&&!isYouTubeVideo(tab.url))return;if(playableInLuna(tab.url)&&rows.length<=1){await startMedia(tab,media);return;}
+      if(playableInLuna(tab.url)&&rows.length>1&&!rows.some(r=>r.url===tab.url))rows.unshift({url:tab.url,label:label('Sayfa oynatıcısı','Page player')});
+      if(rows.length>1&&!automatic&&!autoPick){setMediaChoice({tab,revision,media,rows});return;}await startMedia(tab,media,rows[0]);
+    }catch(e){showError(e);}finally{if(alive.current&&job===mediaJob.current)setMediaBusy(false);}
+  }
+  useEffect(()=>{if(!active||!autoOpen||!current)return;let cancelled=false,busy=false;const tab={id:current.id,url:current.url};const poll=async()=>{if(busy||mediaBusyRef.current||document.querySelector('.modal-bg'))return;busy=true;try{const media=cleanWebMedia(await native('browser_media',{id:tab.id,probeOnly:true}));const playing=automaticVideoSources(media.media).find(row=>row.playing)||(tabNative[tab.id]?.audio||media.pagePlaying?automaticVideoSources(media.media)[0]:undefined);const key=tab.id+'|'+tab.url+'|'+(playing?.url||'');if(!cancelled&&playing&&!autoSeen.current.has(key)){if(autoSeen.current.size>64)autoSeen.current.clear();autoSeen.current.add(key);await playInLuna(tab,true);}}catch{}finally{busy=false;}};const timer=window.setInterval(()=>void poll(),1800);void poll();return()=>{cancelled=true;clearInterval(timer);};},[active,autoOpen,current?.id,current?.url,tabNative[current?.id??-1]?.audio]);
   async function closeMany(ids: number[]) { for (const id of ids) await closeTab(id); }
   function togglePin(id: number) {
     const result = pinTab(tabsRef.current, pinnedRef.current, id, !pinnedRef.current.has(id));
@@ -627,7 +665,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
   function tabMenuItems(id: number): TabMenuItem[] {
     const list = tabsRef.current, tab = list.find(t => t.id === id);
     if (!tab) return [];
-    const at = list.indexOf(tab), muted = mutedTabs.includes(id), full = list.length >= 8 || creating, canPlay = !!onPlay && !!playableInLuna(tab.url);
+    const at = list.indexOf(tab), muted = mutedTabs.includes(id), full = list.length >= 8 || creating, canPlay = !!onPlay && !!mediaAddress(tab.url);
     const items: TabMenuItem[] = [
       { label: pinned.has(id) ? label("Sabitlemeyi kaldır", "Unpin tab") : label("Sekmeyi sabitle", "Pin tab"), icon: "pin", run: () => togglePin(id) },
       { label: label("Yenile", "Reload"), icon: "reload", hint: "F5", run: () => reloadTab(id) },
@@ -678,6 +716,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
     switch (name) {
       case "ctrl+shift+d": window.dispatchEvent(new Event("luna-open-debug"));return true;
       case "ctrl+k": setToolsOpen(false); setPaletteOpen(true); return true;
+      case "alt+f3": window.dispatchEvent(new KeyboardEvent("keydown",{key:"F3",code:"F3",altKey:true,bubbles:true})); return true;
       case "ctrl+l": case "f6": addressInput.current?.focus(); addressInput.current?.select(); return true;
       case "ctrl+shift+a": setToolsOpen(false); setWorkspaceOpen(true); return true;
       case "ctrl+d": if (!current) return false; bookmark(); return true;
@@ -750,7 +789,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
       }
       if(e.kind === "loaded" && pendingScroll.current?.url === e.value && pendingScroll.current.id===e.id){const pending=pendingScroll.current;pendingScroll.current=null;void native("browser_position",{id:e.id,action:"scroll",expectedUrl:e.value,fraction:pending.progress}).catch(showError);}
       if(e.kind==="loaded" && pendingScroll.current?.id===e.id && pendingScroll.current.url!==e.value)pendingScroll.current=null;
-      if (e.kind === "popup") { const tab=tabsRef.current.find(t=>t.id===e.id),pref=prefsRef.current[siteOrigin(tab?.url||"")];if(pref?.popups==="block")return;if(pref?.popups==="tab"&&chosen.current===e.id&&shown.current){void addRef.current(e.value);return;} if(chosen.current===e.id)setPopup({id:e.id,url:e.value}); return; }
+      if (e.kind === "popup") { const tab=tabsRef.current.find(t=>t.id===e.id),pref=prefsRef.current[siteOrigin(tab?.url||"")];if(pref?.popups==="block")return;if(chosen.current===e.id&&shown.current){void addRef.current(e.value);return;} return; }
       if (e.kind !== "title" && e.kind !== "history") dlog("event", e.id, e.kind);
       if (e.kind === "download-rejected") {showError(e.value);return;}
       if (e.kind === "download-start") {const back=committed.current.get(e.id);setTabs(ts=>ts.map(t=>t.id===e.id?{...t,url:back??t.url,loading:false}:t));setBrowserNotice(label("İndirme başladı. Araçlar › İndirmeler bölümünden yönetebilirsin.","Download started. Manage it in Tools › Downloads."));return;}
@@ -793,7 +832,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
   }, []);
   useEffect(() => {
     if (!isTauri()) return;
-    let last = "", busy = false, disposed = false;
+    let last = "", busy = false, disposed = false, awaySince = 0;
     const place = async () => {
       if (busy || disposed) return;
       const r = slot.current?.getBoundingClientRect();
@@ -801,7 +840,15 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
       const chatElement = Array.from(document.querySelectorAll<HTMLElement>(".chat-panel,.browser-tools-pop,.browser-suggest,.browser-tab-menu,.dev-notebook,.global-search")).find(el=>el.getClientRects().length>0);
       const chat = chatElement?.getBoundingClientRect();
       const extraOverlays=Array.from(document.querySelectorAll<HTMLElement>(".chat-panel,.browser-tools-pop,.browser-suggest,.browser-tab-menu,.dev-notebook,.global-search")).filter(el=>el!==chatElement&&el.getClientRects().length).slice(0,7).map(el=>{const r=el.getBoundingClientRect(),dpr=window.devicePixelRatio;return{x:Math.round((r.left-6)*dpr),y:Math.round((r.top-6)*dpr),width:Math.ceil((r.width+12)*dpr),height:Math.ceil((r.height+12)*dpr),radius:14*dpr};});
-      const covered = !!document.querySelector('.modal-bg,.chat-ws,.menu-pop,.card-menu,.bk-reader,.mu-np,[role="dialog"]:not(.browser-tools-pop)');
+      // The music / small film dock floats over the page: its exact shape is cut out of the page window, so the page keeps
+      // its full height and nothing resizes when the dock comes or goes (the strip above it is the seek line).
+      // When a web video starts (dock-away), the cut stays for the whole slide even while the dock fades, so the page never
+      // covers the dock at the first frame; it is dropped only after the slide has ended.
+      const away=!!document.querySelector(".root.dock-away");if(!away)awaySince=0;else if(!awaySince)awaySince=performance.now();const leaving=away&&performance.now()-awaySince<1500;
+      for(const dock of Array.from(document.querySelectorAll<HTMLElement>(".mu-dock"))){if(extraOverlays.length>=7)break;const d=dock.getBoundingClientRect(),st=getComputedStyle(dock),dpr=window.devicePixelRatio;if(!d.width||(!leaving&&(Number(st.opacity)<.05||st.visibility==="hidden")))continue;// The cut reaches from the dock down to the window's bottom edge: when a web video starts, the page is busy for about
+      // a second and the cut cannot follow, but the dock sliding down stays inside it the whole way.
+      extraOverlays.push({x:Math.round(d.left*dpr),y:Math.round((d.top-8)*dpr),width:Math.ceil(d.width*dpr),height:Math.ceil((Math.max(d.height,window.innerHeight-d.top)+8)*dpr),radius:Math.ceil((parseFloat(st.borderTopLeftRadius)||16)*dpr)});}
+      const covered = Array.from(document.querySelectorAll<HTMLElement>('.modal-bg,.chat-ws,.menu-pop,.card-menu,.bk-reader,.mu-np,.dev-crop,[role="dialog"]:not(.browser-tools-pop)')).some(el=>el.getClientRects().length>0&&getComputedStyle(el).visibility!=="hidden"&&getComputedStyle(el).pointerEvents!=="none");
       const right = r?.right ?? 0;
       setNeedsRoom(!!(active && r && right - r.left < 240));
       const visible = active && !document.hidden && r && right - r.left >= 240 && r.height >= 100 && !covered;
@@ -825,14 +872,18 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
       dlog("layer", { selected, visible, covered: cover ? cover.className || cover.tagName : null, cut: chatElement?.className ?? null, bounds, bubble: bubbleBounds, tabs: [...known.current], dpr });
       try {
         for (const id of known.current) {
-          if (id === selected && bounds) await native("browser_bounds", { id, ...bounds,overlays:extraOverlays });
-          else await native("browser_action", { id, action: "hide" });
+          if (id === selected && bounds) await native("browser_bounds", { id, ...bounds,overlays:extraOverlays },()=>!disposed&&alive.current&&known.current.has(id));
+          else await native("browser_action", { id, action: "hide" },()=>!disposed&&alive.current&&known.current.has(id));
         }
-        await native("browser_bubble", bubbleBounds);
-      } catch (e) { last = ""; dlog("layer error", String((e as any)?.message ?? e)); showError(e); } finally { busy = false; }
+        await native("browser_bubble", bubbleBounds,()=>!disposed&&alive.current);
+      } catch (e) { if(disposed)return;last = ""; dlog("layer error", String((e as any)?.message ?? e)); showError(e); } finally { busy = false; }
     };
     const interval = active ? window.setInterval(place, 160) : 0; void place();
-    return () => { disposed = true; clearInterval(interval); };
+    // While a dock slides or fades, the page cut-out follows it every frame (160 ms steps would show the page over it).
+    let burst=0,until=0;const follow=()=>{if(disposed||performance.now()>until){burst=0;return;}void place();burst=requestAnimationFrame(follow);};
+    const moving=(e:Event)=>{if(!active||!(e.target as HTMLElement|null)?.classList?.contains("mu-dock"))return;until=performance.now()+1500;if(!burst)burst=requestAnimationFrame(follow);};
+    document.addEventListener("animationstart",moving,true);document.addEventListener("transitionrun",moving,true);
+    return () => { disposed = true; clearInterval(interval); cancelAnimationFrame(burst); document.removeEventListener("animationstart",moving,true); document.removeEventListener("transitionrun",moving,true); };
   }, [active, selected, tabs.length]);
   useEffect(()=>{
     if(!active||!current||!isTauri())return;
@@ -888,7 +939,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
   }
   const insecure = !!current && current.url.startsWith("http:") && !/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(current.url);
   const showPretty = !!current && focusSource !== "bar" && address === current.url, searchWords = current ? searchedWords(current.url) : null, pretty = current ? prettyAddress(current.url) : null;
-  return <section className={"browser-shell" + (!current ? " is-start" : "") + (cinema?" is-cinema":"")} hidden={!active} aria-label="Luna Web">
+  return <><section className={"browser-shell" + (!current ? " is-start" : "") + (cinema?" is-cinema":"")} hidden={!active} aria-label="Luna Web">
     {workspaceOpen&&<BrowserWorkspace tabs={tabs} selected={selected} select={chooseTab} move={(id,direction)=>setTabs(rows=>stepTab(rows,id,direction,pinnedRef.current))} closeTab={closeTab} closed={closedTabs} reopen={reopenClosed} add={add} close={()=>setWorkspaceOpen(false)} bookmarks={bookmarks} saveBookmarks={rows=>{localStorage.setItem("lunaWebBookmarks",JSON.stringify(rows));setBookmarks(rows);}}/>}
     {cinema&&<div className="browser-cinema-bar"><span>{current?.title}</span><button className="chip" onClick={()=>{setFocusMode(false);if(fullscreen&&current)void native("browser_action",{id:current.id,action:"exit-fullscreen"}).catch(showError);}}>{label("İzleme görünümünden çık","Exit watch view")}</button></div>}
     <div className="browser-chrome">
@@ -918,11 +969,14 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
           {current && nowNative.zoom !== 1 && <button type="button" className="browser-zoom-chip" aria-label={label(`Yakınlaştırma %${Math.round(nowNative.zoom * 100)}; sıfırlamak için tıkla`, `Zoom ${Math.round(nowNative.zoom * 100)}%; click to reset`)} title={label("Yakınlaştırmayı sıfırla · Ctrl+0", "Reset zoom · Ctrl+0")} onClick={() => setPageZoom(1)}>{Math.round(nowNative.zoom * 100)}%</button>}
           {current && <button type="button" disabled={readerBusy} aria-label={label("Okuma modu", "Reading view")} title={label("Okuma modu · Ctrl+Shift+R", "Reading view · Ctrl+Shift+R")} onClick={() => void openReader()}><WebIcon name="reader" size={16}/></button>}
           {current && <button type="button" className={bookmarks.some(b => b.url === current.url) ? "saved" : ""} aria-label={label("Yer imini değiştir", "Toggle bookmark")} title={label("Yer imi · Ctrl+D", "Bookmark · Ctrl+D")} onClick={() => bookmark()}><WebIcon name="star" size={16}/></button>}
-          <button type="submit" aria-label={label("Adrese git", "Go")}><WebIcon name="arrow" size={16}/></button></form>
+          {current&&(playlistAddress(current.url)||(()=>{try{const u=new URL(current.url);return ((["youtube.com","www.youtube.com"].includes(u.hostname)&&u.pathname==="/watch"&&u.searchParams.has("v"))||(u.hostname==="youtu.be"&&u.pathname.length>1)||(u.hostname==="open.spotify.com"&&u.pathname.includes("/track/")));}catch{return false;}})())?<button className="browser-playlist-import" type="button" aria-label={label("Müziği içe aktar","Import music")} title={label("Müziği içe aktar","Import music")} onClick={()=>{setToolsOpen(false);window.dispatchEvent(new CustomEvent("luna-import-playlist",{detail:current.url}));}}><span style={{display:"inline-flex",transform:"rotate(90deg)"}}><WebIcon name="arrow" size={16}/></span></button>:<button type="submit" aria-label={label("Adrese git", "Go")}><WebIcon name="arrow" size={16}/></button>}</form>
           {focusSource === "bar" && suggestions.length > 0 && suggestList}</div>
-        {current && onPlay && playableInLuna(current.url) && <button className="browser-play-luna" title={label("Bu sayfayı Luna'nın kendi oynatıcısında aç", "Open this in Luna's own player")} onClick={() => playInLuna(current)}><WebIcon name="play" size={13}/><span>{label("Luna'da oynat", "Play in Luna")}</span></button>}
+        {current && onPlay && mediaAddress(current.url) && <button disabled={mediaBusy} className="browser-play-luna" title={label("Bu sayfayı Luna'nın kendi oynatıcısında aç", "Open this in Luna's own player")} onClick={() => playInLuna(current)}><WebIcon name="play" size={13}/><span>{mediaBusy?label("Video aranıyor…","Finding video…"):label("Luna'da oynat", "Play in Luna")}</span></button>}
         <div className="browser-tools-anchor"><button className={"browser-tools-toggle" + (toolsOpen ? " on" : "")} aria-label={label("Sayfa araçları", "Page tools")} aria-expanded={toolsOpen} title={label("Çeviri ve sayfa araçları", "Translation and page tools")} onClick={() => setToolsOpen(v => !v)}><WebIcon name="translate" size={18}/><span>{label("Araçlar", "Tools")}</span></button>
           {toolsOpen && <div className="browser-tools-pop extra-browser-tools" role="dialog" aria-label={label("Sayfa araçları", "Page tools")}>
+            <BrowserAdBlock/>
+            <label className="look-check browser-menu-action"><input type="checkbox" checked={autoPick} onChange={e=>{const on=e.target.checked;if(store.set('webAutoPick',on?'1':'0'))setAutoPick(on);}}/><span>{label('En uygun kaynağı otomatik seç','Automatically choose the best source')}</span></label>
+            <label className="look-check browser-menu-action"><input type="checkbox" checked={autoOpen} onChange={e=>{const on=e.target.checked;if(store.set('webAutoOpen',on?'1':'0'))setAutoOpen(on);}}/><span>{label('Web videolarını Luna’da otomatik aç','Automatically open web videos in Luna')}</span></label>
             <button className="browser-menu-action" disabled={!current} onClick={()=>{setToolsOpen(false);setSiteSettings(true);}}><WebIcon name="settings" size={17}/>{label("Bu sitenin tercihleri","Site preferences")}</button><button className="browser-menu-action" disabled={!current} onClick={()=>{setToolsOpen(false);setFocusMode(true);}}><WebIcon name="film" size={17}/>{label("İzleme görünümü","Watch view")}</button>
             <button className="browser-menu-action" onClick={()=>{setToolsOpen(false);setManager("extensions");}}><WebIcon name="plus" size={17}/>{label("Eklentileri yönet","Manage extensions")}</button>
             <button className="browser-menu-action" onClick={()=>{setToolsOpen(false);setManager("downloads");}}><WebIcon name="external" size={17}/>{label("İndirmeler","Downloads")}{downloadCount>0&&<small>{downloadCount} {label("devam ediyor","in progress")}</small>}</button><hr/>
@@ -949,8 +1003,8 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
     {(translationNote||translating) && <div className="browser-translation-status" role="status"><WebIcon name="translate" size={14}/><span>{translationNote}</span>{translating&&<button className="chip" onClick={()=>{cancelTranslation.current=true;setTranslationNote(label("Durduruluyor; gönderilmiş isteğin yanıtı uygulanmayacak.","Stopping; the in-flight reply will not be applied."));}}>{label("İptal","Cancel")}</button>}{canRetry&&!translating&&<button className="chip" onClick={()=>void translatePage(retryTranslation.current?.target||targetLanguage).catch(showError)}>{label("Başarısız bölümden devam et","Retry remaining sections")}</button>}</div>}
     <div className="browser-surface" ref={slot} aria-busy={!!current?.loading}>
       {current && needsRoom && <div className="browser-space-note"><WebIcon name="globe" size={32}/><p>{label("Web sayfasını göstermek için pencereyi biraz genişlet.", "Widen the window a little to show the web page.")}</p></div>}
-      {!current && <BrowserStart query={address} setQuery={v => { addressDirty.current = true; setAddress(v); setAddressEdited(true); setSuggestAt(-1); }}
-        submit={() => { setAddressEdited(false); void action("navigate", address); }} onKeyDown={e => { suggestKeys(e); }}
+      {!current && <BrowserStart query={startQuery} setQuery={v => { setStartQuery(v); setAddressEdited(true); setSuggestAt(-1); }}
+        submit={() => { setAddressEdited(false); void action("navigate", startQuery); }} onKeyDown={e => { suggestKeys(e); }}
         onFocusChange={f => { setFocusSource(f ? "start" : null); if (!f) { setAddressEdited(false); setSuggestAt(-1); } }}
         suggest={focusSource === "start" && suggestions.length > 0 ? suggestList : null} suggestOpen={focusSource === "start" && suggestions.length > 0} activeOption={suggestAt}
         engine={engine} setEngine={chooseEngine} creating={creating} go={url => void action("navigate", url)} topSites={topList} hideSite={hideSite}
@@ -962,7 +1016,7 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
     </div>
 
     {active&&recover.length>0&&<RecoveryPanel tabs={recover} busy={recoveryBusy} restore={recoverSelected} close={closeRecovery}/>}
-    {active&&siteSettings&&current&&<SitePreferencesPanel origin={siteOrigin(current.url)} value={sitePrefs[siteOrigin(current.url)]||{muted:false,popups:"ask"}} zoom={nowNative.zoom} resetZoom={()=>setPageZoom(1)} save={value=>saveSitePreference(siteOrigin(current.url),value)} close={()=>setSiteSettings(false)}/>}
+    {active&&siteSettings&&current&&<SitePreferencesPanel origin={siteOrigin(current.url)} value={sitePrefs[siteOrigin(current.url)]||{muted:false,popups:"tab"}} zoom={nowNative.zoom} resetZoom={()=>setPageZoom(1)} save={value=>saveSitePreference(siteOrigin(current.url),value)} close={()=>setSiteSettings(false)}/>}
     {pageMenu&&<WebMenu x={pageMenu.x} y={pageMenu.y} items={pageMenuItems()} close={()=>setPageMenu(null)}/>}
     {active && paletteOpen && <CommandPalette title={label("Web komutları", "Web commands")} commands={webCommands()} onClose={() => setPaletteOpen(false)} footer="Ctrl+K" extra={query => {
       if (!query.trim()) return []; let url: string; try { url = resolveWebInput(query, engine, lang() === "tr"); } catch { return []; }
@@ -973,9 +1027,10 @@ export function Browser({ active, onClose, onPage, onInvalidate, onAssistant, on
     {historyOpen && <HistoryPanel rows={history} paused={historyPaused} setPaused={setPaused} close={() => setHistoryOpen(false)}
       open={(url, newTab) => { setHistoryOpen(false); if (newTab) void add(url); else void action("navigate", url); }}
       remove={url => commitHistory(removeVisit(historyRef.current, url))} removeSite={host => commitHistory(removeSite(historyRef.current, host))} clearSince={since => commitHistory(clearVisitsSince(historyRef.current, since))}/>}
+    {mediaChoice&&<BrowserMediaPicker error={mediaChoice.failed} rows={mediaChoice.rows} close={()=>setMediaChoice(null)} choose={source=>{const choice=mediaChoice;setMediaChoice(null);if(!alive.current||!shown.current||chosen.current!==choice.tab.id||revisions.current.get(choice.tab.id)!==choice.revision||tabsRef.current.find(t=>t.id===choice.tab.id)?.url!==choice.tab.url){setBrowserNotice(label("Sayfa değişti; kaynakları yeniden bul.","The page changed. Find the sources again."));return;}void startMedia(choice.tab,choice.media,source);}}/>}
     {keysOpen && <ShortcutsPanel close={() => setKeysOpen(false)}/>}
     {clearOpen && <ClearDataPanel canClearSite={tabs.length > 0} clear={clearData} close={() => setClearOpen(false)}/>}
-  </section>;
+  </section>{!active&&backgroundAudio!==null&&(tabNative[backgroundAudio]?.audio||backgroundPaused)&&(()=>{const tab=tabs.find(t=>t.id===backgroundAudio);if(!tab)return null;return createPortal(<div className="luna-browser-audio-dock"><WebIcon name="speaker" size={22}/><strong>{tab.title}</strong><button className="chip" onClick={()=>{const paused=!backgroundPaused;void native("browser_action",{id:tab.id,action:paused?"pause-media":"resume-media"}).then(()=>setBackgroundPaused(paused)).catch(showError);}}>{backgroundPaused?"▶":"Ⅱ"}</button><button className="chip" onClick={()=>{chooseTab(tab.id);window.dispatchEvent(new Event("luna-browser-open"));}}>{label("Web’e dön","Return to Web")}</button><button className="chip" aria-label={label("Durdur","Stop")} onClick={()=>{void native("browser_action",{id:tab.id,action:"pause-media"}).catch(showError);setBackgroundPaused(false);setBackgroundAudio(null);}}>×</button></div>,document.body);})()}</>;
 }
 
 function SiteIcon({url,loading}:{url:string;loading:boolean}){const [failed,setFailed]=useState(false);let src="";try{src=new URL("/favicon.ico",url).href;}catch{}useEffect(()=>setFailed(false),[src]);return loading?<WebIcon name="reload" size={14}/>:failed||!src?<WebIcon name="globe" size={14}/>:<img className="browser-favicon" src={src} alt="" referrerPolicy="no-referrer" onError={()=>setFailed(true)}/>;}

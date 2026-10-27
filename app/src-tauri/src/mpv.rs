@@ -108,12 +108,12 @@ pub fn start(app: AppHandle, exe: PathBuf, hwnd: isize, fonts: PathBuf) -> Mpv {
                 .arg(format!("--script-opts=ytdl_hook-ytdl_path={}", ytdlp.display()))
                 .args([
                     format!("--wid={hwnd}"), format!("--input-ipc-server={pipe}"),
-                    "--no-config".into(), "--idle=yes".into(), "--force-window=yes".into(),
+                    "--no-config".into(), "--audio-client-name=Luna Player".into(), "--title=Luna Player".into(), "--idle=yes".into(), "--force-window=yes".into(),
                     "--prefetch-playlist=yes".into(), "--keep-open=yes".into(), "--osc=no".into(), "--osd-level=0".into(),
-                    "--input-default-bindings=no".into(), "--input-vo-keyboard=no".into(),
+                    "--fullscreen=no".into(), "--input-default-bindings=no".into(), "--input-vo-keyboard=no".into(),
                     "--cursor-autohide=no".into(), "--hwdec=auto-safe".into(),
                     "--vo=gpu-next".into(), "--gpu-api=d3d11".into(),
-                    "--target-colorspace-hint=yes".into(), "--tone-mapping=auto".into(),
+                    "--target-colorspace-hint=auto".into(), "--tone-mapping=auto".into(),
                     "--hdr-compute-peak=yes".into(), "--sub-auto=fuzzy".into(),
                     "--slang=tr,tur,en,eng".into(), "--background=color".into(),
                     "--background-color=#000000".into(), "--screenshot-directory=~~desktop/".into(),
@@ -178,6 +178,10 @@ pub fn start(app: AppHandle, exe: PathBuf, hwnd: isize, fonts: PathBuf) -> Mpv {
                                 }
                             }
                             if value.get("event").is_none() {continue;}
+                            if value["event"]=="file-loaded" {
+                                let pid=child.lock().ok().and_then(|c|c.as_ref().map(|c|c.id())).unwrap_or(0);
+                                if pid!=0 { std::thread::spawn(move||brand_audio_session(pid)); }
+                            }
                             if value["event"]=="file-loaded" && recover_file {
                                 recover_file=false;
                                 value["luna_recovered"]=json!(true);
@@ -277,4 +281,31 @@ mod recovery_tests {
         assert_eq!(r.commands().last().unwrap()[1],"film.mkv");
         r.command(&json!(["stop"]));assert!(r.commands().is_empty());assert_eq!(r.time,0.0);
     }
+}
+
+// Match only this owned playback process; never rename another application's session.
+fn brand_audio_session(pid:u32){
+ use windows::{core::{Interface,PCWSTR},Win32::{Media::Audio::{MMDeviceEnumerator,IMMDeviceEnumerator,IAudioSessionManager2,IAudioSessionControl2,eRender,DEVICE_STATE_ACTIVE},System::Com::{CoInitializeEx,CoUninitialize,CoCreateInstance,COINIT_MULTITHREADED,CLSCTX_ALL}}};
+ unsafe{
+  if CoInitializeEx(None,COINIT_MULTITHREADED).is_err(){return;}
+  let name:Vec<u16>="Luna Player\0".encode_utf16().collect();
+  let icon:Vec<u16>=std::env::current_exe().unwrap_or_default().to_string_lossy().encode_utf16().chain(Some(0)).collect();
+  for _ in 0..4{
+   let result=(||->windows::core::Result<()>{
+    let devices:IMMDeviceEnumerator=CoCreateInstance(&MMDeviceEnumerator,None,CLSCTX_ALL)?;
+    let endpoints=devices.EnumAudioEndpoints(eRender,DEVICE_STATE_ACTIVE)?;
+    for d in 0..endpoints.GetCount()?{
+     let Ok(endpoint)=endpoints.Item(d)else{continue;};
+     let Ok(manager)=endpoint.Activate::<IAudioSessionManager2>(CLSCTX_ALL,None)else{continue;};
+     let Ok(sessions)=manager.GetSessionEnumerator()else{continue;};
+     for i in 0..sessions.GetCount()?{let session=sessions.GetSession(i)?;let control:IAudioSessionControl2=session.cast()?;if control.GetProcessId()?==pid{session.SetDisplayName(PCWSTR(name.as_ptr()),std::ptr::null())?;session.SetIconPath(PCWSTR(icon.as_ptr()),std::ptr::null())?;}}
+    }Ok(())
+   })();let _=result;std::thread::sleep(std::time::Duration::from_millis(300));
+  }CoUninitialize();
+ }
+}
+
+/// Reposition the existing decoder's child window; never reload a playing stream.
+pub fn dock_rect(parent:isize,rect:Option<[i32;4]>)->Result<(),String>{
+    crate::video_host::dock(parent,rect)
 }

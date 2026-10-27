@@ -9,7 +9,7 @@ import "./QueueTools.css";
 // and a "now playing" screen with synced lyrics. Playback goes through the same mpv as video,
 // with the picture track off.
 import { open } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl } from "./linkOpen";
 import { useEffect,useMemo,useRef,useState } from "react";
 import { createPortal } from "react-dom";
 import "./BookMusic.css";

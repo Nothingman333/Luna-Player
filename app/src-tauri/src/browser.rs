@@ -1,4 +1,8 @@
 //! Remote pages live in separate WebView2 storage and receive no Luna command access.
+#[path = "browser_playback.rs"]
+mod playback;
+#[path = "browser_media_info.rs"]
+mod media_info;
 use std::{collections::{BTreeSet, HashSet}, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, Webview, WebviewBuilder, WebviewUrl};
@@ -90,6 +94,8 @@ fn permission_name(kind: PermissionKind) -> &'static str {
 /// Native signals the UI cannot infer from page-load events alone: which navigation finished and
 /// how (`nav-done`), real back/forward availability, whether the page is playing audio, and the
 /// page zoom. All are read from WebView2 itself; none of them runs script in the page.
+static PAGE_MEDIA: Mutex<std::collections::BTreeMap<u32, Vec<(String,String,String,String,String)>>> = Mutex::new(std::collections::BTreeMap::new());
+fn media_kind(raw:&str)->Option<&'static str>{let u=Url::parse(raw).ok()?;if !matches!(u.scheme(),"http"|"https")||!u.username().is_empty()||u.password().is_some()||raw.len()>8192{return None}let p=u.path().to_ascii_lowercase();if [".m3u8",".mpd",".mp4",".webm"].iter().any(|x|p.ends_with(x)){Some("media")}else if [".vtt",".srt",".ass"].iter().any(|x|p.ends_with(x)){Some("subtitles")}else{None}}
 fn watch(view: &Webview, app: AppHandle, id: u32) -> Result<(), String> {
     view.with_webview(move |platform| {
         use std::{cell::RefCell, collections::HashMap, rc::Rc};
@@ -99,6 +105,23 @@ fn watch(view: &Webview, app: AppHandle, id: u32) -> Result<(), String> {
         use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2_8, ICoreWebView2NavigationCompletedEventArgs2};
         let controller = platform.controller();
         let Ok(core) = (unsafe { controller.CoreWebView2() }) else { return };
+        playback::attach(&core,id);
+        // Observe URLs already fetched by the page (including embedded players); never read cookies,
+        // response bodies or DRM keys. The bounded in-memory list expires on navigation/tab close.
+        if let Ok(more)=core.cast::<webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_2>() {
+            let handler=webview2_com::WebResourceResponseReceivedEventHandler::create(Box::new(move |sender,args|{
+                let (Some(sender),Some(args))=(sender,args) else{return Ok(())};
+                let request=unsafe{args.Request()?};let mut uri=PWSTR::null();unsafe{request.Uri(&mut uri)?};let uri=take_pwstr(uri);
+                let response=unsafe{args.Response()?};let mut status=0;unsafe{response.StatusCode(&mut status)?};if !(200..300).contains(&status){return Ok(())}
+                let mut mime=PWSTR::null();if let Ok(headers)=unsafe{response.Headers()}{let _=unsafe{headers.GetHeader(windows_core::w!("Content-Type"),&mut mime)};}let mime=take_pwstr(mime).to_ascii_lowercase();
+                let kind=media_kind(&uri).or_else(||if mime.contains("mpegurl")||mime.contains("dash+xml")||mime.starts_with("video/mp4")||mime.starts_with("video/webm"){Some("media")}else if mime.starts_with("text/vtt"){Some("subtitles")}else{None});let Some(kind)=kind else{return Ok(())};if checked_url(&uri).is_err()||uri.len()>8192{return Ok(())}
+                let(mut referer,mut agent)=(PWSTR::null(),PWSTR::null());if let Ok(headers)=unsafe{request.Headers()}{let _=unsafe{headers.GetHeader(windows_core::w!("Referer"),&mut referer)};let _=unsafe{headers.GetHeader(windows_core::w!("User-Agent"),&mut agent)};}let referer=take_pwstr(referer);let agent=take_pwstr(agent);
+                let mut page=PWSTR::null();unsafe{sender.Source(&mut page)?};let page=take_pwstr(page);
+                if let Ok(mut all)=PAGE_MEDIA.lock(){let list=all.entry(id).or_default();if list.len()<64&&!list.iter().any(|(_,u,_,_,_)|u==&uri){list.push((page,uri,kind.into(),referer,agent));}}
+                Ok(())
+            }));
+            let mut media_token=Default::default();let _=unsafe{more.add_WebResourceResponseReceived(&handler,&mut media_token)};
+        }
         // NavigationId -> the address that navigation was (last) heading to, redirects included.
         let started: Rc<RefCell<HashMap<u64, String>>> = Rc::default();
         let mut token = Default::default();
@@ -108,6 +131,7 @@ fn watch(view: &Webview, app: AppHandle, id: u32) -> Result<(), String> {
             let (mut nav, mut uri, mut cancel) = (0u64, PWSTR::null(), Default::default());
             unsafe { args.NavigationId(&mut nav)?; args.Uri(&mut uri)?; args.Cancel(&mut cancel)?; }
             let uri = take_pwstr(uri);
+            if let Ok(mut media)=PAGE_MEDIA.lock(){media.remove(&id);}
             let canceled: bool = cancel.into();
             let mut seen = seen.borrow_mut();
             if seen.len() > 64 { seen.clear(); }
@@ -201,6 +225,7 @@ fn watch(view: &Webview, app: AppHandle, id: u32) -> Result<(), String> {
             let down = |vk: i32| unsafe { GetKeyState(vk) } < 0;
             if let Some(name) = page_shortcut(key, down(0x11), down(0x10), down(0x12)) {
                 unsafe { args.SetHandled(true)?; }
+                if name=="alt+f3" {let mut status=Default::default();if unsafe{args.PhysicalKeyStatus(&mut status)}.is_ok()&&status.WasKeyDown.as_bool(){return Ok(())}}
                 event(&key_app, id, "key", name.into());
             }
             Ok(())
@@ -224,7 +249,7 @@ fn page_shortcut(key: u32, ctrl: bool, shift: bool, alt: bool) -> Option<&'stati
             0x44 => Some("ctrl+shift+d"), 0x54 => Some("ctrl+shift+t"), 0x09 => Some("ctrl+shift+tab"), 0x52 => Some("ctrl+shift+r"), 0x41 => Some("ctrl+shift+a"), 0x2E => Some("ctrl+shift+delete"), 0x21 => Some("ctrl+shift+pageup"), 0x22 => Some("ctrl+shift+pagedown"),
             _ => None,
         },
-        (false, false, true) => if key == 0x24 { Some("alt+home") } else { None },
+        (false, false, true) => match key {0x24=>Some("alt+home"),0x72=>Some("alt+f3"),_=>None},
         (false, false, false) => match key { 0x75 => Some("f6"), 0x78 => Some("f9"), 0x70 => Some("f1"), _ => None },
         _ => None,
     }
@@ -254,6 +279,8 @@ pub async fn browser_bubble(app: AppHandle, caller: Webview, visible: bool, x: O
             // environment on one folder with other options (0x8007139F "not in the correct state").
             .additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling")
             .initialization_script(format!("addEventListener('DOMContentLoaded',()=>document.documentElement.style.setProperty('--accent',{initial_color}),{{once:true}});"))
+            .initialization_script_for_all_frames(include_str!("../../src/browserHold.js"))
+            .initialization_script_for_all_frames(include_str!("../../src/browserPause.js"))
             .on_navigation(move |url| {
                 if url.as_str() == "https://luna-assistant.invalid/open" {
                     event(&callback_app, 0, "assistant", String::new());
@@ -304,6 +331,7 @@ pub async fn browser_create(app: AppHandle, caller: Webview, id: u32, url: Strin
         let builder = WebviewBuilder::new(label(id), WebviewUrl::External(blank))
             .data_directory(profile).disable_drag_drop_handler().focused(false)
             .browser_extensions_enabled(true)
+            .initialization_script(include_str!("../../src/browserSearchLinks.js"))
             .on_navigation(move |url| {
                 if url.scheme() == "about" { return !nav_started.load(Ordering::SeqCst); }
                 let allowed = checked_url(url.as_str()).is_ok();
@@ -332,6 +360,7 @@ pub async fn browser_create(app: AppHandle, caller: Webview, id: u32, url: Strin
         view.navigate(url).map_err(|e| e.to_string())
     })();
     dlog(&app, &format!("tab create id={id} -> {:?}", result));
+    if result.is_ok(){crate::browser_extensions::audit_profile(app.clone());}
     if result.is_err() {
         if let Some(view) = app.get_webview(&label(id)) { let _ = view.close(); }
         if let Ok(mut ids) = app.state::<BrowserState>().0.lock() { ids.remove(&id); }
@@ -347,9 +376,10 @@ pub async fn browser_action(app: AppHandle, caller: Webview, id: u32, action: St
         if app.state::<crate::browser_downloads::Downloads>().0.lock().map_err(|e|e.to_string())?.iter().any(|row|row.tab==id&&(matches!(row.state.as_str(),"running"|"paused")||row.can_resume)) {
             return Err("Bu sekmede indirme sürüyor. Önce İndirmeler ekranından iptal et veya tamamlanmasını bekle.".into());
         }
-        if let Some(view) = app.get_webview(&label(id)) { view.close().map_err(|e| e.to_string())?; }
+        if let Some(view) = app.get_webview(&label(id)) { playback::close(&view,id);view.close().map_err(|e| e.to_string())?; }
         app.state::<BrowserState>().0.lock().map_err(|e| e.to_string())?.remove(&id);
         set_user_muted(id, false);
+        if let Ok(mut media)=PAGE_MEDIA.lock(){media.remove(&id);}
         return Ok(());
     }
     let view = tab(&app, id)?;
@@ -360,6 +390,8 @@ pub async fn browser_action(app: AppHandle, caller: Webview, id: u32, action: St
         "forward" => with_core(&view, |core| { let _ = unsafe { core.GoForward() }; }),
         // Cancels the pending navigation; an uncommitted request leaves the previous page in place.
         "stop" => with_core(&view, |core| { let _ = unsafe { core.Stop() }; }),
+        "pause-media" => {mute(&view,true)?;playback::control(&view,id,true)},
+        "resume-media" => {playback::control(&view,id,false)?;mute(&view,user_muted(id))},
         "exit-fullscreen" => view.eval("if(document.fullscreenElement)void document.exitFullscreen().catch(()=>{})").map_err(|e|e.to_string()),
         "reload" => view.reload().map_err(|e| e.to_string()),
         "zoom" => {
@@ -373,13 +405,13 @@ pub async fn browser_action(app: AppHandle, caller: Webview, id: u32, action: St
         "mute" | "unmute" => {
             let muted = action == "mute";
             set_user_muted(id, muted);
-            mute(&view, muted)
+            mute(&view, muted||playback::held(id))
         },
         // The page's own print preview (WebView2 shows it inside the tab).
         "print" => view.eval("window.print()").map_err(|e| e.to_string()),
         "hide" => {
-            mute(&view, true)?;
-            let _ = view.eval("document.querySelectorAll('video,audio').forEach(m=>m.pause())");
+            mute(&view, user_muted(id)||playback::held(id))?;
+            if playback::held(id){playback::control(&view,id,true)?;}
             view.hide().map_err(|e| e.to_string())
         },
         _ => Err("Unknown browser action".into()),
@@ -456,8 +488,33 @@ pub async fn browser_bounds(app: AppHandle, caller: Webview, id: u32, x: f64, y:
     view.set_position(tauri::PhysicalPosition::new(x as i32, y as i32)).map_err(|e| e.to_string())?;
     view.set_size(tauri::PhysicalSize::new(width as u32, height as u32)).map_err(|e| e.to_string())?;
     floating_chat_region(&view, width as i32, height as i32, cuts).await?;
-    mute(&view, user_muted(id))?;
+    mute(&view, user_muted(id)||playback::held(id))?;
     view.show().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn browser_media(app: AppHandle, caller: Webview, id: u32,probe_only:Option<bool>) -> Result<serde_json::Value, String> {
+    trusted(&caller)?;
+    let view = tab(&app, id)?;
+    let before = view.url().map_err(|e| e.to_string())?;
+    checked_url(before.as_str())?;
+    let source = include_str!("../../src/browserMedia.js").replace("export function", "function");
+    let script = format!("(()=>{{ {source}; return extractBrowserMedia(); }})()");
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let tx = Mutex::new(Some(tx));
+    view.eval_with_callback(script, move |value| {
+        if let Ok(mut sender) = tx.lock() { if let Some(sender) = sender.take() { let _ = sender.send(value); } }
+    }).map_err(|e| e.to_string())?;
+    let raw = tokio::time::timeout(std::time::Duration::from_secs(5), rx).await.map_err(|_| "Media detection timed out")?.map_err(|_| "Page closed")?;
+    if view.url().map_err(|e| e.to_string())? != before { return Err("Page changed while detecting media".into()); }
+    if raw.len()>700_000 { return Err("Media response too large".into()); }
+    let mut result:serde_json::Value=serde_json::from_str(&raw).map_err(|e|e.to_string())?;
+    let result_frames=result["frames"].as_array().cloned().unwrap_or_default();
+    if let Ok(all)=PAGE_MEDIA.lock(){if let Some(list)=all.get(&id){for (page,url,kind,referer,agent) in list{if page!=before.as_str(){continue}{if let Some(rows)=result.get_mut(kind.as_str()).and_then(|v|v.as_array_mut()){if rows.len()<24&&!rows.iter().any(|r|r["url"]==url.as_str()){let frame=result_frames.iter().filter(|f|f["pageUrl"].as_str().is_some_and(|p|!referer.is_empty()&&(p==referer||p.starts_with(referer)))).max_by(|a,b|a["duration"].as_f64().unwrap_or(0.).total_cmp(&b["duration"].as_f64().unwrap_or(0.)));
+ let mut row=serde_json::json!({"url":url,"referer":referer,"agent":agent});if let Some(f)=frame{for key in ["duration"]{if let Some(n)=f[key].as_f64().filter(|n|n.is_finite()&&*n>0.&&*n<=if key=="duration"{604800.}else{16384.}){row[key]=serde_json::json!(n);}}row["frameUrl"]=f["pageUrl"].clone();row["playing"]=serde_json::json!(f["playing"].as_bool().unwrap_or(false));}rows.push(row);}}}}}}
+    if probe_only!=Some(true){if let Some(rows)=result["media"].as_array(){result["media"]=serde_json::Value::Array(media_info::enrich(rows.clone()).await);}}
+    if view.url().map_err(|e|e.to_string())?!=before{return Err("Page changed while reading quality".into())}
+    Ok(result)
 }
 
 #[tauri::command]
@@ -587,6 +644,9 @@ mod tests {
         assert_eq!(k(0x54, true, true, false), Some("ctrl+shift+t"));
         assert_eq!(k(0x39, true, false, false), Some("ctrl+9"));
         assert_eq!(k(0x24, false, false, true), Some("alt+home"));
+        assert_eq!(k(0x72, false, false, false), None);
+        assert_eq!(k(0x72, false, false, true), Some("alt+f3"));
+        assert_eq!(k(0x72, true, false, false), None);
         assert_eq!(k(0x75, false, false, false), Some("f6"));
         assert_eq!(k(0x78, false, false, false), Some("f9"));
         assert_eq!(k(0x21, true, false, false), Some("ctrl+pageup"));

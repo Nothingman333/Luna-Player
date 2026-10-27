@@ -58,7 +58,7 @@ export function ShellSettings() {
 }
 
 /** Settings › General: sound extras and the address bar of Luna Web. */
-export function SoundWebSettings() {
+export function SoundWebSettings({section="all"}:{section?:"all"|"sound"|"web"}) {
   const [rg, setRg] = useState(replayGainPref());
   const [eqName, setEqName] = useState(autoEqName());
   const [eqOn, setEqOn] = useState(store.get("autoEqOn") === "1");
@@ -88,7 +88,7 @@ export function SoundWebSettings() {
   };
   return (
     <>
-      <div className="set-card lp-set">
+      {section!=="web"&&<div className="set-card lp-set">
         <h3>{tt("Ses seviyesi ve kulaklık düzeltmesi")}</h3>
         <div className="lp-row">
           <span>{tt("ReplayGain (şarkıların etiketindeki ses düzeyi)")}</span>
@@ -109,8 +109,8 @@ export function SoundWebSettings() {
         {eqName && <Check on={eqOn} set={(v) => { setEqOn(v); store.set("autoEqOn", v ? "1" : "0"); snd(); }}>{tt("Film ve müzikte uygula")}</Check>}
         <div className="lp-hint">{tt("Kulaklığının modeline göre hazırlanmış düzeltmeyi autoeq.app ya da github.com/jaakkopasanen/AutoEq adresinden “ParametricEQ.txt” olarak indirip buradan seç. Ses panelindeki ekolayzerle birlikte çalışır.")}</div>
         {eqMsg && <div className="lp-msg" role="status">{eqMsg}</div>}
-      </div>
-      <div className="set-card lp-set">
+      </div>}
+      {section!=="sound"&&<div className="set-card lp-set">
         <h3>{tt("Luna Web: arama")}</h3>
         <div className="lp-row">
           <span>{tt("Adres çubuğuna yazılan arama nereye gitsin?")}</span>
@@ -127,7 +127,7 @@ export function SoundWebSettings() {
         )}
         {customErr && <div className="lp-msg warn" role="alert">{tt("Adres https ile başlamalı ve bir tane %s içermeli.")}</div>}
         <div className="lp-hint">{tt("Kısa yollar: !w Vikipedi · !yt YouTube · !imdb IMDb · !tmdb TMDB · !lb Letterboxd · !gr Goodreads · !gh GitHub · !maps Haritalar · !tr Çeviri. Örnek: !yt dune fragman")}</div>
-      </div>
+      </div>}
     </>
   );
 }

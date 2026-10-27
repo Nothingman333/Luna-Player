@@ -34,7 +34,7 @@ export function fileState(rec: Recent | undefined, finished: boolean): 0 | 1 | 2
 // ---------- groups: every copy of one film is one result ----------
 /** Copies of a film share a TMDB id; everything else (series, unmatched files) stands alone. */
 export function groupId(item: Item): string {
-  return item.parsed?.kind === "movie" && itemFacts(item).matched ? workIdentity(item) : "item:" + item.key;
+  return (item.meta?.kind??item.parsed?.kind) === "movie" && itemFacts(item).matched ? workIdentity(item) : "item:" + item.key;
 }
 export type ResumeInfo = {
   /** The file to continue with, and the card (record) that holds it; null when nothing is half-watched. */

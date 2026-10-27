@@ -1,7 +1,7 @@
 import {HardwareCapabilities} from "./HardwareCapabilities";
 import {rememberHardware,systemProfile} from "./hardwareProfile";
 import { useEffect, useState } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl } from "./linkOpen";
 import { store } from "./library";
 import { lang, setLang, tt } from "./i18n";
 import { I, Icon, LunaMark } from "./Screens";

@@ -10,7 +10,7 @@ import { tt } from "./i18n";
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "./nativeCore";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl } from "./linkOpen";
 import { SECRET_KEYS, store } from "./library";
 import { backupData, replaceStorage, storageSnapshot } from "./safety";
 import { VERSION_LABEL } from "./version";

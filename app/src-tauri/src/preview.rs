@@ -35,7 +35,7 @@ fn spawn(mpv_exe: &Path) -> Result<Worker, String> {
         .args([
             "--no-config", "--idle=yes", "--pause", "--keep-open=always", "--force-window=no",
             "--ao=null", "--aid=no", "--sid=no", "--hr-seek=no", "--hwdec=auto-copy-safe",
-            "--vo=image", "--vo-image-format=jpg", "--vo-image-jpeg-quality=75", "--vf=scale=320:-2",
+            "--hls-bitrate=min", "--vd-lavc-fast", "--vo=image", "--vo-image-format=jpg", "--vo-image-jpeg-quality=75", "--vf=scale=320:-2",
             "--demuxer-readahead-secs=0", "--cache=no", "--really-quiet",
         ])
         .arg(format!("--input-ipc-server={pipe_name}"))
@@ -106,19 +106,21 @@ impl Worker {
 }
 
 /// JPEG bytes of the frame near `secs` in `file`.
-pub fn frame(mpv_exe: &Path, file: &str, secs: u32) -> Result<Vec<u8>, String> {
+pub fn frame(mpv_exe:&Path,file:&str,secs:u32)->Result<Vec<u8>,String>{frame_with_headers(mpv_exe,file,secs,None,None)}
+pub fn frame_with_headers(mpv_exe: &Path, file: &str, secs: u32,referrer:Option<&str>,agent:Option<&str>) -> Result<Vec<u8>, String> {
+    let mut options=format!("start={secs}");if let Some(r)=referrer{options.push_str(&format!(",referrer=%{}%{}",r.len(),r));}if let Some(a)=agent{options.push_str(&format!(",user-agent=%{}%{}",a.len(),a));}if crate::mpv_policy::file_options(&options).is_none(){return Err("Invalid preview headers".into())}let identity=format!("{file}|{:?}|{:?}",referrer,agent);
     let mut guard = WORKER.lock().unwrap_or_else(|e| e.into_inner());
     let alive = guard.as_mut().is_some_and(|w| matches!(w.child.try_wait(), Ok(None)));
     if !alive {
         *guard = Some(spawn(mpv_exe)?);
     }
     let w = guard.as_mut().unwrap();
-    if w.file.as_deref() != Some(file) {
+    if w.file.as_deref() != Some(identity.as_str()) {
         w.file = None;
         // Open straight at the wanted second: the first rendered frame is the answer.
-        let b = w.render(json!(["loadfile", file, "replace", -1, format!("start={secs}")]), Duration::from_secs(20));
+        let b = w.render(json!(["loadfile", file, "replace", -1, options]), Duration::from_secs(20));
         if b.is_ok() {
-            w.file = Some(file.to_string());
+            w.file = Some(identity);
         }
         return b;
     }

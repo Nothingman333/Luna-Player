@@ -1,0 +1,1 @@
+import {store} from "./library";import {cleanWebPlayback} from "./browserMediaModel";export function webPlaybackSource(path:string){const web=cleanWebPlayback(store.json("web-playback:"+path,null));return {path:web?.streamUrl||path,referrer:web?.referer,agent:web?.agent};}

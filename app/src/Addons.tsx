@@ -3,7 +3,7 @@
 import { tt } from "./i18n";
 import { useEffect, useState } from "react";
 import { invoke } from "./nativeCore";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl } from "./linkOpen";
 import { store } from "./library";
 import { I, Icon } from "./Screens";
 

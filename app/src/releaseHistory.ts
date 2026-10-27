@@ -1,8 +1,324 @@
 // Generated from the versioned CHANGELOG; keep older records for skipped upgrades.
 export const RELEASE_HISTORY=[
   {
+    "version": "2.7.5",
+    "text": "- 2.7.3 ve 2.7.4 geri alındı: web videosunda çubuk davranışı 2.7.2 ile aynı."
+  },
+  {
+    "version": "2.7.4",
+    "text": "- Web sesi başlayınca müzik çubuğu birden kaybolmuyor: bunu yapan eski bir gizleme kuralı kaldırıldı; çubuk sayfa hazır olunca kayarak gider."
+  },
+  {
+    "version": "2.7.3",
+    "text": "- Web videosu başlarken siyah bar kalmaz: çubuk, sayfanın videoyu açarken yaşadığı ~1 saniyelik takılma geçtikten sonra kayar (sabit gecikme yerine sayfanın hazır olması beklenir, en çok 1,8 sn)."
+  },
+  {
+    "version": "2.7.2",
+    "text": "- Web videosu başlarken çubuk kısa bir an bekleyip sonra kayar: videonun açıldığı ilk anda ekran takılırken siyah bar görünmesin diye."
+  },
+  {
+    "version": "2.7.0",
+    "text": "- Web videosu başlayınca çubuk kayarken solmuyor: içeriğiyle birlikte aşağı iner, arkasında siyah boş kutu kalmaz. Küçük film videosu kaymanın başında gizlenmez, çubukla birlikte iner."
+  },
+  {
+    "version": "2.6.9",
+    "text": "- Web videosu başlayınca çubuğun aşağı kayışı yavaşladı ve yumuşadı; geri gelişi aynı kaldı."
+  },
+  {
+    "version": "2.6.8",
+    "text": "- Web videosu başlayınca çubuk sayfanın arkasında birden kaybolmaz: kayma bitene kadar sayfadaki oyuk yerinde kalır, çubuk aşağı kayarak gider."
+  },
+  {
+    "version": "2.6.7",
+    "text": "- Web videosu başlayınca küçük film oynatıcısı aşağı kayarak gider: video artık pencerenin alt kenarına yapışıp sonra birden kaybolmuyor."
+  },
+  {
+    "version": "2.6.6",
+    "text": "- Web videosu başlayınca çubuk birden kaybolmaz, kayarak gider: sayfadaki oyuk çubuktan pencerenin altına kadar uzanır, video başlarken sayfa meşgul olsa da animasyon görünür."
+  },
+  {
+    "version": "2.6.5",
+    "text": "- Web videosu başlayınca küçük film çubuğu giderken küçük video da çubukla birlikte aşağı kayar, birden kaybolmaz."
+  },
+  {
+    "version": "2.6.4",
+    "text": "- Web’den açılan bir filmin sayfasındaki ⋯ menüsünde “Bunu izliyorsun” kontrolü o film için kapatılıp açılabilir.\n- Küçük film çubuğu web videosu durunca geri gelirken küçük video da çubukla birlikte kayar; yerinde birden belirmez."
+  },
+  {
+    "version": "2.6.3",
+    "text": "- Web videosu durunca çubuk da gittiği gibi kayarak geri gelir.\n- Film ile şarkı arasında geçerken çubuk yalnız yerinde yumuşakça belirir; ardından aşağıdan yukarı ikinci bir hareket gelmez."
+  },
+  {
+    "version": "2.6.2",
+    "text": "- Web sayfasında çubuk geri gelirken de kayarak gelir: sayfadaki oyuk animasyon boyunca her karede çubuğu izler.\n- Film ile şarkı arasında geçerken yeni çubuk aynı yerde yumuşakça belirir (aşağıdan zıplamaz)."
+  },
+  {
+    "version": "2.6.1",
+    "text": "- Web sayfasında müzik ve küçük film çubuğu sayfanın üstünde yüzer: çubuğun şekli sayfa penceresinden oyulur, altta siyah şerit kalmaz ve çubuk gelip giderken sayfa yeniden boyutlanmaz."
+  },
+  {
+    "version": "2.6.0",
+    "text": "- Web sayfasında müzik ve küçük film çubukları yeniden görünür; yalnız web sayfası ses çalarken kayarak gizlenir, ses durunca geri gelir."
+  },
+  {
+    "version": "2.5.9",
+    "text": "- Web sayfasında video başlayınca müzik çubuğu gizlenince altta kalan siyah boşluk kaldırıldı; sayfa tam yüksekliğe geçer.\n- Küçük film çubuğu da web videosu sesle başlayınca filmi duraklatır ve kayarak gizlenir; küçük video tarayıcının üstünde tek başına kalmaz. Film çubuğu görünürken web sayfası ona yer açar."
+  },
+  {
+    "version": "2.5.8",
+    "text": "- Çubuktaki ses kaydırıcısı her zaman görünür."
+  },
+  {
+    "version": "2.5.7",
+    "text": "- Çubuktaki ses kaydırıcısının üst üste binen eski kuralları temizlendi; tek kural: yeri hep ayrılı, hoparlöre gelince açılır, hoparlörden ve kaydırıcıdan ayrılınca kapanır."
+  },
+  {
+    "version": "2.5.6",
+    "text": "- Çubuktaki ses kaydırıcısı fare hoparlörde ya da kaydırıcıdayken açık kalır, ikisinden de ayrılınca kapanır.\n- Web sayfasında video başlayıp müzik duraklayınca müzik çubuğu aşağı kayarak gizlenir ve sayfa tam yüksekliğini korur; müzik yeniden çalınca çubuk kayarak geri gelir."
+  },
+  {
+    "version": "2.5.5",
+    "text": "- Neler yeni ekranı onaylanan tasarıma getirildi: bulanık videonun üstünde koyu mavi cam kart, sade başlık, ince zaman çizgisi üzerinde noktalı liste ve sade Başlayalım düğmesi."
+  },
+  {
+    "version": "2.5.4",
+    "text": "- Neler yeni ekranı herkes için yeni tasarımda: daha ince başlık, altında \"… sürümünden bu yana N güncelleme\" satırı ve renkli noktalı liste; bulanık video arka plan korunur."
+  },
+  {
+    "version": "2.5.2",
+    "text": "- Ses kaydırıcısı hoparlörün üzerine gelince aynı yerde belirir, yeri hep ayrılı olduğu için hiçbir şey kaymaz; hemen kaybolmaz.\n- Film ile şarkı arasında geçerken büyük oynatıcının bir an görünüp sayfanın yenileniyormuş gibi görünmesi kaldırıldı; film doğrudan küçük çubukta açılır."
+  },
+  {
+    "version": "2.5.1",
+    "text": "- Çubuktaki ses ayarı açılır balon yerine ses düğmesinin yanında her zaman görünen kısa, ince bir kaydırıcı; fare altında hiçbir şey açılıp kapanmaz."
+  },
+  {
+    "version": "2.5.0",
+    "text": "- Çubuktaki ses ayarı artık ses düğmesinin üstünde küçük bir balon olarak açılır; düğmeleri itmediği için çubuk fare altında titreyip bozulmaz."
+  },
+  {
+    "version": "2.4.9",
+    "text": "- Küçültülmüş film varken YouTube şarkısı açınca film beklemeye alınmıyor, \"filme geç\" oku çıkmıyor ve film yeniden açılınca oynatıcı kayboluyordu; düzeltildi."
+  },
+  {
+    "version": "2.4.8",
+    "text": "- Luna her açılışta Film bölümünde başlar."
+  },
+  {
+    "version": "2.4.7",
+    "text": "- Küçük çubuktaki videoya tıklamak filmi büyütüp tam ekranda açar."
+  },
+  {
+    "version": "2.4.6",
+    "text": "- Küçük film çubuğu müzik tarafında da filmin turuncu rengini kullanır. Geçiş noktaları kendi renginde: şarkı yeşil, film turuncu; beklerken soluk, çalarken tam renk."
+  },
+  {
+    "version": "2.4.5",
+    "text": "- Çubuktaki ses kaydırıcısı artık yalnız ses düğmesinin üzerine gelince açılır; filme/şarkıya geç okuna giderken çubuk genişlemez."
+  },
+  {
+    "version": "2.4.4",
+    "text": "- Film ile şarkı arasında geçiş artık çubuğun içinde: tek ok düğmesi ve hangisinin çaldığını gösteren iki nokta. Çubuğun üstündeki sekmeler kaldırıldı.\n- Küçültülmüş filme şarkıdan geri dönünce oynatıcının tamamen kaybolması düzeltildi (film yanlışlıkla müzik sayılıyordu); film küçük oynatıcıda devam eder."
+  },
+  {
+    "version": "2.4.3",
+    "text": "- Küçük video çubuğu müzik çubuğuyla aynı şekilde: ortada, tek satır, ~780px, zaman çizgisi üst kenarda, küçük video kapak yerinde. Şarkı/film sekmeleri arasında geçiş yumuşak."
+  },
+  {
+    "version": "2.4.2",
+    "text": "- Tam ekrandayken filmi küçük oynatıcıya almak (−) artık tam ekrandan çıkarmaz; büyütünce film yine tam ekranda devam eder."
+  },
+  {
+    "version": "2.4.1",
+    "text": "- Tam ekrandayken filmden Esc ile çıkmak artık tam ekranı kapatmaz; tam ekrandan yalnız F11 ile çıkılır (oynatıcının kendi açtığı tam ekran film kapanınca kapanır)."
+  },
+  {
+    "version": "2.4.0",
+    "text": "- Pencerenin büyütme (□) düğmesi yeniden doğrudan tam ekrana geçer; tam ekranda farenin ekranın üst ortasına gidince çıkış düğmeleri görünür."
+  },
+  {
+    "version": "2.3.9",
+    "text": "- Luna son kapanıştaki boyutla değil, her açılışta 1152×684 boyutunda ve ortada açılır.\n- Arkadaş puanlarındaki buçuklu yıldız artık gerçek yarım yıldız olarak çizilir; boş yıldızlar soluk görünür.\n- Müzik çubuğu tek satır ve ~780px: solda şarkı, sağda bütün düğmeler yan yana. Ses kaydırıcısı ses simgesinin üzerine gelince açılır."
+  },
+  {
+    "version": "2.3.8",
+    "text": "- Luna 1152×684 boyutunda, ekranın ortasında açılır.\n- Müzik çubuğu artık tam genişlikte değil: ortada, en fazla 980px genişliğinde kompakt bir çubuk."
+  },
+  {
+    "version": "2.3.7",
+    "text": "- Müzik çubuğu daha kompakt: aynı düğmeler, yarı yükseklik. Zaman çizgisi üst kenarda ince bir çizgi; üzerine gelince kalınlaşır ve tutamaç çıkar. Süre şarkı bilgisinin yanında yazar."
+  },
+  {
+    "version": "2.3.6",
+    "text": "- Film küçültülmüşken müzik açınca alt çubuk artık kaybolmaz: son açılan çalar, film kaldığı yerde bekler. Alt çubuğun üstündeki ♪ şarkı / ▶ film sekmeleriyle ikisi arasında geçilir.\n- Arkadaş puanları penceresi afişin içine sığar, cam görünümündedir; uzun yorumlar pencerede kaydırılır.\n- Bu akşam ne izlesem: arkadaş seçimi düğmesi yalnız Önerilenler seçiliyken yumuşakça görünür."
+  },
+  {
+    "version": "2.3.5",
+    "text": "- Ana sayfa vitrininde Detaylar ve “Bu akşam ne izlesem?” düğmeleri aynı görünür; parlak bir resim üstünde düğme artık griye dönmez."
+  },
+  {
+    "version": "2.3.4",
+    "text": "- Film kartlarının düğmeleri her yerde Öneriler tasarımında: afişin alt kısmında tek sıra. Arkadaş fotoğrafları artık düğmeleri kapatmaz; üzerine gelince sıranın sonuna geçer.\n- Büyük film ızgaralarında kartlar daha hızlı: arkadaş puanları tek seferde hazırlanır, düğmeler yalnız kartın üzerine gelince oluşturulur."
+  },
+  {
+    "version": "2.3.3",
+    "text": "- Ortak film kartı: Keşfet, ana sayfa satırları, Filmler ve Öneriler kartlarında filmi izleyen arkadaşların fotoğrafları ve puanları görünür; fotoğraflara gelince herkesin yıldızı açılır.\n- Kartların üzerine gelince her yerde aynı hızlı düğmeler çıkar: Oynat, Fragman, Detay, Sonra izle, İzledim ve Diğer menüsü."
+  },
+  {
+    "version": "2.3.2",
+    "text": "- Öneri listelerindeki afiş kartlarına Sonra izle ve İzledim düğmeleri eklendi."
+  },
+  {
+    "version": "2.3.1",
+    "text": "- Keşfet kategorilerinde birden fazla tür birlikte seçilebilir.\n- Kategori sonuçları sınırlı bir sırada kalmaz; aşağı kaydırdıkça o kategorideki yeni filmler yüklenir."
+  },
+  {
+    "version": "2.3.0",
+    "text": "- Keşfet kategori menüsü okunabilir cam görünümüne uyarlandı; dışarı tıklama ve Escape ile kapanır.\n- Başka bir öneri hazırlanırken mevcut film görünür kalır. Afiş değiştiren hızlı döngü kaldırıldı; özet ve oyuncular için yer ayrılarak kartın boyut sıçraması azaltıldı."
+  },
+  {
+    "version": "2.2.9",
+    "text": "- Küçük video oynatıcısında pencere boyutlandırma ve görünüm geçişleri sırasında görüntünün ana arayüzü kaplamasına karşı yerel video alanı ayrıldı.\n- Küçültme tam ekrandan çıkış tamamlandıktan sonra yapılır. Küçük oynatıcı pencere kenarından yukarı alındı; ses kontrolünü gizleyen müzik çubuğu kuralları ayrıldı."
+  },
+  {
+    "version": "2.2.8",
+    "text": "- Küçük video oynatıcısı müzik çubuğuyla aynı düzende: solda video ve başlık, ortada oynat/duraklat, 10 sn geri/ileri ve tıklanabilir ilerleme çubuğu, sağda ses ve kapat."
+  },
+  {
+    "version": "2.2.7",
+    "text": "- Küçük oynatıcı açıkken film detayına girildiğinde oluşan siyah ekran düzeltildi. Aynı film veya başka bir film oynatıldığında büyük görünüm açılır.\n- Küçük oynatıcıya ses seviyesi ve sessize alma kontrolleri eklendi. Tam ekrandan çıkınca pencere ekranın çalışma alanına oturtulur."
+  },
+  {
+    "version": "2.2.6",
+    "text": "- Küçük video modu pencere yeniden boyutlandırılırken korunur; geçici ölçü hatası videoyu büyütmez.\n- Pencereyi büyütmek otomatik tam ekrana geçirmez. Oynatıcı kontrolleri, ses/altyazı ve diğer pencereler dar ve kısa ekranlara uyar."
+  },
+  {
+    "version": "2.2.5",
+    "text": "- Kopya film afişlerinde her dosyanın çözünürlük ve SRT yan dosya bilgisi görünür; eksik çözünürlük bilgisi açıkça belirtilir.\n- Keşfet kategori menüsü film/dizi, kategori ve süre gruplarıyla yenilendi.\n- Yandex sonuç bağlantıları normal tıklamada doğrudan açılır; yeni sekme kısayolları korunur."
+  },
+  {
+    "version": "2.2.4",
+    "text": "- Kopya filmler daha belirgin bir afiş destesi, çerçeve ve kopya rozetiyle gösterilir; üzerine gelince kopyalar yana açılır."
+  },
+  {
+    "version": "2.2.3",
+    "text": "- Küçük video oynatıcısının boş görüntüsü düzeltildi; kontroller ve süre bilgisi bir araya getirildi.\n- Kayıtlı web videosu açılamadığında sessizce tarayıcıya geçmek yerine kaynak yenileme seçeneği sunulur; izleme konumu korunur.\n- Ana sayfa düğmeleri eşleştirildi; kopya filmlerin üst üste afişleri belirginleştirildi."
+  },
+  {
+    "version": "2.2.2",
+    "text": "- Web’den açılan filmler kapatılıp Filmler bölümünden yeniden açıldığında kaldığın yer korunur. Baştan başla seçeneği aynı şekilde çalışır."
+  },
+  {
+    "version": "2.2.1",
+    "text": "- Web’de gezinirken reklam engellemenin oluşturduğu gereksiz yük azaltıldı; sayfa yükleme deneyimi iyileştirildi."
+  },
+  {
+    "version": "2.1.9",
+    "text": "- Kopya film afişleri kapalıyken tek başlık ve bilgi satırı gösterir; yana açıldığında her kopyanın bilgileri görünür.\n- Reklam engelleyici geçici sorgu hatasında açık durumunu korur; yeniden kurulum başlatmaz."
+  },
+  {
+    "version": "2.1.8",
+    "text": "- Web sekmeleri ve bölümler arasında geçişte arka plan sesi korunur. YouTube parçaları ve playlistler mevcut müzik aktarım penceresinden seçilir.\n- Video için küçük oynatıcı, beğenme ve playlist seçenekleri eklendi. Oynatıcı ses oturumu Luna Player adıyla gösterilir."
+  },
+  {
+    "version": "2.1.7",
+    "text": "- Reklam engelleyici eklenti yönetimi, asistan balonu yerine yalnız gerçek web sekmesinin profilini kullanır.\n\n- YouTube playlist aktarımı tek videoyu çalmak yerine mevcut şarkı seçme ve liste oluşturma penceresini kullanır. Aktarım oku hafifçe vurgulanır.\n- Ana sayfadaki film kopyaları üst üste toplanıp yana açılır. Web başlıklarındaki sezon ve bölüm bilgileri dizi olarak ayrıştırılır.\n- Kategoriler, mevcut Keşfet görünümünün içeriklerini filtreleyen açılır menüdür. Ana sayfanın seçim düğmesi ortak cam görünümünü kullanır."
+  },
+  {
+    "version": "2.1.6",
+    "text": "- Arkadaş önerileri bütün listeyi beklemez: kayıtlı TMDB tür ve süre bilgileri önce kullanılır; eksikler küçük gruplar halinde, uygun aday bulunana kadar yüklenir.\n- Öneriler yüklenirken afişler yumuşak bir sıralama animasyonuyla bekleme durumunu gösterir."
+  },
+  {
+    "version": "2.1.4",
+    "text": "- Rust tarayıcı modülünün dosya açıklaması düzeltildi; E0753 derleme hatası giderildi.\n- Klip başlangıç ve bitiş alanları dakika:saniye veya saat:dakika:saniye biçiminde gösterilir ve düzenlenir. Geçersiz zamanlar kaydedilmez."
+  },
+  {
+    "version": "2.1.5",
+    "text": "- Web filmlerinin değişen akış adresleri ve oynatıcı yönlendirmelerinde devam kaydı korundu; devam konumuna ulaşılmadan sıfır saniye kaydedilmesi engellendi. Film kopyaları ortak ilerleme gösterir ve katalogda yana açılan afiş gruplarında toplanır.\n- Luna Web Araçlar bölümüne kullanıcının sağladığı uBlock Origin Lite Manifest V3 paketiyle aç/kapat düğmesi eklendi. Otomatik oynatma yalnız ses kaynaklarını ve 8 saniyeden kısa klipleri atlar. Playlist bağlantıları mevcut müzik içe aktarma ekranını açar.\n- HDR kaynağı ve oynatıcının renk çıkışı ayrı gösterilir; HDR çıkış politikası ekranın otomatik bildirilen yeteneklerini izler.\n- Arkadaş önerileri seçilen kişilerin içe aktarılmış kayıtlarını kullanır; eksik tür ve süre bilgileri TMDB ile tamamlanır. Arkadaş puanları ilgili kişinin film değerlendirme sayfasını açar. TMDB puanları açıkça etiketlenir."
+  },
+  {
+    "version": "2.1.3",
+    "text": "- Web aktarımının geçici sessize alması kullanıcı sekme tercihinden ayrıldı. Kaynak sayfa, iç içe oynatıcı kareleri ve yeniden başlatma girişimleri native kare kontrolüyle durdurulur.\n- HLS ana manifestleri otomatik seçimde önceliklidir. Uzantısız medya adresleri de boyut/süre sınırıyla incelenir; yalnız ses codec'i taşıyan kaynaklara çözünürlük etiketi verilmez.\n- Video açılırken vid=auto dosyaya özel uygulanır. Yalnız ses çıkan Web kaynağında başka video kaynağı sınırlı sayıda denenir; uygun kaynak yoksa seçim ekranına dönülür.\n- YouTube'da mevcutsa HDR video ve ayrı ses birlikte tercih edilir. Görüntü paneli kaynak HDR/SDR durumu ile ekran çıkışını ayrı gösterir.\n- Ana sayfadaki Bu akşam ne izlesem düğmesi slayt göstergelerinin soluna, mevcut sayfa düğmelerinin stiliyle taşındı."
+  },
+  {
+    "version": "2.1.2",
+    "text": "- YouTube videoları film kütüphanesi ve devam listesinden ayrıldı; önceki filmin altyazı ve parça durumu yeni videoya taşınmaz. Eski kayıtlar silinmez.\n- Web kaynaklarında ayrı ses grubu bulunan HLS kalite seçenekleri ilgili ses akışıyla birlikte açılır. YouTube görüntü ve sesini birlikte alan sayfa oynatıcısını kullanır.\n- Kalite bilgisi oynatılan akışın çözünürlüğünden alınır; doğrulanmış PQ/HLG içeriğinde HDR etiketi gösterilir. Kare içindeki oynatma sinyali otomatik açılmada kullanılır.\n- Yalnız Web filmlerinde afiş/ad içeren 10 saniyelik eşleştirme bildirimi ve Değiştir düğmesi eklendi. Film detaylarının menüsünden de Web eşleşmesi değiştirilebilir."
+  },
+  {
+    "version": "2.1.1",
+    "text": "- Web Araçlar menüsüne en uygun kaynağı otomatik seçme ve oynayan web videolarını Luna’da otomatik açma seçenekleri eklendi; varsayılanları kapalıdır. Ses akışları ve tespit edilen reklam önizlemeleri video seçiminden ayıklanır.\n- Kaynak açılamadığında, zaman aşımında veya video motoru hatasında tarayıcıya ve kaynak seçimine dönülür. Luna’da video açılırken sayfadaki video duraklatılır; site tarafından yeniden başlatılması aktarım boyunca engellenir.\n- Webden açılan YouTube bağlantıları görüntülü oynatıcıyı kullanır. Site başlıklarındaki izle ekleri temizlenir; film için sayfada belirtilen çıkış yılı TMDB eşleştirmesine eklenir."
+  },
+  {
+    "version": "2.1.0",
+    "text": "- Web kaynak seçiminde HLS ana listesindeki gerçek çözünürlükler okunur; çok kaliteli akışlarda çözünürlük aralığı gösterilir. Bilgi bulunamayan kaynaklar Kalite bilinmiyor olarak belirtilir.\n- Oynatıcı kalite alanı açık videonun gerçek çözünürlüğünü gösterir; belirsiz Akış etiketleri açıklayıcı hale getirildi."
+  },
+  {
+    "version": "2.0.9",
+    "text": "- Webde Luna’da oynat, birden fazla video kaynağı bulduğunda süre, kalite ve kaynak bilgileriyle seçim penceresi açar. Tek kaynak doğrudan açılır; seçim iptal edilirse oynatma başlamaz."
+  },
+  {
+    "version": "2.0.8",
+    "text": "- Kaynak videolar süre ve çözünürlüğe göre sıralanır; reklam olarak tanınan ve kısa kaynaklar ana videonun önüne geçmez. Erişilebilir gömülü oynatıcıların video bilgileri de değerlendirilir.\n- Kalite listesi ekranın sınırlarına göre açılır; boş/sayısal kalite etiketleri düzenlendi. Uzun altyazı adlarının diğer sütuna taşması giderildi.\n- Klip karelerinde yüklenme durumu gösterilir. Web sahne ızgarası daha az ağ isteğiyle ve yakın zamandaki kareleri önce yükleyerek açılır; önizlemede düşük HLS kalitesi kullanılır.\n- Webden gelen film adı, site ve izleme eklerinden temizlenip mevcut otomatik TMDB eşleştirmesine verilir."
+  },
+  {
+    "version": "2.0.7",
+    "text": "- Tarayıcı videolarında film adı kaynak sayfasından alınır. Devam kaydı sayfa kimliğini, kaynak adresini, referrer bilgisini ve erişilebilir ses/altyazıları saklar; yeniden açılışta oynatma bağlamı geri yüklenir.\n\n- İnternet videosu açılırken ve ileri sarma sırasında yüklenme göstergesi eklendi. Önizleme, sahne ızgarası ve klip aktarımı kaynak adresi ile gerekli HTTP başlıklarını kullanır; klip penceresindeki sıkışma düzeltildi.\n- Tarayıcıda erişilebilir JW/HLS kaynaklarının yakalanması genişletildi; kaynak birden fazla kalite sunuyorsa Görüntü panelinden seçilebilir. Açılamayan videolarda tekrar deneme açıklaması gösterilir.\n- Luna’da video başladığında tarayıcıdaki video duraklatılır. Tarayıcı sesi müziği duraklatır ve müzik çubuğunu gizler; video tam ekranında Luna çubukları gizlenir.\n- Akşam önerisinde konu, otomatik çeviri ve oyuncular gösterilir; afişten ayrıntılar açılır. Arkadaş puanları cam temaya uyar; ana sayfa düğmesi ve asistan müzik kontrolleri yeniden hizalandı."
+  },
+  {
+    "version": "2.0.6",
+    "text": "- Ana sayfada Bu akşam ne izlesem düğmesi, önerileri devam kartıyla aynı alanda yumuşak geçişle açar; sayfaya yeniden gelince devam kartı gösterilir. Arkadaş seçimine yuvarlak profil fotoğrafları eklendi.\n- Tarayıcıdan video açılmasını engelleyen oynatıcı referrer doğrulaması düzeltildi; yalnız güvenli HTTP(S) kaynak adreslerine izin verilir."
+  },
+  {
+    "version": "2.0.4",
+    "text": "- Yanıt biçimi ve tarayıcı arama motoru seçimleri Luna temasına uygun, klavyeyle kullanılabilen menülere dönüştürüldü. Başlangıç araması ile adres çubuğu birbirinden ayrıldı.\n- Letterboxd profil fotoğraflarında Gravatar desteği ve yeni fotoğraf ayrıştırıcısıyla yeniden deneme eklendi.\n- Tarayıcıda diğer siteler için Luna’da oynat erişimi açıldı; erişilebilir video, HLS/DASH, ses ve altyazı kaynakları mevcut oynatıcıya aktarılır."
+  },
+  {
+    "version": "2.0.3",
+    "text": "- Öneriler filtre değişince ekranda kalır; gösterilen filmler 8 saat sonra yeniden aday olabilir, yeni filmler önce gelir. Arkadaş puanlarının yanında kayıtlı yorumlar görünür.\n- Tarayıcı asistanı YouTube videosunu sağlayıcıya göre özetler: Gemini video bağlantısını, diğerleri alınabilen altyazıyı kullanır. Özet isteği YouTube simgesi ve özel bekleme animasyonu ile gösterilir.\n- Tarayıcı yeni sekme bağlantılarını tekrar sormadan açar; asistan bağlantıları varsayılan tarayıcıya gider.\n- Geniş asistanda yanıt biçimi üst çubuğa taşındı; müzik kontrolleri, şarkı önizleme düğmeleri ve genişleyen liste onayı eklendi. Film ayrıntıları ekran boyutuna uyar."
+  },
+  {
+    "version": "2.0.2",
+    "text": "- Sistem ve bakım için ayrı bir sistem simgesi kullanılır.\n- Kütüphane önerileri tükenince yeniden döner; filtreler uygun seçenek bırakmazsa kütüphaneden alternatif gösterilir.\n- Bu akşam ne izlesem bölümüne arkadaş seçimi olan Önerilenler kaynağı eklendi. Seçilen filmin önerenleri, varsa kişisel puanları ve notları gösterilir."
+  },
+  {
+    "version": "2.0.1",
+    "text": "- Öneriler kişi bölümüne Fotoğrafı yenile ve Fotoğraf seç eklendi; site erişimi engellense bile yerel profil fotoğrafı kullanılabilir ve başarısız yenilemede mevcut fotoğraf korunur."
+  },
+  {
+    "version": "2.0.0",
+    "text": "- Arkadaş ortalaması /5 gösterilir; üzerine gelince kimin kaç puan verdiği ve puansız izlemeler görünür. Bu bölüm Öneriler film ayrıntılarında da yer alır.\n- Bağlı Letterboxd profillerinin fotoğrafları erişilebildiğinde yüklenir; fotoğraflardan profillere gidilir. Öneriler kişi kartları ve kişi başlığına da profil erişimi eklendi."
+  },
+  {
+    "version": "1.9.9",
+    "text": "- Film detaylarında kalan süre toplam sürenin yanında dakika olarak gösterilir. Alttaki eski süre satırı kaldırıldı.\n- Bu filmi izleyen arkadaşlar Önerilerdeki izleme/beğeni/puan kayıtlarından bulunur; üst üste duran ad simgeleri üzerine gelince yana açılır."
+  },
+  {
+    "version": "1.9.8",
+    "text": "- Asistan yanıtlarındaki küçük film simgesi yalnız kütüphanede bulunan filmlerde gösterilir; diğer bilinen filmlerin üzerine gelince açılan seçenekler korunur."
+  },
+  {
+    "version": "1.9.7",
+    "text": "- Asistan yanıtlarında film adlarının yanındaki beğeni emojisi ve Kütüphanende etiketi tek küçük film simgesinde birleştirildi; durum bilgileri ipucunda, işlemler simgenin menüsünde korunur."
+  },
+  {
+    "version": "1.9.6",
+    "text": "- Filmlere beğeni, beğenmeme veya puan vermek izlenmiş kaydını da oluşturur; seçimi kaldırmak izleme geçmişini silmez.\n- Asistana izlediğini söylediğin filmler yanıtın yanında sırayla değerlendirilir: beğeni, 10 üzerinden puan ve isteğe bağlı not Gönder ile mevcut deftere kaydedilir.\n- Keşfet içerik uyarısı yıldızı afişin sağ üst köşesine taşındı; bulanık görselin üzerinde net kalır."
+  },
+  {
+    "version": "1.9.5",
+    "text": "- Görünüm ve erişilebilirlik seçenekleri Oynatma ve bağlantılar içine, Luna Web seçenekleri Genel içine taşındı; iki ayrı sekme kaldırıldı.\n- Bu akşam ne izlesem kartına mevcut beğeni/puanlama sistemini kullanan afiş üstü beğen/beğenme ve afiş altı Asistana sor düğmeleri eklendi. Üst kısayollar ortalandı."
+  },
+  {
+    "version": "1.9.4",
+    "text": "- Geniş asistandaki koleksiyon onay paneli kullanılabilir alana yayılır; film, müzik ve kitap grupları sığdıkça yan yana yerleşir. Liste yüksekliği pencereyle büyür, küçük asistanın kompakt görünümü korunur."
+  },
+  {
+    "version": "1.9.3",
+    "text": "- Genel ayarları sadeleştirildi: görünüm/erişilebilirlik, sistem/bakım ve web seçenekleri ilgili bölümlere ayrıldı; atlama/ses oynatmaya, donanım Upscaler’a taşındı. Ayar kartlarının yüzeyleri eşitlendi.\n- Sohbet araması, dizini ve üç nokta yalnız geniş asistanda, film adının karşısındaki üst satırda yer alır. Kopyalama/indirme üç noktada; menü katmanları okunaklıdır.\n- Tanıtımın Film/Müzik/Kitap vurguları aynı zaman çizelgesine alındı; fazladan kenarlık ve eksik kitap çizgileri düzeltildi, geçişler hafifletildi.\n- Keşfet'teki bulanık afişlerin adında kırmızı içerik uyarısı yıldızı gösterilir; puan ve etiketler net kalır.\n- AI token sayacı yanıt geldikçe güncellenir. Elle token bütçesi giriş alanı kaldırıldı; kalan hesap kotası alınamadığında açıkça belirtilir."
+  },
+  {
     "version": "1.9.2",
-    "text": "- Müzik zevk profili kayıtlarında mevcut kapaklar gösterilir. Film, kitap ve müzikte konu önemi /5 olarak okunur.\n- Zevk testinde Hiçbiri seçeneği eklendi, uzun seçenek metinlerinin taşması düzeltildi.\n- Genel arama cam görünümü, kapak/afiş ve mevcut puan, süre ve tür bilgileriyle düzenlendi.\n- Ana sayfa önerileri gösterilmiş filmleri hatırlar, tekrar önermez ve Sonra izle listesine kaydedilebilir.\n- Yenilik ekranındaki Başlayalım yanındaki koyu şerit kaldırıldı.\n- [dev] F3, kilit açıldıktan sonra doğrudan ekran görüntüsü alan seçimini başlatır; Alt+D not panelini açar."
+    "text": "- Müzik zevk profili kayıtlarında mevcut kapaklar gösterilir. Film, kitap ve müzikte konu önemi /5 olarak okunur.\n- Zevk testinde Hiçbiri seçeneği eklendi, uzun seçenek metinlerinin taşması düzeltildi.\n- Genel arama cam görünümü, kapak/afiş ve mevcut puan, süre ve tür bilgileriyle düzenlendi.\n- Ana sayfa önerileri gösterilmiş filmleri hatırlar, tekrar önermez ve Sonra izle listesine kaydedilebilir.\n- Yenilik ekranındaki Başlayalım yanındaki koyu şerit kaldırıldı."
   },
   {
     "version": "1.9.1",
@@ -18,15 +334,11 @@ export const RELEASE_HISTORY=[
   },
   {
     "version": "1.8.8",
-    "text": "- Kitaptan çıkışta kapanmış Foliate sayfa belgelerine erişim düzeltildi.\n- [dev] Geliştirici notlarına çözüldü işareti ve seçili notu silme eklendi; intro tekrarı ve uygulama oturumu boyunca açık kalma sağlandı.\n- Dışarıdan kapsamı yalnız kütüphane dışındaki filmleri önerir. Genel arama kütüphane, öneriler, TMDB film/dizi, kitap ve müzik sonuçlarını ayırır.\n- F11 bildirimi üst ortaya taşındı; arka plan resimleri galerisi ve yerel token bütçesine göre kalan yüzde eklendi.\n- Güncelleme ekranında kullanıcı videolarından rastgele, karartılmış ve bulanık arka plan oynatılır.\n- [dev] Geliştirici değişiklik notları yalnız açık geliştirici oturumunda görünür."
+    "text": "- Kitaptan çıkışta kapanmış Foliate sayfa belgelerine erişim düzeltildi.\n- Dışarıdan kapsamı yalnız kütüphane dışındaki filmleri önerir. Genel arama kütüphane, öneriler, TMDB film/dizi, kitap ve müzik sonuçlarını ayırır.\n- F11 bildirimi üst ortaya taşındı; arka plan resimleri galerisi ve yerel token bütçesine göre kalan yüzde eklendi.\n- Güncelleme ekranında kullanıcı videolarından rastgele, karartılmış ve bulanık arka plan oynatılır."
   },
   {
     "version": "1.8.7",
-    "text": "- [dev] Geliştirici notları panoya kopyalama veya rapor kaydetme sonrasında görüntü ve çizimleriyle kalıcı, kapalı listeye eklenir. Ayrı not ekleme ve eski kaydı yeniden açma eklendi.\n- Kütüphanede / Fark etmez seçimi Benim için seç yanında iki belirgin, kayar göstergeli düğme oldu."
-  },
-  {
-    "version": "1.8.6",
-    "text": "- [dev] Ekran alanı seçiminde fareyi bırakınca görüntü doğrudan not paneline döner; ikinci onay kaldırıldı. İptal, bozuk görüntü ve yakalama zaman aşımı akışları düzeltildi."
+    "text": "- Kütüphanede / Fark etmez seçimi Benim için seç yanında iki belirgin, kayar göstergeli düğme oldu."
   },
   {
     "version": "1.8.5",
@@ -34,19 +346,15 @@ export const RELEASE_HISTORY=[
   },
   {
     "version": "1.8.4",
-    "text": "- [dev] Geliştirici notları sağ üstte kompakt panel oldu; karartma kaldırıldı. Seçili alan yakalama ve resmi panoya kopyalama eklendi.\n- Bu akşam ne izlesem bölümüne tek düğmeyle Kütüphanede / Fark etmez kapsam seçimi eklendi; süre seçenekleri korundu."
+    "text": "- Bu akşam ne izlesem bölümüne tek düğmeyle Kütüphanede / Fark etmez kapsam seçimi eklendi; süre seçenekleri korundu."
   },
   {
     "version": "1.8.3",
     "text": "- EPUB sayfa notlarına okuyucu sayfası eklendi; defterden alınan notlar sayfa etiketini korur. Eski notların kayıtlı konumu okuyucuda ziyaret edilince sayfa etiketi tamamlanır."
   },
   {
-    "version": "1.8.3",
-    "text": "- [dev] Geliştirici araçları yalnız sahibinin geliştirici şifresiyle açılır; ilk açılışta şifre belirleme adımı kaldırıldı."
-  },
-  {
     "version": "1.8.2",
-    "text": "- [dev] F3 geliştirici girişi, yerel şifre kurulumu ve 30 dakikalık kilitli oturum eklendi.\n- [dev] Alt+D not ve ekran görüntüsü paneli, Luna/tüm ekran çekimi, çizim/alan işaretleme ve okunabilir rapor dosyaları eklendi.\n- Dış kaynaklı yenilik maddeleri kaynak etiketiyle kaynaklarını sonunda gösterir; eski bilinmeyen kayıtlar tahminle etiketlenmez."
+    "text": "- Dış kaynaklı yenilik maddeleri kaynak etiketiyle kaynaklarını sonunda gösterir; eski bilinmeyen kayıtlar tahminle etiketlenmez."
   },
   {
     "version": "1.8.1",
@@ -87,10 +395,6 @@ export const RELEASE_HISTORY=[
   {
     "version": "1.7.2",
     "text": "- Çarkta Görüntü/Ses sekmeleri; turuncu stüdyo düğmesi ve motor/model seçicili kompakt altyazı stüdyosu.\n- Alt mükerrer film defteri düğmesi kaldırıldı; üst düğmenin boş ipucu düzeltildi. Hatırlanan tercihler ve film serileri üç nokta menüsünden açılır.\n- AI token sayacı Hesaplar ve anahtarlar başına taşındı. Genel ayarlarda dilin yanında bağımsız izleme ülkesi ve tanıtım sonunda ülke sorusu eklendi.\n- JustWatch sonuçları ve önbelleği yalnız seçilen ülkeye aittir; farklı ülkeye geri düşmez. F11 bildirimi küçültülüp üst gezinme çubuğundan uzaklaştırıldı.\n- Yerel, yayımlanmamış sürüm. Kontroller ve sınırlar: docs/LUNA-1.7.2C-UI.md. Commit/push/release/kurulum paketi yok; push Claude’da."
-  },
-  {
-    "version": "1.7.1",
-    "text": "Kullanıcının onluk devir kuralıyla önceki yerel 1.6.11C numarası 1.7.1C olarak düzeltildi; özellikler aynı.\n\nUP/ses/altyazı düzeni, donanım/RAM rehberi, yerel AI token sayacı, elle altyazı arama, kompakt stüdyo, menü/yorum/afiş konumu, dizi bölüm sayıları ve sürüm yenilik penceresi. Ayrıntı ve sınırlar: docs/LUNA-1.6.11C-PDF.md."
   },
   {
     "version": "1.6.10",
@@ -190,7 +494,7 @@ export const RELEASE_HISTORY=[
   },
   {
     "version": "1.3.8",
-    "text": "Bug pass.\n\n- **Header › all tabs on a laptop:** at 1280–1400 px wide the seventh film tab (Öneriler) was cut off and hidden. The tabs sit closer there and \"Dosya aç\" keeps only its icon (with its tooltip), so all of them fit. On narrower windows the tabs still slide sideways, but now the mouse wheel moves them, a fade at the edge shows more are waiting, and the open tab is brought into view (before, with no scrollbar, some tabs couldn't be reached by mouse).\n- **Music › a song that won't open:** a missing or broken file left the bar at 0:00 showing \"Pause\" as if playing, and the queue stopped there. Now it is skipped after the \"couldn't open\" warning, and the next song plays. After 3 in a row (for example a drive unplugged), or at the end of the queue, Luna stops and pauses instead of running through the rest. A radio station that fails just stops.\n- **Player › panels:** the Upscaler panel stayed open under the audio/subtitles or video-settings panel and the two overlapped. Now opening one closes the others, and the Upscaler panel closes on a click outside it like the rest.\n- **Player › Esc:** with a panel or menu open, Esc closed the whole film. Now the first Esc closes the panel, the next one leaves the film.\n- **Esc closes windows:** Esc now closes the window on top everywhere, as a click beside it does. Before, many didn't close on Esc (open link, subtitle search, confirmations, the music link…). A window over the film or a book closes alone; the film keeps playing.\n- **Reader › comics in Luna Dev:** CBZ comics stayed on \"…\" and never showed a page in the development build (React's double mount left a \"closed\" flag set). The installed build wasn't affected.\n- **Reader › Esc in the search box:** closes the panel now (a note being written is still not thrown away by Esc). The contents button opens on the contents again, not on the last search.\n- (Dev only: the browser mock can now deliver events and acts as a small mpv, so playback can be tried there.)"
+    "text": "Bug pass.\n\n- **Header › all tabs on a laptop:** at 1280–1400 px wide the seventh film tab (Öneriler) was cut off and hidden. The tabs sit closer there and \"Dosya aç\" keeps only its icon (with its tooltip), so all of them fit. On narrower windows the tabs still slide sideways, but now the mouse wheel moves them, a fade at the edge shows more are waiting, and the open tab is brought into view (before, with no scrollbar, some tabs couldn't be reached by mouse).\n- **Music › a song that won't open:** a missing or broken file left the bar at 0:00 showing \"Pause\" as if playing, and the queue stopped there. Now it is skipped after the \"couldn't open\" warning, and the next song plays. After 3 in a row (for example a drive unplugged), or at the end of the queue, Luna stops and pauses instead of running through the rest. A radio station that fails just stops.\n- **Player › panels:** the Upscaler panel stayed open under the audio/subtitles or video-settings panel and the two overlapped. Now opening one closes the others, and the Upscaler panel closes on a click outside it like the rest.\n- **Player › Esc:** with a panel or menu open, Esc closed the whole film. Now the first Esc closes the panel, the next one leaves the film.\n- **Esc closes windows:** Esc now closes the window on top everywhere, as a click beside it does. Before, many didn't close on Esc (open link, subtitle search, confirmations, the music link…). A window over the film or a book closes alone; the film keeps playing.\n- **Reader › comics in Luna Dev:** CBZ comics stayed on \"…\" and never showed a page in the development build (React's double mount left a \"closed\" flag set). The installed build wasn't affected.\n- **Reader › Esc in the search box:** closes the panel now (a note being written is still not thrown away by Esc). The contents button opens on the contents again, not on the last search."
   },
   {
     "version": "1.3.7",
@@ -278,7 +582,7 @@ export const RELEASE_HISTORY=[
   },
   {
     "version": "1.1.6",
-    "text": "- **Luna updates itself (new):** a while after opening (at most twice a day) Luna looks at its GitHub releases; when a new version is out a card at the bottom says \"Luna 1.2.0 is ready\" with **Update**, What's new, Later and Skip this version. Update downloads it, checks the signature, installs it and reopens Luna; your data stays. The portable zip and the developer build open the download page instead.\n- **Settings › General › Updates:** check now, \"Tell me when a new version is out\", and **Get beta versions too** (off by default; turning it on warns that betas may have bugs and offers to back up first).\n- The version number in Settings now really follows the changes (it had stayed at 1.1.1 since 1.1.1CC)."
+    "text": "- **Settings › General › Updates:** check now, \"Tell me when a new version is out\", and **Get beta versions too** (off by default; turning it on warns that betas may have bugs and offers to back up first).\n- The version number in Settings now really follows the changes (it had stayed at 1.1.1 since 1.1.1CC)."
   },
   {
     "version": "1.1.5",
@@ -351,9 +655,5 @@ export const RELEASE_HISTORY=[
   {
     "version": "0.3.0",
     "text": "A large correctness and packaging release.\n\n### Player and library\n\n- Fixed \"continue watching\" saving several seconds behind, and saved the final position on exit.\n- Fixed `1920x1080` being read as a release year (posters/summaries now match).\n- Fixed the external-subtitle key overriding an embedded subtitle on every launch.\n- Fixed lost-file re-linking through a torrent using a stale library snapshot.\n- Fixed subtitle nudge keys/buttons using stale state (G/H, +/−).\n- Fixed the cancelled sleep timer leaving the video paused.\n- Throttled seek-bar dragging; final seek on release.\n- The preview worker is always stopped before a file is deleted or moved.\n- \"Finished\" now uses one threshold (95%) across the home row, menus and the player.\n\n### Books\n\n- Audiobooks are visible to the assistant and on the books home (\"Recently listened audiobooks\").\n- A corrupt EPUB can no longer panic/abort the whole app (`percent_decode` is byte-safe, with a test).\n- CBZ blob URLs are revoked; PDF documents/workers are destroyed.\n- EPUB \"two pages\" no longer reloads the whole book.\n- CBZ page numbers cannot go negative; loaded pages are clamped.\n- CBR files are no longer advertised as downloadable (RAR is not supported).\n- A failed book deletion no longer clears the reading record first.\n\n### Music and assistant\n\n- YouTube playlist requests now search smarter (punctuation, artist/title, relevance checks), fill missing\n  entries with the artist's other real tracks, and show a preview before creating the playlist.\n- The assistant opens the new playlist and closes itself; Alt+A toggles it.\n- Song links (`play_song`) and the \"add to library and play\" card are restored.\n- The assistant prompt no longer includes an unbounded film library (first 400 entries).\n- Playlist/reminder/title removals respect the year; duplicate recommendations are avoided.\n- Undo only reverts the assistant's own changes, not later manual edits.\n- Empty/one-letter note deletion can no longer wipe every note.\n- Conversations are separated by song/book/film context instead of one endless chat.\n\n### Packaging\n\n- Setup (NSIS) and portable zip builds, GitHub Actions release workflow.\n- GPL-3.0 license, third-party notices (mpv GPLv2+, yt-dlp Unlicense, fonts OFL).\n- Build documentation for fetching mpv and producing both packages."
-  },
-  {
-    "version": "0.2.3",
-    "text": "See the git history and the previous GitHub releases."
   }
 ];

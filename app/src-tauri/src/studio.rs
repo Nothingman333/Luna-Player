@@ -885,7 +885,7 @@ pub async fn make_clip(
     sub_file: Option<String>,
     burn_subs: bool,
     max_mb: Option<u32>,
-    src_height: Option<u32>,
+    src_height: Option<u32>,referrer:Option<String>,agent:Option<String>,
 ) -> Result<String, String> {
     let target = PathBuf::from(&out);
     let parent_ok = target.parent().is_some_and(|p| p.is_dir());
@@ -893,7 +893,7 @@ pub async fn make_clip(
         return Err(tr!("Kayıt klasörü bulunamadı", "The destination folder wasn't found"));
     }
     let sub_arg = sub_file.filter(|f| !f.contains("://") && Path::new(f).is_file());
-    let args = shell::clip_args(&shell::ClipOpts {
+    let mut args = shell::clip_args(&shell::ClipOpts {
         out: &out,
         format: &format,
         start,
@@ -904,6 +904,7 @@ pub async fn make_clip(
         src_height,
         max_height: 720,
     })?;
+    let mut header_options=String::new();if let Some(r)=&referrer{header_options.push_str(&format!("referrer=%{}%{}",r.len(),r));}if let Some(a)=&agent{if !header_options.is_empty(){header_options.push(',');}header_options.push_str(&format!("user-agent=%{}%{}",a.len(),a));}if crate::mpv_policy::file_options(&header_options).is_none(){return Err("Invalid clip headers".into())}if let Some(r)=referrer{args.push(format!("--referrer={r}"));}if let Some(a)=agent{args.push(format!("--user-agent={a}"));}
     let j = Job::start(&app, job)?;
     let mpv = crate::mpv_exe(&app);
     let expected: Option<u64> = max_mb.filter(|m| *m > 0).map(|m| m as u64 * 1_000_000);

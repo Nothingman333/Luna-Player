@@ -41,8 +41,16 @@ export function PlaybackRuntime({ s, film, item }: { s: MpvState; film: boolean;
   const done = useRef<string[]>([]);
   const [note, setNote] = useState<{ seg: SponsorSegment; skipped: boolean } | null>(null);
   const hide = useRef(0);
+  const skipPending=useRef(false);
+  const skipGeneration=useRef(0);
+  const skipSegment=async(seg:SponsorSegment)=>{
+    if(skipPending.current)return;skipPending.current=true;const generation=skipGeneration.current;
+    try{for(let attempt=0;attempt<3;attempt++){if(generation!==skipGeneration.current)return;await mpv("seek",seg.end,"absolute+exact");await new Promise(resolve=>window.setTimeout(resolve,500));if(generation!==skipGeneration.current)return;const actual=await mpv("get_property","time-pos");if(typeof actual==="number"&&actual>=seg.end-.45){done.current=[...done.current,seg.uuid];show({seg,skipped:true});return;}}done.current=[...done.current,seg.uuid];show({seg,skipped:false});}
+    catch{if(generation===skipGeneration.current){done.current=[...done.current,seg.uuid];show({seg,skipped:false});}}
+    finally{if(generation===skipGeneration.current)skipPending.current=false;}
+  };
   useEffect(() => {
-    setSegs([]); setNote(null); done.current = [];
+    skipGeneration.current++;skipPending.current=false;setSegs([]); setNote(null); done.current = [];
     if (!vid || !sponsorKey) return;
     let alive = true;
     const cats = sponsorKey.split(",");
@@ -68,9 +76,7 @@ export function PlaybackRuntime({ s, film, item }: { s: MpvState; film: boolean;
       return;
     }
     if (loadSponsor().auto) {
-      done.current = [...done.current, seg.uuid];
-      void mpv("seek", seg.end, "absolute");
-      show({ seg, skipped: true });
+      void skipSegment(seg);
     } else if (note?.seg.uuid !== seg.uuid) show({ seg, skipped: false });
   }, [Math.floor(s.time * 4), segs]);
   function show(n: { seg: SponsorSegment; skipped: boolean }) {
@@ -178,7 +184,7 @@ export function PlaybackRuntime({ s, film, item }: { s: MpvState; film: boolean;
       <span className="lx-toast-t">{note.skipped ? tt("{0} atlandı", label) : label}</span>
       {note.skipped
         ? <button className="chip" onClick={() => { void mpv("seek", note.seg.start, "absolute"); setNote(null); }}>{tt("Geri al")}</button>
-        : <button className="chip" onClick={() => { done.current = [...done.current, note.seg.uuid]; void mpv("seek", note.seg.end, "absolute"); setNote(null); }}>{tt("Atla")}</button>}
+        : <button className="chip" onClick={() => { void skipSegment(note.seg); }}>{tt("Atla")}</button>}
       <button className="lx-x" aria-label={tt("Kapat")} onClick={() => { done.current = [...done.current, note.seg.uuid]; setNote(null); }}>×</button>
       <span className="lx-credit">SponsorBlock</span>
       <i className="lx-toast-bar" style={{ animationDuration: (note.skipped ? 6000 : 15000) + "ms" }} />

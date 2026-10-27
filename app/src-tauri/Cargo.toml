@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.9.2"
+version = "2.7.5"
 description = "Luna Player"
 authors = ["you"]
 edition = "2024"
@@ -61,7 +61,7 @@ libloading = "0.8"
 webview2-com = "0.39.1"
 souvlaki = { version = "0.8.3", default-features = false }
 windows-core = "0.62"
-windows = { version = "0.62.2", features = ["Globalization", "Media_Ocr", "Graphics_Imaging", "Storage_Streams", "Win32_System_WinRT"] }
+windows = { version = "0.62.2", features = ["Globalization", "Media_Ocr", "Graphics_Imaging", "Storage_Streams", "Win32_System_WinRT", "Win32_Media_Audio", "Win32_System_Com"] }
 
 [profile.release]
 codegen-units = 1
@@ -69,3 +69,8 @@ lto = true
 opt-level = 3
 panic = "unwind"
 strip = true
+
+# Development builds keep only line tables for debugging: full debug info made target/debug/incremental grow to
+# 150+ GB across rebuilds. Release builds are unaffected.
+[profile.dev]
+debug = "line-tables-only"

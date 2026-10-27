@@ -13,7 +13,7 @@ const WRITABLE: &[&str] = &[
 ];
 const FILE_OPTIONS: &[&str] = &[
     "start", "sub-delay", "audio-delay", "aid", "sid", "sub-speed", "secondary-sid", "vid", "speed",
-    "loop-file", "pause", "ytdl-format", "user-agent",
+    "loop-file", "pause", "ytdl-format", "user-agent", "referrer",
 ];
 
 /// Parse mpv's byte-length escaping, so a comma inside a user-agent cannot inject an option.
@@ -36,7 +36,9 @@ pub fn file_options(text: &str) -> Option<Vec<(String, String)>> {
             if value.contains(['%', '"', '\'', '\\', '\0', '\n', '\r']) { return None; }
             (value, tail)
         };
-        if key != "user-agent" && (value.contains(',') || value.contains('\0')) { return None; }
+        if value.contains(['\0','\n','\r']) { return None; }
+        if key == "referrer" { let u=tauri::Url::parse(value).ok()?;if !matches!(u.scheme(),"http"|"https")||!u.username().is_empty()||u.password().is_some()||value.len()>8192{return None;} }
+        else if key != "user-agent" && value.contains(',') { return None; }
         out.push((key.to_string(), value.to_string()));
         if tail.is_empty() { break; }
         rest = tail.strip_prefix(',')?;
@@ -134,3 +136,5 @@ mod tests {
         assert!(file_options("start=%14%1,script-opts=x").is_none());
     }
 }
+
+#[cfg(test)]mod web_referrer_tests{use super::*;use serde_json::json;#[test]fn browser_referrer(){let u="https://page.test/watch?q=a,b";let opt=format!("start=0,referrer=%{}%{}",u.len(),u);assert!(validate(&json!(["loadfile","https://media.test/a.m3u8","replace",-1,opt])).is_ok());for bad in ["referrer=file:///secret","referrer=https://u:p@page.test/","referrer=https://page.test/,scripts=x.lua","referrer=%21%https://page.test/\r\n"]{assert!(file_options(bad).is_none(),"{bad}");}}}

@@ -1,3 +1,5 @@
+mod video_host;
+mod dock_layout;
 mod dev_tools;
 mod cache_tools;
 mod database;
@@ -143,6 +145,15 @@ async fn music_queue_prepare(current: String, next: Option<String>, next_agent: 
     engine.command(json!(["loadfile", next, "append", -1, options])).await?;
     let playlist = engine.command(json!(["get_property", "playlist"])).await?;
     Ok(playlist.as_array().and_then(|rows| rows.iter().find(|row| row["current"] != true).and_then(|row| row["id"].as_i64())))
+}
+
+#[tauri::command]
+async fn mpv_dock(caller:tauri::Webview,rect:Option<[i32;4]>)->Result<(),String>{
+ if caller.label()!="main"{return Err("Only the Luna window may move playback".into());}
+ let window=caller.window();let hwnd=window.hwnd().map_err(|e|e.to_string())?.0 as isize;
+ let (send,receive)=tokio::sync::oneshot::channel();
+ window.run_on_main_thread(move||{let _=send.send(mpv::dock_rect(hwnd,rect));}).map_err(|e|e.to_string())?;
+ receive.await.map_err(|_|"Video layout thread stopped".to_string())?
 }
 
 #[tauri::command]
@@ -386,10 +397,10 @@ async fn video_thumbnail(app: AppHandle, path: String) -> Result<String, String>
 }
 
 #[tauri::command]
-async fn seek_preview(app: AppHandle, path: String, secs: u32) -> Result<String, String> {
+async fn seek_preview(app: AppHandle, path: String, secs: u32,referrer:Option<String>,agent:Option<String>) -> Result<String, String> {
     let exe = mpv_exe(&app);
     let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("previews");
-    blocking(move || files::frame_at(&exe, &path, secs, &cache)).await
+    blocking(move || files::frame_at_with_headers(&exe, &path, secs, &cache,referrer.as_deref(),agent.as_deref())).await
 }
 
 /// The subtitle file to read for each film (see `files::best_subs`); used by the line search.
@@ -1423,12 +1434,14 @@ async fn rename_video(path: String, name: String) -> Result<String, String> {
 /// Keeps the window inside the space the taskbar leaves (a restored window can be taller than the
 /// screen; at start only) and zooms the page out on screens narrower than Luna's layout (off: `fit_zoom` false).
 #[tauri::command]
-fn fit_window(window: tauri::WebviewWindow, fit_zoom: bool, keep_inside: bool) -> Result<f64, String> {
+fn fit_window(caller: tauri::Webview, fit_zoom: bool, keep_inside: bool) -> Result<f64, String> {
+    if caller.label()!="main" { return Err("Only the Luna view may fit its window".into()); }
+    let window=caller.window();
     let m = window.current_monitor().map_err(|e| e.to_string())?.ok_or("no screen")?;
     let zoom = if fit_zoom { screen::zoom_for(m.size().width as f64 / m.scale_factor()) } else { 1.0 };
-    window.set_zoom(zoom).map_err(|e| e.to_string())?;
-    // only when Luna starts: leaving full screen briefly reports a screen-sized window, and moving or
-    // resizing is the user's own doing
+    caller.set_zoom(zoom).map_err(|e| e.to_string())?;
+    // Clamp only when explicitly requested at startup or after leaving fullscreen;
+    // ordinary move/resize events retain the user's chosen window geometry.
     if keep_inside && !window.is_fullscreen().unwrap_or(false) && !window.is_maximized().unwrap_or(false) && !window.is_minimized().unwrap_or(false) {
         let a = m.work_area();
         if let (Ok(p), Ok(sz)) = (window.outer_position(), window.outer_size()) {
@@ -1461,7 +1474,10 @@ pub fn run() {
                 let _ = w.set_focus();
             }
         }))
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_window_state::Builder::default()
+            // Luna always opens at its default size (1152×684, centred): size, place and maximized state are not restored.
+            .with_state_flags(tauri_plugin_window_state::StateFlags::all() - tauri_plugin_window_state::StateFlags::SIZE - tauri_plugin_window_state::StateFlags::POSITION - tauri_plugin_window_state::StateFlags::MAXIMIZED)
+            .build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -1469,6 +1485,9 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
         .on_window_event(|window, event| {
+            if window.label()=="main" && matches!(event,tauri::WindowEvent::Resized(_)|tauri::WindowEvent::ScaleFactorChanged{..}) {
+                if let Ok(hwnd)=window.hwnd(){let _=video_host::resize(hwnd.0 as isize);}
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 shell::on_close_requested(window, api);
             }
@@ -1501,7 +1520,8 @@ pub fn run() {
             } else if minimized {
                 let _ = win.hide();
             }
-            let _ = MPV.set(mpv::start(app.handle().clone(), exe, hwnd, fonts));
+            let video_hwnd=video_host::create(hwnd).map_err(std::io::Error::other)?;
+            let _ = MPV.set(mpv::start(app.handle().clone(), exe, video_hwnd, fonts));
             Ok(())
         })
         .invoke_handler(|invoke| {
@@ -1514,6 +1534,7 @@ pub fn run() {
             dev_tools::dev_auth_status,
             dev_tools::dev_unlock,
             dev_tools::dev_lock,
+            dev_tools::dev_resume,
             dev_tools::dev_capture,
             dev_tools::dev_copy_image,
             dev_tools::dev_save_report,
@@ -1530,12 +1551,14 @@ pub fn run() {
             browser::browser_bounds,
             browser::browser_bubble,
             browser::browser_read,
+            browser::browser_media,
             browser::browser_position,
             browser::browser_translation,
             browser::browser_find,
             set_lang,
             system_check,
             mpv_command,
+            mpv_dock,
             music_queue_prepare,
             startup_file,
             find_subtitles,

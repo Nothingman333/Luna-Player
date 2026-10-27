@@ -8,7 +8,8 @@ use tauri::{AppHandle, Manager, Webview};
 #[derive(Default)]
 struct Session { token: String, failures: u32, retry: Option<Instant> }
 static SESSION: Mutex<Session> = Mutex::new(Session {token:String::new(),failures:0,retry:None});
-fn trusted(caller:&Webview)->Result<(),String>{if caller.label()=="main"{Ok(())}else{Err("Developer tools require Luna's main UI".into())}}
+fn dev_origin_ok(scheme:&str,host:Option<&str>,port:Option<u16>,development:bool)->bool{matches!((scheme,host),("tauri",Some("localhost"))|("http"|"https",Some("tauri.localhost"))) || (development && scheme=="http" && matches!(host,Some("localhost"|"127.0.0.1")) && port==Some(1420))}
+fn trusted(caller:&Webview)->Result<(),String>{let url=caller.url().map_err(|_|"Developer origin unavailable")?;if caller.label()=="main"&&dev_origin_ok(url.scheme(),url.host_str(),url.port(),cfg!(debug_assertions)){Ok(())}else{Err("Developer tools require Luna's local main UI".into())}}
 fn random<const N:usize>()->Result<[u8;N],String>{let mut b=[0;N];SystemRandom::new().fill(&mut b).map_err(|_|"Random generator failed")?;Ok(b)}
 fn auth_path(app:&AppHandle)->Result<PathBuf,String>{Ok(app.path().app_local_data_dir().map_err(|e|e.to_string())?.join("developer-auth.json"))}
 // Only the owner's developer password opens the tools (PBKDF2 verifiers; the password itself is never stored).
@@ -25,12 +26,42 @@ pub fn dev_unlock(app:AppHandle,caller:Webview,password:String,setup:bool)->Resu
  if password.len()>1024{return Err("Password too long".into())}
  let mut s=SESSION.lock().map_err(|_|"Developer lock unavailable")?;
  if s.retry.is_some_and(|t|Instant::now()<t){return Err("Please wait before trying again".into())}
- let _=(&app,setup);
+ if setup{return Err("Developer password setup is disabled".into())}
+ let _=&app;
  if !BUILTIN.iter().any(|v|pbkdf2::verify(pbkdf2::PBKDF2_HMAC_SHA256,rounds(),&BUILTIN_SALT,password.as_bytes(),v).is_ok()){s.failures+=1;s.retry=Some(Instant::now()+Duration::from_secs(if s.failures>=5{30}else{1}));return Err("Incorrect developer password".into())}
+ // Remember this computer: a random key sealed for this Windows user (DPAPI) lets the next start resume without the
+ // password. The password itself is never stored; Lock deletes the key.
+ if let Ok(path)=remember_path(&app){if let Ok(sealed)=seal(&[REMEMBER_MAGIC,&random::<32>()?].concat()){let _=fs::write(path,sealed);}}
  let token=STANDARD.encode(random::<32>()?);s.token=token.clone();s.failures=0;s.retry=None;Ok(token)
 }
+const REMEMBER_MAGIC:&[u8]=b"luna-dev-remember-v1";
+fn remember_path(app:&AppHandle)->Result<PathBuf,String>{Ok(app.path().app_local_data_dir().map_err(|e|e.to_string())?.join("developer-remember.bin"))}
+/// Resumes a remembered developer session on this computer and Windows user, or returns None (password needed).
 #[tauri::command]
-pub fn dev_lock(caller:Webview,token:String)->Result<(),String>{trusted(&caller)?;let mut s=SESSION.lock().map_err(|_|"Developer lock unavailable")?;if s.token==token{*s=Session::default();}Ok(())}
+pub fn dev_resume(app:AppHandle,caller:Webview)->Result<Option<String>,String>{
+ trusted(&caller)?;
+ let Ok(sealed)=fs::read(remember_path(&app)?) else {return Ok(None)};
+ match unseal(&sealed){Ok(plain) if plain.len()==REMEMBER_MAGIC.len()+32&&plain.starts_with(REMEMBER_MAGIC)=>{},_=>return Ok(None)}
+ let mut s=SESSION.lock().map_err(|_|"Developer lock unavailable")?;
+ if s.token.is_empty(){s.token=STANDARD.encode(random::<32>()?);}
+ Ok(Some(s.token.clone()))
+}
+#[cfg(not(windows))]fn seal(_: &[u8])->Result<Vec<u8>,String>{Err("Remember requires Windows".into())}
+#[cfg(not(windows))]fn unseal(_: &[u8])->Result<Vec<u8>,String>{Err("Remember requires Windows".into())}
+#[cfg(windows)]#[repr(C)]struct Blob{len:u32,data:*mut u8}
+#[cfg(windows)]#[link(name="crypt32")]unsafe extern "system"{fn CryptProtectData(input:*const Blob,desc:*const u16,entropy:*const Blob,reserved:*const u8,prompt:*const u8,flags:u32,out:*mut Blob)->i32;fn CryptUnprotectData(input:*const Blob,desc:*mut *mut u16,entropy:*const Blob,reserved:*const u8,prompt:*const u8,flags:u32,out:*mut Blob)->i32;}
+#[cfg(windows)]#[link(name="kernel32")]unsafe extern "system"{fn LocalFree(h:*mut u8)->*mut u8;}
+#[cfg(windows)]fn dpapi(data:&[u8],protect:bool)->Result<Vec<u8>,String>{
+ let input=Blob{len:data.len() as u32,data:data.as_ptr() as *mut u8};let mut out=Blob{len:0,data:std::ptr::null_mut()};
+ // 1 = CRYPTPROTECT_UI_FORBIDDEN
+ let ok=unsafe{if protect{CryptProtectData(&input,std::ptr::null(),std::ptr::null(),std::ptr::null(),std::ptr::null(),1,&mut out)}else{CryptUnprotectData(&input,std::ptr::null_mut(),std::ptr::null(),std::ptr::null(),std::ptr::null(),1,&mut out)}};
+ if ok==0||out.data.is_null(){return Err("Protected storage unavailable".into())}
+ let v=unsafe{std::slice::from_raw_parts(out.data,out.len as usize).to_vec()};unsafe{LocalFree(out.data);}Ok(v)
+}
+#[cfg(windows)]fn seal(data:&[u8])->Result<Vec<u8>,String>{dpapi(data,true)}
+#[cfg(windows)]fn unseal(data:&[u8])->Result<Vec<u8>,String>{dpapi(data,false)}
+#[tauri::command]
+pub fn dev_lock(app:AppHandle,caller:Webview,token:String,forget:Option<bool>)->Result<(),String>{trusted(&caller)?;let mut s=SESSION.lock().map_err(|_|"Developer lock unavailable")?;if s.token==token{*s=Session::default();if forget.unwrap_or(false){if let Ok(path)=remember_path(&app){let _=fs::remove_file(path);}}}Ok(())}
 #[tauri::command]
 pub fn dev_capture(app:AppHandle,caller:Webview,token:String,desktop:bool)->Result<String,String>{trusted(&caller)?;authorize(&token)?;capture(&app,desktop).map(|b|STANDARD.encode(b))}
 
@@ -62,7 +93,7 @@ fn copy_image(bytes:&[u8],owner:isize)->Result<(),String>{
 #[tauri::command]
 pub fn dev_save_report(app:AppHandle,caller:Webview,token:String,directory:String,note:String,png:Option<String>,logs:String,context:serde_json::Value)->Result<String,String>{
  trusted(&caller)?;authorize(&token)?;
- if note.len()>64_000||logs.len()>2_000_000||context.to_string().len()>32_000{return Err("Report exceeds size limit".into())}
+ if note.len()>64_000||logs.len()>2_000_000||context.to_string().len()>512_000{return Err("Report exceeds size limit".into())}
  let image=if let Some(value)=png{if value.len()>64_000_000{return Err("Image too large".into())}let b=STANDARD.decode(value).map_err(|_|"Invalid screenshot")?;if b.len()<24||&b[..8]!=b"\x89PNG\r\n\x1a\n"{return Err("Screenshot must be PNG".into())}let w=u32::from_be_bytes(b[16..20].try_into().unwrap());let h=u32::from_be_bytes(b[20..24].try_into().unwrap());if w==0||h==0||u64::from(w)*u64::from(h)>64_000_000{return Err("Screenshot dimensions exceed limit".into())}Some(b)}else{None};
  let root=PathBuf::from(directory);if !root.is_absolute()||!root.is_dir(){return Err("Choose an existing report folder".into())}
  let name=format!("Luna-dev-{}-{}",chrono::Local::now().format("%Y%m%d-%H%M%S"),STANDARD.encode(random::<6>()?).replace(['+','/'],"_"));let dir=root.join(name);fs::create_dir(&dir).map_err(|e|e.to_string())?;
@@ -78,6 +109,8 @@ pub fn dev_save_report(app:AppHandle,caller:Webview,token:String,directory:Strin
 
 #[cfg(not(windows))]
 fn capture(_: &AppHandle,_:bool)->Result<Vec<u8>,String>{Err("Screen capture requires Windows".into())}
+// Browser tabs make the main window a multi-webview window. Resolve the trusted main
+// view and then its owning Window; get_webview_window would return None after adding tabs.
 #[cfg(windows)]
 fn capture(app:&AppHandle,desktop:bool)->Result<Vec<u8>,String>{
  #[repr(C)]struct Rect{left:i32,top:i32,right:i32,bottom:i32}
@@ -86,7 +119,7 @@ fn capture(app:&AppHandle,desktop:bool)->Result<Vec<u8>,String>{
  #[link(name="gdi32")]unsafe extern "system"{fn CreateCompatibleDC(dc:isize)->isize;fn DeleteDC(dc:isize)->i32;fn CreateCompatibleBitmap(dc:isize,w:i32,h:i32)->isize;fn SelectObject(dc:isize,obj:isize)->isize;fn DeleteObject(obj:isize)->i32;fn BitBlt(dst:isize,x:i32,y:i32,w:i32,h:i32,src:isize,sx:i32,sy:i32,rop:u32)->i32;fn GetDIBits(dc:isize,bmp:isize,start:u32,lines:u32,bits:*mut u8,info:*mut Header,usage:u32)->i32;}
  let mut r=Rect{left:0,top:0,right:0,bottom:0};
  unsafe {
-  if desktop{r.left=GetSystemMetrics(76);r.top=GetSystemMetrics(77);r.right=r.left+GetSystemMetrics(78);r.bottom=r.top+GetSystemMetrics(79);}else{let win=app.get_webview_window("main").ok_or("Luna window unavailable")?;let hwnd=win.hwnd().map_err(|e|e.to_string())?.0 as isize;if GetWindowRect(hwnd,&mut r)==0{return Err("Cannot get Luna window bounds".into())}}
+  if desktop{r.left=GetSystemMetrics(76);r.top=GetSystemMetrics(77);r.right=r.left+GetSystemMetrics(78);r.bottom=r.top+GetSystemMetrics(79);}else{let win=app.get_webview("main").ok_or("Luna main view unavailable")?.window();let hwnd=win.hwnd().map_err(|e|e.to_string())?.0 as isize;if GetWindowRect(hwnd,&mut r)==0{return Err("Cannot get Luna window bounds".into())}}
   let (w,h)=(r.right-r.left,r.bottom-r.top);if w<=0||h<=0||(w as u64)*(h as u64)>32_000_000{return Err("Capture dimensions exceed limit".into())}
   let dc=GetDC(0);if dc==0{return Err("Cannot access screen".into())}let mem=CreateCompatibleDC(dc);if mem==0{ReleaseDC(0,dc);return Err("Cannot create capture context".into())}let bmp=CreateCompatibleBitmap(dc,w,h);if bmp==0{DeleteDC(mem);ReleaseDC(0,dc);return Err("Cannot allocate capture image".into())}let old=SelectObject(mem,bmp);
   let copied=BitBlt(mem,0,0,w,h,dc,r.left,r.top,0x40CC0020);SelectObject(mem,old);
@@ -97,5 +130,6 @@ fn capture(app:&AppHandle,desktop:bool)->Result<Vec<u8>,String>{
 }
 #[cfg(test)]mod tests{
  use super::*;
+  #[cfg(windows)]#[test]fn remember_key_round_trips(){let data=[REMEMBER_MAGIC,&[7u8;32]].concat();let sealed=seal(&data).unwrap();assert_ne!(sealed,data);assert_eq!(unseal(&sealed).unwrap(),data);assert!(unseal(b"not sealed").is_err());}
  #[test]fn password_and_session(){let salt=[17;16];let mut hash=[0;32];pbkdf2::derive(pbkdf2::PBKDF2_HMAC_SHA256,rounds(),&salt,b"synthetic-test-password",&mut hash);assert!(pbkdf2::verify(pbkdf2::PBKDF2_HMAC_SHA256,rounds(),&salt,b"synthetic-test-password",&hash).is_ok());assert!(pbkdf2::verify(pbkdf2::PBKDF2_HMAC_SHA256,rounds(),&salt,b"wrong",&hash).is_err());let mut s=Session{token:"synthetic-token".into(),..Default::default()};assert!(valid(&s,"synthetic-token"));assert!(!valid(&s,""));assert!(!valid(&s,"other"));s.token.clear();assert!(!valid(&s,"synthetic-token"));}
 }

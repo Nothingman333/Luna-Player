@@ -1,7 +1,7 @@
 import {useWatchCountry,countryName} from "./CountrySelect";
 import {WatchProviderGroup} from "./WatchProviderGroup";
 import { useEffect, useState } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl } from "./linkOpen";
 import { tt, lang } from "./i18n";
 import { IMG, store, tmdbGet } from "./library";
 import { logoUrl, parseProviders, pickLogo, Providers } from "./titleExtrasModel";

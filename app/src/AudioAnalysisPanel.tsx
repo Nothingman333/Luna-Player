@@ -1,4 +1,4 @@
-import {openUrl} from "@tauri-apps/plugin-opener";
+import {openUrl} from "./linkOpen";
 import {cleanMusicIdentities} from "./musicIdentityModel";
 import {useEffect,useRef,useState} from "react";
 import {open} from "@tauri-apps/plugin-dialog";
