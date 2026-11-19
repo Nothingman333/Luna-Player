@@ -57,7 +57,7 @@ export const prefs = {
 export function pickEngine(st: WhisperStatus | null): string {
   if (!st) return "";
   const chosen = prefs.engine();
-  return st.engines.find((e) => e.toLowerCase() === chosen.toLowerCase()) ?? (chosen && chosen.toLowerCase().endsWith(".exe") ? chosen : st.engines.find(e => store.get("studioEngineHint") === "cpu" ? /[\\/]cpu[\\/]/i.test(e) : /[\\/]cuda[\\/]/i.test(e)) ?? st.engines.find(e=>/[\\/]cpu[\\/]/i.test(e)) ?? st.engines[0] ?? "");
+  return st.engines.find((e) => e.toLowerCase() === chosen.toLowerCase()) ?? (chosen && chosen.toLowerCase().endsWith(".exe") ? chosen : st.engines.find(e => /[\\/]vulkan[\\/]/i.test(e)) ?? st.engines.find(e => store.get("studioEngineHint") === "cpu" ? /[\\/]cpu[\\/]/i.test(e) : /[\\/]cuda[\\/]/i.test(e)) ?? st.engines.find(e=>/[\\/]cpu[\\/]/i.test(e)) ?? st.engines[0] ?? "");
 }
 export function pickModel(st: WhisperStatus | null): string {
   if (!st) return "";

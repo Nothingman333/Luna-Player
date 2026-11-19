@@ -93,6 +93,8 @@ pub fn validate(args: &Value) -> Result<(), String> {
             },
             "seek" | "revert-seek" | "frame-step" | "frame-back-step" | "sub-add" | "sub-remove" |
             "sub-reload" | "sub-step" | "sub-seek" | "audio-add" | "stop" => a.len() <= 5,
+            // a song's picture added beside the sound already playing: only a web stream
+            "video-add" => a.len() <= 5 && a[1].as_str().is_some_and(|u| u.starts_with("https://")),
             // The target directory is fixed in native startup; no screenshot-to-file command is allowed.
             "screenshot" => a.len() == 2 && matches!(a[1].as_str(), Some("video" | "subtitles" | "window")),
             _ => false,

@@ -1,0 +1,136 @@
+/* One-row browser (2.7.6): Luna's header folds into the logo menu, and the tabs and the address share one row.
+   Everything is scoped to .is-compact, so turning the layout off (Tools or the logo menu) brings back the classic
+   two-row chrome untouched. Buttons follow Luna's own shapes: round icon buttons, pill tabs like the header tabs,
+   a search-style address and an accent pill like the active part in the header. */
+.root:has(.browser-shell.is-compact:not([hidden])) .browser-app-header { display:none; }
+.browser-shell.is-compact { inset:0; }
+
+/* The two classic rows dissolve into one flex row (display:contents), then the parts are ordered:
+   logo · back/forward/reload · tabs (take the room left of the address) · tools. The address sits in the middle of the
+   window, narrow until clicked; clicking widens it to both sides over the tabs. */
+.browser-shell.is-compact .browser-chrome { --aw:480px; display:flex; flex-wrap:nowrap; align-items:center; column-gap:12px; min-height:64px; padding:10px 18px; background:rgba(10,10,11,.96); box-shadow:none; border-bottom:1px solid rgba(255,255,255,.06); }
+.browser-shell.is-compact .browser-tabstrip,.browser-shell.is-compact .browser-toolbar { display:contents; }
+.browser-shell.is-compact .browser-luna-anchor { order:0; }
+.browser-shell.is-compact .browser-nav { order:1; flex:none; }
+.browser-shell.is-compact .browser-tabs { order:2; flex:1 1 0; min-width:0; height:44px; margin-right:calc(50% + var(--aw) / 2 + 12px); }
+.browser-shell.is-compact .browser-address-wrap { position:absolute; z-index:6; top:12px; left:50%; width:var(--aw); min-width:0; transform:translateX(-50%); transition:width .32s cubic-bezier(.2,.8,.2,1); }
+/* Only typing in the address widens it: a click on the capsule's buttons must not move them away from the pointer */
+.browser-shell.is-compact .browser-address-wrap.is-typing { width:min(62vw,980px); }
+/* The address and the tools share one capsule: the capsule look moves from the form to its wrapper */
+.browser-shell.is-compact .browser-address-wrap { box-sizing:border-box; align-items:center; height:40px; border-radius:20px; background:rgba(255,255,255,.06); border:1px solid transparent; padding-right:5px; }
+.browser-shell.is-compact .browser-address-wrap.is-typing { border-color:var(--accent); background:#1b1b1f; }
+.browser-shell.is-compact .browser-address-wrap > .browser-address,.browser-shell.is-compact .browser-address-wrap > .browser-address:focus-within { background:transparent; border:0; box-shadow:none; height:38px; }
+.browser-shell.is-compact .browser-address-wrap .browser-tools-anchor { flex:none; }
+.browser-shell.is-compact .browser-address-wrap .browser-tools-toggle { width:30px; height:30px; border-radius:15px; background:transparent; }
+.browser-shell.is-compact .browser-address-wrap .browser-tools-toggle > svg { width:20px; height:20px; stroke-width:3.4; }
+.browser-shell.is-compact .browser-address-wrap .browser-tools-toggle:hover { background:rgba(255,255,255,.08); }
+.browser-shell.is-compact .browser-start-tab { display:none; }
+/* The row never wraps (a second line would move the web page); bookmarks get their own line below it */
+.browser-shell.is-compact .browser-chrome:has(.browser-bookmarks) { padding-bottom:48px; }
+.browser-shell.is-compact .browser-bookmarks { position:absolute; left:18px; right:18px; top:62px; padding-top:0; }
+.browser-shell.is-compact .browser-return { display:none; }
+
+/* The Luna logo: hovering widens it into the parts and pushes the row aside (like the address); a click opens the full menu */
+.browser-luna-anchor { position:relative; flex:none; height:40px; }
+.browser-luna-rail { position:relative; display:flex; align-items:center; height:40px; border-radius:20px; background:transparent; transition:background .25s ease, box-shadow .25s ease; }
+.browser-luna-rail-modes { display:flex; align-items:center; gap:2px; max-width:0; overflow:hidden; opacity:0; transition:max-width .35s cubic-bezier(.2,.8,.2,1), opacity .2s ease, padding .35s ease; }
+.browser-luna-anchor:hover .browser-luna-rail,.browser-luna-anchor.is-open .browser-luna-rail,.browser-luna-anchor:has(.browser-luna-logo:focus-visible) .browser-luna-rail { background:var(--panel); box-shadow:0 0 0 1px rgba(255,255,255,.08),0 10px 30px rgba(0,0,0,.5); }
+.browser-luna-anchor:hover .browser-luna-rail-modes,.browser-luna-anchor.is-open .browser-luna-rail-modes,.browser-luna-anchor:has(.browser-luna-logo:focus-visible) .browser-luna-rail-modes { max-width:520px; opacity:1; padding-right:4px; }
+.browser-luna-rail-modes > button { display:flex; align-items:center; gap:6px; height:32px; padding:0 12px; border-radius:16px; font-size:13px; font-weight:600; color:#b7b7c0; white-space:nowrap; }
+.browser-luna-rail-modes > button:hover:not(.on) { background:rgba(255,255,255,.08); color:var(--text); }
+.browser-luna-rail-modes > button.on { background:var(--accent); color:var(--bg); }
+.browser-luna-rail-sep { flex:none; width:1px; height:18px; margin:0 4px; background:rgba(255,255,255,.12); }
+.browser-luna-rail-modes > button.is-round { width:32px; padding:0; justify-content:center; color:#c9c9d1; }
+.browser-luna-logo { display:grid; place-items:center; flex:none; width:40px; height:40px; border-radius:20px; background:transparent; transition:background var(--t,.2s) ease, box-shadow var(--t,.2s) ease; }
+.browser-luna-logo:hover,.browser-luna-logo.on { background:rgba(255,255,255,.08); }
+.browser-luna-logo svg { transition:transform .3s cubic-bezier(.2,.8,.2,1); }
+.browser-luna-anchor:hover .browser-luna-logo svg { transform:scale(1.08); }
+.browser-luna-pop { position:absolute; top:calc(100% + 10px); left:0; z-index:60; width:250px; padding:10px; border-radius:16px; background:var(--panel); border:1px solid rgba(255,255,255,.1); box-shadow:0 18px 60px rgba(0,0,0,.6); animation:fcIn .16s ease-out; }
+.browser-luna-pop hr { border:0; height:1px; background:rgba(255,255,255,.07); margin:8px 2px; }
+.browser-luna-modes { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.browser-luna-modes > button { display:flex; align-items:center; gap:8px; height:38px; padding:0 12px; border-radius:19px; font-size:13px; font-weight:600; color:#b7b7c0; background:rgba(255,255,255,.04); }
+.browser-luna-modes > button:hover:not(.on) { background:rgba(255,255,255,.09); color:var(--text); }
+.browser-luna-modes > button.on { background:var(--accent); color:var(--bg); }
+.browser-luna-pop .browser-menu-action { display:flex; align-items:center; gap:10px; width:100%; min-height:38px; padding:0 10px; border-radius:10px; font-size:13px; color:#d0d0d6; text-align:left; }
+.browser-luna-pop .browser-menu-action:hover { background:rgba(255,255,255,.06); color:var(--text); }
+
+/* Tabs: pills like the header tabs; the start tab is a round home button */
+.browser-shell.is-compact .browser-tabs { gap:4px; }
+.browser-shell.is-compact .browser-start-tab { width:34px; height:34px; padding:0; justify-content:center; border-radius:17px; font-size:0; gap:0; color:#a8a8b0; }
+.browser-shell.is-compact .browser-start-tab > svg { width:16px; height:16px; }
+.browser-shell.is-compact .browser-tab { flex:0 1 176px; min-width:46px; height:34px; border-radius:17px; font-size:12.5px; color:#a8a8b0; border:0; }
+.browser-shell.is-compact .browser-tab > button:first-child { padding:0 6px 0 12px; }
+.browser-shell.is-compact .browser-tab:hover:not(.on),.browser-shell.is-compact .browser-start-tab:hover:not(.on) { background:rgba(255,255,255,.05); color:var(--text); }
+.browser-shell.is-compact .browser-start-tab.on,.browser-shell.is-compact .browser-tab.on { background:rgba(255,255,255,.09); color:var(--text); box-shadow:inset 0 0 0 1px rgba(255,255,255,.06); }
+.browser-shell.is-compact .browser-tab.on > button:first-child > svg,.browser-shell.is-compact .browser-tab.on .browser-favicon { filter:none; }
+.browser-shell.is-compact .browser-tab-close,.browser-shell.is-compact .browser-tab-audio { width:24px; height:24px; border-radius:12px; margin-right:5px; }
+.browser-shell.is-compact .browser-new { width:34px; height:34px; border-radius:17px; background:rgba(255,255,255,.05); }
+
+/* Round icon buttons, like Luna's .round */
+.browser-shell.is-compact .browser-nav { gap:4px; }
+.browser-shell.is-compact .browser-nav > button,.browser-shell.is-compact .browser-tools-toggle { display:grid; place-items:center; width:36px; height:36px; padding:0; border-radius:18px; background:rgba(255,255,255,.06); color:#c9c9d1; }
+.browser-shell.is-compact .browser-nav > button:hover:not(:disabled),.browser-shell.is-compact .browser-tools-toggle:hover { background:rgba(255,255,255,.12); color:var(--text); }
+.browser-shell.is-compact .browser-tools-toggle.on { background:rgba(var(--acc-rgb),.16); color:var(--accent); }
+.browser-shell.is-compact .browser-tools-toggle > span { display:none; }
+
+/* Inside the capsule the address buttons are small round ones */
+.browser-shell.is-compact .browser-address { flex:1; min-width:0; border-radius:20px; padding:0 2px 0 14px; gap:8px; }
+.browser-shell.is-compact .browser-address > button { width:30px; height:30px; border-radius:15px; }
+.browser-shell.is-compact .browser-address > button:hover,.browser-shell.is-compact .browser-address > button.saved { background:rgba(255,255,255,.08); }
+
+/* "Play in Luna" lives in the address as the accent pill */
+.browser-shell.is-compact .browser-address > .browser-play-chip { display:flex; width:auto; min-width:68px; justify-content:center; align-items:center; gap:6px; flex:none; height:30px; padding:0 13px 0 11px; border-radius:15px; background:var(--accent); color:var(--bg); font-size:12px; font-weight:600; white-space:nowrap; animation:fcIn .2s ease-out; }
+.browser-shell.is-compact .browser-address > .browser-play-chip:hover:not(:disabled) { background:var(--accent); color:var(--bg); filter:brightness(1.08); box-shadow:0 6px 18px rgba(var(--acc-rgb),.32); }
+.browser-shell.is-compact .browser-address > .browser-play-chip:disabled { opacity:.75; }
+
+@media (max-width:1200px) {
+  .browser-shell.is-compact .browser-chrome { --aw:380px; }
+}
+/* Too narrow to keep the address in the middle: it follows the tabs in the row instead */
+@media (max-width:900px) {
+  .browser-shell.is-compact .browser-tabs { margin-right:0; }
+  .browser-shell.is-compact .browser-address-wrap { position:relative; top:auto; left:auto; transform:none; order:3; flex:0 1 360px; width:auto; }
+  .browser-shell.is-compact .browser-address-wrap.is-typing { width:auto; flex-basis:60vw; }
+  .browser-shell.is-compact .browser-tab { min-width:40px; }
+  /* The Luna pill keeps its play mark but loses its word, so the URL still has real room in a narrow row. */
+  .browser-shell.is-compact .browser-address > .browser-play-chip { min-width:30px; width:30px; padding:0; gap:0; }
+  .browser-shell.is-compact .browser-address > .browser-play-chip span { display:none; }
+}
+@media (prefers-reduced-motion:reduce) { .browser-luna-pop,.browser-play-chip { animation:none; } .browser-luna-rail-modes,.browser-shell.is-compact .browser-address-wrap { transition:none; } }
+
+/* Music import in the capsule: a plain round button like its neighbours, no breathing */
+.browser-shell.is-compact .browser-address > .browser-playlist-import { animation:none; box-shadow:none; color:#93939d; }
+.browser-shell.is-compact .browser-address > .browser-playlist-import:hover { color:var(--accent); }
+
+/* The capsule talks (2.8.1): a notice grows out of the address capsule as frosted glass, like the dock's glass parts,
+   says its line, and melts back into the address. Short notices show a 3 s line that runs out underneath. */
+.browser-talk { position:fixed; top:var(--luna-web-notice-top,80px); left:50%; z-index:450; box-sizing:border-box; display:flex; align-items:center; gap:8px; height:40px;
+  width:min(600px,calc(100vw - 24px)); min-width:0; max-width:calc(100vw - 24px); padding:0 6px 0 7px; border-radius:20px; overflow:hidden;
+  background:rgba(22,22,26,.58); -webkit-backdrop-filter: var(--glass-1); backdrop-filter: var(--glass-1);
+  border:1px solid rgba(255,255,255,.17); box-shadow:var(--glass-light),0 12px 32px rgba(0,0,0,.5);
+  transform:translateX(-50%); animation:browserTalkIn .16s ease-out both; }
+@keyframes browserTalkIn { from { opacity:0; } to { opacity:1; } }
+.browser-talk-icon { display:grid; place-items:center; flex:none; width:26px; height:26px; border-radius:13px; background:rgba(var(--acc-rgb),.18); color:var(--accent-soft); box-shadow:inset 0 0 0 1px rgba(var(--acc-rgb),.25); }
+.browser-talk-text { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; color:#f2f2f4; cursor:text; padding-right:4px; }
+.browser-talk > button { flex:none; height:28px; padding:0 12px; border-radius:14px; font-size:12px; color:#e4e4ea; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.16); white-space:nowrap; }
+.browser-talk > button:hover:not(:disabled) { background:rgba(255,255,255,.13); }
+.browser-talk > button.is-primary { background:var(--accent); border-color:transparent; color:var(--bg); font-weight:600; }
+.browser-talk > button.is-primary:hover:not(:disabled) { filter:brightness(1.08); background:var(--accent); }
+.browser-talk > button:disabled { opacity:.5; }
+.browser-talk > .browser-talk-close { display:grid; place-items:center; width:28px; padding:0; background:transparent; border-color:transparent; color:#a8a8b2; }
+.browser-talk.is-error { border-color:rgba(226,75,74,.45); }
+.browser-talk.is-error .browser-talk-icon { background:rgba(226,75,74,.2); color:#f3a3a2; box-shadow:inset 0 0 0 1px rgba(226,75,74,.3); }
+.browser-talk.is-ask .browser-talk-icon,.browser-talk.is-work .browser-talk-icon { background:rgba(255,255,255,.08); color:#e4e4ea; box-shadow:inset 0 0 0 1px rgba(255,255,255,.14); }
+.browser-talk.is-info::after,.browser-talk.is-work::after { content:""; position:absolute; left:14px; right:14px; bottom:3px; height:2px; border-radius:2px; background:rgba(var(--acc-rgb),.75); }
+.browser-talk.is-info::after { transform-origin:left; animation:browserTalkTime 3s linear both; }
+.browser-talk.is-work::after { width:30%; right:auto; animation:browserTalkWork 1.3s ease-in-out infinite; }
+@keyframes browserTalkTime { from { transform:scaleX(1); } to { transform:scaleX(0); } }
+@keyframes browserTalkWork { from { transform:translateX(-10%); } to { transform:translateX(260%); } }
+@media (prefers-reduced-motion:reduce) { .browser-talk,.browser-talk::after { animation:none!important; } }
+
+/* Mini web video (film dock shape): the page's native window covers this square; before the video is found it shows a speaker. */
+.web-mini-dock .web-mini-surface{background:#000;display:grid;place-items:center;color:var(--muted)}
+.web-mini-dock .web-mini-back{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;margin-right:4px;white-space:nowrap}
+
+html.luna-web-notices .clip-offer{position:fixed;top:var(--luna-web-import-top,80px);max-width:calc(100vw - 24px);box-sizing:border-box}
+html.luna-web-notices .toast{position:fixed;top:var(--luna-web-toast-top,80px);max-width:calc(100vw - 24px);box-sizing:border-box}

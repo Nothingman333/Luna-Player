@@ -1,0 +1,133 @@
+/* Birlikte izle: same surfaces as the player's audio/subtitle panel (.tracks) and Luna tokens. */
+.wp-pop {
+  position: absolute; right: -40px; bottom: calc(100% + 64px); width: 330px; padding: 16px;
+  background: rgba(38,38,42,0.97); border-radius: 6px; box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+  display: flex; flex-direction: column; gap: 10px; font-size: 14px; color: var(--text); z-index: 30;
+  transform-origin: calc(100% - 66px) 100%; animation: wp-in 160ms cubic-bezier(0.23,1,0.32,1);
+}
+@keyframes wp-in { from { opacity: 0; transform: translateY(6px) scale(0.98); } }
+.wp-pop h4 { font-family: Sora, sans-serif; font-size: 17px; font-weight: 600; margin: 0; }
+.wp-mut { color: var(--muted); font-size: 13px; line-height: 1.45; margin: 0; display: flex; align-items: center; gap: 8px; }
+.wp-field { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--muted); }
+.wp-field input, .wp-row input {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; color: var(--text);
+  font: inherit; font-size: 14px; height: 34px; padding: 0 10px; min-width: 0;
+}
+.wp-row input { flex: 1; }
+.wp-field input:focus, .wp-row input:focus { outline: none; border-color: var(--accent); }
+.wp-row { display: flex; gap: 8px; align-items: center; }
+.wp-row.end { justify-content: flex-end; }
+.wp-btn {
+  height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid var(--line); color: var(--text);
+  font-size: 13.5px; font-weight: 500; white-space: nowrap; transition: transform 0.12s, background 0.15s;
+}
+.wp-btn:hover { background: rgba(255,255,255,0.08); }
+.wp-btn:active { transform: scale(0.97); }
+.wp-btn.fill { background: var(--accent); border-color: var(--accent); color: #1a0d03; }
+.wp-btn.fill:hover { filter: brightness(1.08); }
+.wp-btn.danger { background: #c0392b; border-color: #c0392b; color: #fff; }
+.wp-btn.sm { height: 26px; padding: 0 10px; font-size: 12.5px; }
+.wp-btn.ghost { border-color: transparent; color: var(--muted); }
+.wp-btn:disabled { opacity: 0.5; pointer-events: none; }
+.wp-btn:focus-visible, .wp-item:focus-visible, .wp-em:focus-visible, .wp-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wp-hr { height: 1px; background: var(--line); margin: 2px 0; }
+.wp-link {
+  display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; padding: 5px 5px 5px 10px; font-size: 12.5px; color: #ddd;
+}
+.wp-link span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+.wp-item {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px; text-align: left;
+  color: var(--text); font-size: 14px; width: 100%;
+}
+.wp-item:hover { background: rgba(255,255,255,0.07); }
+.wp-item.danger { color: #ff8a80; }
+.wp-sure { background: rgba(192,57,43,0.12); border: 1px solid rgba(255,138,128,0.3); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+.wp-sure p { margin: 0; font-size: 13px; line-height: 1.4; }
+.wp-sure .wp-row { justify-content: flex-end; }
+.wp-people { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow-y: auto; }
+.wp-people li { display: flex; align-items: center; gap: 10px; padding: 5px 4px; }
+.wp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wp-name small { color: var(--muted); margin-left: 6px; font-size: 12px; }
+.wp-av {
+  width: 22px; height: 22px; border-radius: 11px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600; background: #7cc4ff; color: #0a1a26;
+}
+.wp-av.host { background: var(--accent); color: #1a0d03; }
+.wp-spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); flex: none; animation: wp-spin 0.8s linear infinite; }
+@keyframes wp-spin { to { transform: rotate(360deg); } }
+
+/* chat button on the bar, with an unread dot */
+.wp-chatbtn { position: relative; }
+.wp-dot { position: absolute; top: 9px; right: 8px; width: 9px; height: 9px; border-radius: 5px; background: var(--accent); box-shadow: 0 0 0 2px #000; }
+
+/* right-hand chat panel: the video keeps its size, only the player controls move left */
+.wp-chat {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 300px; z-index: 20;
+  background: rgba(38,38,42,0.97); border-left: 1px solid var(--line); box-shadow: -8px 0 30px rgba(0,0,0,0.45);
+  display: flex; flex-direction: column; color: var(--text);
+  animation: wp-slide 220ms cubic-bezier(0.23,1,0.32,1);
+}
+@keyframes wp-slide { from { transform: translateX(100%); } }
+.wp-chat-open .root .bottom, .wp-chat-open .root .top { right: 300px; transition: right 220ms cubic-bezier(0.23,1,0.32,1), opacity 0.25s; }
+.wp-chat header { padding: 14px 14px 12px; border-bottom: 1px solid var(--line); }
+.wp-chat-head { display: flex; align-items: center; justify-content: space-between; }
+.wp-chat-head b { font-family: Sora, sans-serif; font-size: 16px; font-weight: 600; }
+.wp-x { width: 30px; height: 30px; border-radius: 15px; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.wp-x:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+.wp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.wp-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 2px 3px; border-radius: 99px; background: rgba(255,255,255,0.07); font-size: 12.5px; }
+.wp-msgs { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 9px; user-select: text; }
+.wp-msgs > :first-child { margin-top: auto; }
+.wp-m { font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; animation: wp-msg 180ms ease-out; }
+@keyframes wp-msg { from { opacity: 0; transform: translateY(4px); } }
+.wp-m.sys { color: var(--muted); font-size: 12.5px; text-align: center; }
+.wp-who { font-weight: 600; margin-right: 6px; color: #7cc4ff; }
+.wp-who.host { color: var(--accent); }
+.wp-m.me .wp-who { color: var(--accent-soft); }
+.wp-inbox { padding: 10px; border-top: 1px solid var(--line); }
+.wp-inp { display: flex; align-items: center; gap: 2px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px 2px 10px; }
+.wp-inp:focus-within { border-color: var(--accent); }
+.wp-inp input { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; color: var(--text); font: inherit; font-size: 14px; height: 32px; padding: 0; user-select: text; }
+.wp-em { font-size: 16px; padding: 2px 3px; border-radius: 4px; transition: transform 0.12s; }
+.wp-em:hover { transform: scale(1.2); }
+.wp-em:active { transform: scale(0.92); }
+
+.wp-float { position: fixed; bottom: 140px; font-size: 30px; z-index: 60; pointer-events: none; animation: wp-up 2.2s ease-out forwards; }
+@keyframes wp-up { to { opacity: 0; transform: translateY(-160px); } }
+
+/* host approval: top centre, on every screen */
+.wp-request {
+  position: fixed; top: 18px; left: 50%; translate: -50% 0; z-index: 9000; display: flex; align-items: center; gap: 12px;
+  background: rgba(38,38,42,0.98); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px;
+  box-shadow: 0 10px 34px rgba(0,0,0,0.55); color: var(--text); max-width: min(560px, calc(100vw - 32px));
+  animation: wp-drop 200ms cubic-bezier(0.23,1,0.32,1);
+}
+@keyframes wp-drop { from { opacity: 0; transform: translateY(-8px); } }
+.wp-request > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.wp-request b { font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wp-request small { color: var(--muted); font-size: 12.5px; }
+.wp-request .wp-av { width: 30px; height: 30px; border-radius: 15px; font-size: 13px; }
+
+.wp-scrim { position: fixed; inset: 0; z-index: 9100; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.wp-dialog {
+  width: min(440px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 20px;
+  display: flex; flex-direction: column; gap: 14px; color: var(--text); box-shadow: 0 16px 48px rgba(0,0,0,0.6);
+  animation: wp-in 180ms cubic-bezier(0.23,1,0.32,1);
+}
+.wp-dialog h3 { font-family: Sora, sans-serif; font-size: 18px; font-weight: 600; margin: 0; }
+
+.wp-toast {
+  position: fixed; top: 18px; left: 50%; translate: -50% 0; z-index: 8900; display: flex; align-items: center; gap: 8px;
+  background: rgba(38,38,42,0.97); border: 1px solid var(--line); border-radius: 6px; padding: 9px 16px; font-size: 14px;
+  color: var(--text); box-shadow: 0 8px 24px rgba(0,0,0,0.5); max-width: calc(100vw - 32px); animation: wp-drop 180ms ease-out;
+}
+.wp-toast.wait { top: 64px; }
+
+/* a narrow window with the chat open: the film title gives its room to the buttons */
+@media (max-width: 1100px) { .wp-chat-open .root .c-title { visibility: hidden; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .wp-pop, .wp-chat, .wp-m, .wp-request, .wp-dialog, .wp-toast { animation: none; }
+  .wp-float { display: none; }
+}

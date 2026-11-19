@@ -5,7 +5,9 @@
 .browser-address-wrap { position:relative; display:flex; flex:1; min-width:100px; }
 .browser-address-wrap > .browser-address { flex:1; min-width:0; position:relative; }
 .browser-address.is-pretty input { color:transparent; caret-color:transparent; text-shadow:none; }
-.browser-address-view { position:absolute; left:38px; right:112px; top:0; bottom:0; display:flex; align-items:center; gap:2px; overflow:hidden; white-space:nowrap; pointer-events:none; font-size:12px; }
+/* The view lives inside .browser-addr-field, so it ends where the real input ends: extra address-bar
+   buttons (reading view, extensions, Luna pill) can never sit on top of the URL text. */
+.browser-address-view { position:absolute; inset:0; display:flex; align-items:center; gap:2px; overflow:hidden; white-space:nowrap; pointer-events:none; font-size:12px; }
 .browser-address-view b { font-weight:500; color:#ececf0; flex:none; max-width:70%; overflow:hidden; text-overflow:ellipsis; }
 .browser-address-view i { font-style:normal; color:#6d6d78; overflow:hidden; text-overflow:ellipsis; min-width:0; }
 .browser-address-view i::before { content:"  "; white-space:pre; }
@@ -231,7 +233,7 @@ body.web-tab-dragging .browser-tab { cursor:grabbing; }
 /* ---- tools menu room ----------------------------------------------------------------------------- */
 .browser-tools-pop { max-height:calc(100vh - 160px); overflow-y:auto; scrollbar-width:thin; }
 
-@media(max-width:900px) { .browser-top-sites,.browser-continue { grid-template-columns:repeat(2,minmax(0,1fr)); } .browser-address-view { right:96px; } }
+@media(max-width:900px) { .browser-top-sites,.browser-continue { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:700px) { .browser-play-luna span { display:none; } .browser-play-luna { padding:0 10px; } .browser-start-clock > span,.browser-start-clock { font-size:9px; } .browser-start-clock b { font-size:12px; } .browser-top-sites,.browser-continue { grid-template-columns:1fr; } .browser-restore { flex-wrap:wrap; } .web-find { padding:7px 14px; } .web-find input { width:100%; flex:1; } .web-reader-bar { padding:8px 12px; } .web-reader-article { padding:26px 18px 70px; } .browser-engine-mark { min-width:26px; height:26px; } .browser-start-footer { flex-wrap:wrap; gap:10px 18px; } }
 @media(prefers-reduced-motion:reduce) {
   .browser-shell *,.browser-suggest,.browser-tab-menu,.web-find,.web-reader,.browser-play-luna { animation:none!important; transition:none!important; }
@@ -245,3 +247,21 @@ body.web-tab-dragging .browser-tab { cursor:grabbing; }
 .browser-reader.reader-luna{background:var(--bg,#0d0c0f);color:var(--text,#e8e6e4)}
 
 .reader-swatch.sw-luna{background:linear-gradient(135deg,#211913,#e8701a)}
+
+/* address bar feel: every button answers the pointer (soft colour change, a press that springs back) and a
+   button whose panel is open stays lit; the panels above the page only fade (they sit over the native page and
+   must keep their place), so moving from one to another cross-fades instead of popping */
+html .browser-shell .browser-address > button, html .browser-shell .browser-nav > button, html .browser-shell .browser-play-chip, html .browser-shell .browser-play-luna {
+  transition: color .16s ease, background-color .16s ease, transform .22s cubic-bezier(.2, .9, .3, 1.35), box-shadow .16s ease;
+}
+html .browser-shell .browser-address > button:hover:not(:disabled), html .browser-shell .browser-nav > button:hover:not(:disabled) { background: rgba(255, 255, 255, .08); color: #f1f1f4; }
+html .browser-shell .browser-address > button:active:not(:disabled), html .browser-shell .browser-nav > button:active:not(:disabled),
+html .browser-shell .browser-play-chip:active:not(:disabled), html .browser-shell .browser-play-luna:active:not(:disabled) { transform: scale(.88); transition-duration: .08s; }
+html .browser-shell .browser-address > button.on, html .browser-shell .browser-address > button[aria-pressed="true"], html .browser-shell .browser-address > button[aria-expanded="true"] {
+  color: var(--accent); background: rgba(var(--acc-rgb), .14);
+}
+html .browser-shell .browser-play-chip:hover:not(:disabled), html .browser-shell .browser-play-luna:hover:not(:disabled) { box-shadow: 0 6px 18px -6px rgba(var(--acc-rgb), .7); }
+html .browser-shell .browser-address > button svg { transition: transform .22s cubic-bezier(.2, .9, .3, 1.35); }
+html .browser-shell .browser-address > button:hover:not(:disabled) svg { transform: translateY(-1px); }
+.browser-tools-pop, .browser-extensions-pop, .browser-collections-pop, .browser-ctx-pop, .browser-suggest { animation: web-menu-fade .14s ease-out both; }
+@keyframes web-menu-fade { from { opacity: 0; } }

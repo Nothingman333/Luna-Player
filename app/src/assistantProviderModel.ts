@@ -44,6 +44,19 @@ export function providerPayloadError(r: unknown): string | null {
 
 const part = (name: string, args: Record<string, unknown>, error?: string) => ({ functionCall: { name, args }, ...(error ? { lunaArgsError: error } : {}) });
 
+/** A model caught in a loop writes the same line again and again: a line is kept once (empty lines are left alone). */
+export function dropRepeats(text: string): string {
+  const seen = new Set<string>();
+  const out = text.split("\n").filter((line) => {
+    const k = line.trim().toLocaleLowerCase();
+    if (!k || k.length < 4) return true;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 /** An OpenAI-compatible answer in Gemini's shape (`candidates[0].content.parts`). Covers array content,
  *  empty content with tool_calls, the legacy function_call, refusals and reasoning-only answers. */
 export function fromOpenAi(r: any) {
@@ -51,11 +64,21 @@ export function fromOpenAi(r: any) {
   const m: any = choice?.message ?? (typeof choice?.text === "string" ? { content: choice.text } : {});
   const parts: any[] = [];
   const meta: AnswerMeta = {};
-  const text = openAiText(m.content);
+  // a local reasoning model (Qwen3, DeepSeek-R1…) can put its thinking inside the answer as <think>…</think>: never shown
+  let text = openAiText(m.content).replace(/<think>[\s\S]*?(?:<\/think>|$)\s*/gi, "").trim();
+  // a small local model sometimes writes its tool call as text (<tool_call>{…}</tool_call>) instead of a real call
+  const written: any[] = [];
+  if (!Array.isArray(m.tool_calls) || !m.tool_calls.length) {
+    text = text.replace(/<tool_call>\s*([\s\S]*?)\s*(?:<\/tool_call>|$)/gi, (_all, body) => {
+      try { const c = JSON.parse(body); if (typeof c?.name === "string") written.push({ function: { name: c.name, arguments: c.arguments ?? c.parameters ?? {} } }); } catch { /* not a call */ }
+      return "";
+    }).trim();
+  }
+  text = dropRepeats(text);
   if (text) parts.push({ text });
   const refusal = typeof m.refusal === "string" && m.refusal.trim() ? m.refusal.trim() : undefined;
   if (!text && refusal) { parts.push({ text: refusal }); meta.refusal = refusal; }
-  const calls: any[] = Array.isArray(m.tool_calls) ? m.tool_calls : (m.function_call?.name ? [{ function: m.function_call }] : []);
+  const calls: any[] = Array.isArray(m.tool_calls) && m.tool_calls.length ? m.tool_calls : m.function_call?.name ? [{ function: m.function_call }] : written;
   for (const c of calls) {
     const name = c?.function?.name;
     if (typeof name !== "string" || !name.trim()) { meta.droppedCalls = (meta.droppedCalls ?? 0) + 1; continue; }
@@ -66,6 +89,8 @@ export function fromOpenAi(r: any) {
   if (finish === "length") meta.truncated = true;
   const reasoning = [m.reasoning_content, m.reasoning].find((x) => typeof x === "string" && x.trim());
   if (!parts.length && reasoning) meta.reasoningOnly = true;
+  // DeepSeek (thinking with tools) wants this reasoning back in the next request, or it answers 400: kept hidden on the first part
+  if (parts.length && reasoning) parts[0] = { ...parts[0], lunaReasoning: reasoning };
   return { candidates: [{ content: { role: "model", parts }, ...(finish ? { finishReason: String(finish) } : {}) }], lunaMeta: meta };
 }
 
@@ -110,6 +135,32 @@ export function emptyAnswerReason(meta: AnswerMeta | undefined, tr: boolean): st
   return undefined;
 }
 
+/** Small local models can forget a closing bracket (Gemma ends with `}\n}` where `}\n]\n}` belongs) or leave a
+ *  trailing comma. Only the structure is repaired, never a value; text cut inside a string stays unreadable. */
+function repairJsonBrackets(text: string): string | null {
+  const closers: string[] = [];
+  let out = "", inString = false, escaped = false;
+  for (const c of text) {
+    if (inString) {
+      out += c;
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"') inString = false;
+    } else if (c === '"') { inString = true; out += c; }
+    else if (c === "{" || c === "[") { closers.push(c === "{" ? "}" : "]"); out += c; }
+    else if (c === "}" || c === "]") {
+      if (!closers.includes(c)) return null;
+      out = out.replace(/,\s*$/, "");
+      while (closers[closers.length - 1] !== c) out += closers.pop();
+      closers.pop();
+      out += c;
+    } else out += c;
+  }
+  if (inString) return null;
+  out = out.replace(/,\s*$/, "");
+  return out + closers.reverse().join("");
+}
+
 /** The JSON object in a model's text answer: a ```json fence is preferred, otherwise the outermost {…}.
  *  Throws a clear error (not "Unexpected end of JSON input") when there is none or it does not parse. */
 export function extractJsonObject(text: unknown): any {
@@ -122,7 +173,13 @@ export function extractJsonObject(text: unknown): any {
     try {
       const value = JSON.parse(candidate.slice(start, end + 1));
       if (value && typeof value === "object" && !Array.isArray(value)) return value;
-    } catch { /* try the next candidate */ }
+    } catch {
+      const repaired = repairJsonBrackets(candidate.slice(start, end + 1));
+      try {
+        const value = repaired && JSON.parse(repaired);
+        if (value && typeof value === "object" && !Array.isArray(value)) return value;
+      } catch { /* try the next candidate */ }
+    }
   }
   throw new Error(/[{}]/.test(raw) ? "The AI answer's JSON could not be read" : "The AI answer had no JSON");
 }

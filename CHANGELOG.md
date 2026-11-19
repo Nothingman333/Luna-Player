@@ -1,3 +1,541 @@
+## 3.5.4CC
+
+- Genel denetim: cam pencereler açılış animasyonunda camını kaybetmiyor (tüm cam sınıfları için tek kural). Mini ses kutusu, transkript menüsü ve güncelleme penceresi de aynı camı kullanıyor; düğmeden büyüyerek açılıp yerine küçülerek kapanıyor.
+- 13 sekme konsol hatası olmadan açılıyor; boşta arka plan çağrısı yok.
+- Testler güncel koda uyduruldu: 60 test grubu geçiyor.
+
+## 3.5.3CC
+
+- Sinema görünümü: cam efektleri tek sisteme bağlandı (kontrol, panel, perde), camın üst kenarında ince projektör ışığı; oynatıcı kontrolleri filmin üstünde cam bir adada. Daha hissedilir hareket: afişe basınca detay sayfası afişten büyüyerek açılır, sekmeler gidilen yöne kayar, menüler ve pencereler yükselerek açılır, düğmeler basınca hafifçe çöker, 2× gibi göstergeler kısa bir vuruşla belirir, afişler sırayla gelir. Detay sayfası kapanırken açıldığı afişe geri küçülür; film sayfasındaki cam düğmeler afişin rengini alır; menü ve panel köşeleri iç içe uyumlu. Düğme menüye dönüşür (kutu genişlemesi): düğmenin ya da afişin kendi kutusu, köşeleriyle birlikte, açılan pencereye ya da film sayfasına genişler; film sayfası açılırken arkadaki ana sayfa görünür kalır, siyah boşluk çıkmaz. Sekmeler ve Film/Müzik/Kitap arasında eski sayfa geri çekilerek solarken yenisi gidilen yönden aynı anda kayarak gelir, arada boş kare olmaz. Genişleyen kutu daha sakin hareket eder (sayfa ~0,75 sn, menü ~0,5 sn); köşeleri yol boyunca büyük ve yuvarlak kalır, kenarında yumuşak bir gölge ve ince cam çizgisi taşır, sonunda pencerenin köşesine oturur. Ana sayfadaki büyük vitrinden film sayfası da kutu olarak açılır. Luna Web'de Luna simgesi ana başlıktaki yerinde durur; Web ile Film/Müzik/Kitap arasında sayfa (açık bir site yokken) yumuşakça geçer ve seçim hapı Web'den kayarak döner. Üç nokta menüleri, analiz seçenekleri, arkadaş puanları ve film sayfasındaki kutular cam oldu; arkadaş puanları artık üstteki kutunun altında kalmaz. Cam her yerde: oynatıcı menüleri (senkron, altyazı arama, birlikte izle), Keşfet filtresi, Web menüleri ve üst çubuğu, müzik çubuğu ve diğer açılır kutular aynı camı kullanır. Yüklenirken Keşfet ve Kitap rafları başlık satırlarıyla birlikte iskelet gösterir, kartlar gelince sayfa zıplamaz. Ayarlar, Koleksiyonlar, Bağlantı, bildirimler, arama, Detaylar ve "Bu akşam ne izlesem?" açtıkları pencereye düğmenin yerinden büyüyerek dönüşür, kapanınca o düğmeye geri küçülür. Üst çubuk ve ana sayfadaki film alanının düğmelerinde iOS tarzı sıvı cam (Glisse; komut paletinden kapatılabilir). Film/Müzik/Kitap/Web ve üst sekmelerde seçim balonu yeni seçeneğe kayarak gider; mod değişince sayfa da o yöne kayar. Bir filmden geri çıkınca ana sayfa kaldığın yerde ve aynı filmde durur (önceden en üste atlıyordu). Küçük etiketler büyük harften cümle düzenine geçti.
+- Birlikte izle (1. adım): oynatıcıdaki 👥 düğmesiyle oda açılır ve bir davet linki oluşur. Linke tıklayan kişi adını yazıp katılmak ister, oda sahibi onaylar. Biri katılınca sağda sohbet paneli açılır (mesaj ve tepkiler); kimse yokken sohbet görünmez. Oda sahibi katılanı çıkarabilir, kontrolü yalnız kendine ya da herkese verebilir. "Odayı kapat" deyince herkes çıkar ve o link bir daha çalışmaz. Luna sunucusu yok, router'da port açılmaz, bağlantı uçtan uca şifrelidir ve video gönderilmez. Oynat/duraklat/sarma eşitlemesi sonraki adımda gelecek.
+- Filmde seçilen dublaj dili hatırlanır: menüden seçtiğin dil hemen kaydedilir ve film tekrar açılınca (web akışı, torrent, başka kopya) sitenin varsayılan dilinin yerine o gelir.
+- Bir filmin birden çok kopyası varken torrent kopyası silinince kartı kopyalar arasında kalmaz.
+- Boşluk basılıyken çıkan 2× göstergesi ekranın tam ortasında.
+- Film sayfasında (kütüphanede olmayan filmlerde de) beğeni puanı değiştirilebilir: 👍 ya da 👎'ye tekrar basınca puan balonu açılır, bir kez daha basınca oy kalkar.
+- Asistan: DeepSeek gibi modeller film adını yılsız yazsa da listedeki film adları tıklanabilir film olarak görünür.
+- Asistan cevabında sağ tık: seçili metni ya da cevabın tamamını kopyala.
+- Bildirimler: hazırlanan altyazılar zil panelinin üstünde canlı ilerleme ve kalan süreyle görünür; bildirimler dosya adı yerine bölüm adını kullanır. Çeviri de böyle: "Çevir" deyince stüdyo kapanır, ilerleme zilde görünür, bitince bildirim gelir. Çeviride yapay zekâ bozuk cevap verirse o parça 3 kez yeniden istenir, yine olmazsa yalnız o parça orijinal kalır ve çeviri sürer; bildirim metni tam okunur. Çevir sekmesinde çeviren yapay zekâ (kayıtlı profillerden) ve efor seçilir: Gemini ve OpenAI düşünen modellerinde 4 kademe, Claude ve DeepSeekte düşünme açık/kapalı; varsayılan düşük. Özel sağlayıcılarda (DeepSeek) cevap 2500 tokende kesiliyordu, çeviride 8192 oldu. "Aslına yakın (dil öğrenmek için)" çeviri aynı dildeki normal çevirinin üstüne yazmaz; ayrı dosya ve "dil öğrenme" etiketli ayrı satır olur.
+- Podcast ve sesli kitap altyazısı iki dilde: altyazı menüsündeki "Çifte altyazı" ikinci dili seçer ya da stüdyonun Çevir sekmesini mevcut altyazıyla açar (çeviri alt satır olarak eklenir, ana altyazı değişmez); seçilince duyulan satır ve iki yanındaki ikişer satır, her birinin altında çevirisiyle görünür. Görünüm altyazı menüsünden seçilir: alt alta (varsayılan) ya da yan yana. Altyazı menüsü yenilendi: "1" ana altyazı, "2" ikinci dil rozeti; görünüm küçük önizlemeli kartlarla; dosya adı yerine okunur ad.
+- Zile basınca sağ üstteki açılır bildirimler kapanır; bildirimlerde altyazı işleri bölüm kapağını, resmi olmayanlar türünün simgesini gösterir.
+- Kitaplar kendiliğinden tanınır: dosya adı temizlenir, yazar ayrılır, Open Library / Google Books'tan kapak ve açıklama gelir (yalnız kesin eşleşmede).
+- Tarayıcıdan inen dosyalar türüne göre indirme klasörünün içinde Luna Video / Luna Müzik / Luna Kitap'a taşınır ve o kütüphaneye düşer; 7 dakikadan uzun seste podcast, müzik ya da sesli kitap diye sorulur.
+- Nereden açılırsa açılsın her kitap Kitaplığım'da kalıcı olarak hatırlanır; kitap sayfasında düzenleme ve raflar ⋯ menüsünde.
+- Arkadaş puanları penceresi yalnız ortalamanın ve avatarların üstünde açılır, puan satırını kapatmaz; afişte senin puanın ile TMDB etiketi yan yana durur.
+- Dosyası olmayan afiş yalnız soluk görünür; ayrı "Dosya yok" yazısı ve ↓ işareti kaldırıldı. Kartın üzerine gelince açılan satırdaki arkadaş fotoğrafı kaldırıldı (arkadaşlar kartın altında yazıyor).
+- Bilgisayarda olmayan filmin sayfasında ana tuş "İndir" olur, "Bu film bilgisayarında yok" kutusu kalktı; indirme başlayınca ve bitince tuş Oynat / Devam et olur.
+- Torrentten gelen filmin dosyası silinince film kütüphaneden gitmez, "indirilmedi" olarak kalır ve sayfasında İndir çıkar.
+- Film sayfasında İndir, İzleme seçeneklerinde seçili kaliteyi doğrudan indirir (kaynak seçme ekranı açılmaz); kopya seçimi yalnız bilgisayarda olan kopyaları gösterir.
+- Puan verilmiş filmde İzledim'e tekrar basınca puan sorulmaz.
+- Sesli Luna uyandırma sözünü dinlerken film sesi artık birkaç saniyede bir kısılıp açılmaz; ses yalnız Luna gerçekten dinlerken/konuşurken kısılır.
+- Asistan (sesli de) artık ileri/geri sarar, baştan başlatır, hızı değiştirir, altyazı ve ses dilini değiştirir/kapatır, sonraki bölümü açar; kitapta sayfa çevirir ve yazıyı büyütür/küçültür.
+- Asistan "Hangisi hakkında?" seçimini sorudan tahmin eder (kitap / şarkı / film); sesli soru panel açılırken kaybolmaz, yeni konuşmada yeniden sorulur.
+- Asistan bilgisayarda olmayan filmi/bölümü eklentilerden bulup izletir ya da indirir (kalite seçilebilir); indirmeleri listeler, duraklatır, sürdürür, iptal eder; dışarıdan açılan kitapları da kitaplıkta görür.
+- Kitaplar › Sesli kitaplar: bilgisayardaki sesli kitap dosyaları (MP3, M4B…) "Bilgisayardan ekle" ile eklenir; indirilen sesli kitaplarla birlikte "Benim sesli kitaplarım"da listelenir.
+- Kitaplar’daki "Dosya aç" artık MP3, M4B gibi sesli kitap dosyalarını da açıyor; dosya Sesli kitaplar’a eklenip çalmaya başlıyor.
+- Bilgisayardan eklenen sesli kitaplar Kitaplar ana sayfasındaki Kitaplığım rafında da kart olarak görünüyor; tıklayınca çalıyor.
+- Sesli kitap kartları da kitaplar gibi tanınıyor: dosya adından yazar, doğru ad ve kapak bulunuyor.
+- Sesli kitap kartlarına sağ tık menüsü: Dinle, kapak ve bilgileri düzenle, koleksiyona ekle, kitaplıktan çıkar, dosyayı sil. "Yazar Kitap Yazar" biçimindeki dosya adları da doğru ayrılıyor.
+- Sesli kitap kartlarında da "i" düğmesi var; kitabın detay sayfasını açar, oradan Oku dinlemeyi başlatır.
+- Sesli kitabın detay sayfası "SESLİ KİTAP" ve dosya türünü (MP3…) gösteriyor; düğme Oku değil Dinle.
+- Sesli kitap kartlarında yüzde yerine filmlerdeki gibi kalan süre yazıyor ("1 sa 20 dk kaldı").
+- Kitap detayındaki "Ayrıntılı inceleme" artık Luna Web’i açmıyor, asistana soruyor. Üstteki Kitap düğmesinin simgesi Luna Web’deki açık kitap simgesiyle aynı.
+- Sesli kitap ve podcast çalarken üst çubukta filmlerdeki not defteri var: o anki dakikaya not alınır, nota tıklayınca oraya atlanır.
+- Fare alttaki oynatma çubuğunun üzerindeyken çubuk kaybolmaz; fare çekilince birkaç saniye sonra gizlenir.
+- Bilgisayardaki videolarda zaman çubuğu küçük resimleri arka planda önceden hazırlanır; üzerine gelince en yakın kare hemen çıkar.
+- Altyazı penceresinde arama kutusundaki yazıyı fareyle sürükleyip seçince pencere artık kapanmıyor.
+- Altyazı araması kütüphanede film tanınmışsa TMDB kimliğiyle yapılır; Türkçe ad yüzünden altyazı bulunamaması bitti. Elle isimle arama eskisi gibi.
+- Film kartındaki İzledim düğmesi artık ayrıntılardaki Bitirdim gibi filmi Bitirdiklerim satırına da ekler; İzlemedim deyince oradan çıkar.
+- Sesli kitap ve podcast ekranında (internetteki bölümler dahil) stüdyoda yapılan ya da dosyanın yanındaki .srt/.vtt altyazı müzik sözleri gibi akar, satıra tıklayınca oraya atlanır; üst çubukta Altyazı stüdyosu düğmesi var, stüdyoda oluşturulan altyazı kapanınca hemen görünür.
+- Altyazı stüdyosunun model listesinde, model klasörüne elle eklenen modeller de görünür; Türkçe için eğitilmiş İTÜ modeli "Türkçe · İTÜ turbo" adıyla ve açıklamasıyla çıkar.
+- Altyazı stüdyosunda "Ekran kartı (Vulkan)" motoru: Intel Arc, AMD ve NVIDIA kartlarda çalışır, işlemciden kat kat hızlıdır ve kuruluysa varsayılan seçilir. Ekran kartı NVIDIA olmayan bilgisayarda CUDA seçeneği gizlenir.
+- Altyazı stüdyosu internetteki podcast bölümlerinden de altyazı çıkarır: Podbee bölümleri kendi ses adresinden, YouTube ve yt-dlp ile açılan diğer siteler oynatmadaki gibi yt-dlp üzerinden okunur (önce "Ses çıkarılamadı" hatası veriyordu).
+- Altyazı stüdyosunda "Altyazı oluştur"a basınca pencere kapanır; iş arkada sürerken ekranın üstünde ilerleme halkası görünür, tıklayınca stüdyo yeniden açılır.
+- Sesli kitap/podcast ekranında altyazı arama ve "Sesi takip et" üst çubuğa taşındı. Altyazı işi kendi bölümünün ekranında üstte halka olarak, başka ekranlarda sağ üstte birkaç saniye görünen kart olarak gösterilir; bildirimlerde dosya adı yerine bölümün adı yazar.
+- İzlendi tiki afişte ayrı rozet yerine TMDB etiketinin içinde durur.
+- Kitapta fare tekerleğiyle sayfa çevrilir; otomatik tanımada dosyadaki Türkçe yazılış korunur.
+- Sesli kitap ve podcast ekranında üst çubukta altyazı seçici var: stüdyoda yapılan, çevrilen ya da temizlenen altyazılar, dosyanın yanındaki .srt/.vtt dosyaları ve Kapalı listelenir; seçim her bölüm için hatırlanır, varsayılan en son yapılan altyazıdır.
+- Altyazı seçicide Luna'nın önbelleğindeki altyazı silinir; senin dosyanın yanındakiler önce sorulur (İptal: yalnız listeden kalkar). "Yeniden oluştur" stüdyoyu açar.
+- Altyazı seçiciden seçili altyazı zaman damgasız, satır satır .txt olarak dışa aktarılır.
+- Sesli kitap ve podcast altyazısında arama kutusu satırları süzer, "Sesi takip et" otomatik kaydırmayı açar/kapatır.
+- İnternetteki bölümlerde ses önce yt-dlp ile 8 parçalı hızlı indirilir (olmazsa eski yol); sırada "Ses indiriliyor · %40 · ~3 dk kaldı" gibi yüzde ve kalan süre görünür, yazıya dökme aşamasında da.
+- Luna açılırken stüdyo önbelleğinde 10 dakikadan eski, yarım kalmış Whisper geçici dosyaları (wav, srt, indirilen ses) temizlenir.
+- Altyazı hazır olunca ya da başarısız olunca bildirim çıkar (başlık + "Altyazı hazır" ya da hata).
+- 20 dakikadan uzun kayıtlar 10 dakikalık parçalar hâlinde yazıya dökülür ve tek altyazıda birleştirilir; iptal ya da çökme olursa biten parçalar saklanır, aynı iş kaldığı yerden sürer (saklanan parçalar 3 gün sonra silinir).
+- Kitap analizi dilden bağımsız: yorumlar önce Goodreads'ten, kalan kısım 1000Kitap'tan gelir; analiz hangi siteleri okuduğunu yazar.
+- Keşfet'te film penceresi takılmadan açılır: içerik hazır olunca tek seferde yükselir, yerine oturunca arkası bulanık koyu cam olur (bulanıklık önceden hiç çalışmıyordu). Karttaki çift odak çizgisi kalktı.
+- İzleme seçenekleri pencere açılır açılmaz "Aranıyor…" ile görünür; her kalitenin köşesinde izlemeden indiren ↓ düğmesi var.
+- Cam görünümü glisse tarzında (az buzlu, ince kenar ışığı); küçük yüzen düğmelerde mercek kırılması. Menülerde seçim plakası satırdan satıra kayar.
+- Rozetler, kopya kartları ve oy düğmeleri temayla aynı ("Abonelikle" çipleri gibi); "Kopyaladığın bağlantı" kutusundaki Kapat büyüdü.
+- İndirilenler'de biten torrent filmleri de listelenir.
+- Sayfa kenarında kaydırınca Apple tarzı esneme; kaydırırken camlar sadeleşir, sayfa ve pencere içi kaydırma akıcı.
+- Tarayıcının adres çubuğunda ve düğmelerinde üzerine gelme, basma ve panel geçiş animasyonları.
+- Bildirimlerde indirilen filmlerin afişi görünür (eski bildirimlerde de, sürüm adından bulunur).
+- Zil düğmesi çark gibi dönmez; üstüne gelince gerçek bir zil gibi hafifçe sallanır. Diğer yuvarlak düğmelerin simgesi dönmek yerine hafifçe büyür.
+- Ayarlar penceresi çarkın olduğu köşeden, sekmeden ve zıplamadan açılır; soldaki liste sırayla gelir.
+- Tarayıcıda sağ tık menüsü kapanınca arkasında siyah kutu kalmaz; menü sayfanın bulanık görüntüsüyle gerçek cam olur, imleçten büyüyerek açılır, seçim plakası satırlar arasında kayar.
+- Keşfet vitrininde yalnız görünen arka plan hareket eder, pencere açıkken durur; oyuncu fotoğraflarının yükleniyor parıltısı fotoğraf gelince durur. [external]
+- Bütün açılır menüler ve paneller aynı yumuşak açılışla gelir; camın bulanıklığı ve gölgesi ilk kareden vardır, sonradan yüklenmez. Arkadaş puanları da artık birden belirmez.
+- Oynatıcıda Görüntü ↔ Ses geçişi kayan bir anahtarla yapılır, panel yeni boyuna yumuşakça büyür; görüntü kaydırıcıları yeni, sade bir kartta ve sıfırdan dolan çizgiyle.
+- Oynatıcıdaki 3'ten geri sayma tuşu kaldırıldı; sahne ve kelime defteri tam ekran pencere yerine tuşunun üstünde küçük bir panel olarak açılır.
+- Menüler, paneller ve Ayarlar penceresi açıldıkları gibi yumuşakça kapanır; Ayarlar camı da açılırken bulanıklığını kaybetmez.
+- Ayarlar ve Koleksiyonlar listesinde glisse menü akışı: imlecin altında bir plaka kayar, seçilen bölümün plakası yeni seçime kayarak gider.
+- Liquid glass değerleri glisse referansına çekildi (bükülme .77, renk ayrışması 1.45, 3px buzlanma, kenar parlaklığı .25); film penceresinin arkasında artık glisse merceği var.
+- glisse menüleri gibi: ⋯ tuşuyla açılan menü tuşun yerinde açılır, tuş menüye dönüşür ve kapanınca menü tekrar tuşa dönüşür; küçük menüler büyürken camını kaybetmez. Analiz seçenekleri, arkadaş puanları, açılır seçim kutuları ve paylaşım gibi diğer açılır pencereler de tuşlarından büyür.
+- Üst çubuk tek tasarımda: arama, Bağlantı, Koleksiyonlar, bildirim ve ayarlar düğmeleri mod seçicinin kapsülünü (soluk beyaz zemin, ince kenar) kullanır; aşağı kaydırırken sağdaki düğmelerin griye dönüp titremesi giderildi.
+- Hero’daki ve film sayfasındaki cam düğmeler artık gerçekten buzlu: açılış animasyonu bittikten sonra da açık kalıp camın arkasını görmesini engelliyordu; kenarlarındaki pürüzlü beyaz çizgi de bundandı.
+- Cam düğmelerin kenar parlaklığı (rim) kapatıldı: geç yüklenip kenarlarda pürüzlü beyaz çizgi bırakıyordu.
+- Cam düğmeler üst çubuktaki kapsüllerle aynı ince kenarı taşır; hero’daki Detaylar, Fragman, oklar ve “Bu akşam ne izlesem?” aynı buzlu camdadır; kaydırırken cam düğmeler griye dönüp geri gelmez.
+- Film penceresi tek parça buzlu cam: arkasındaki ayrı glisse camı pencere büyürken ölçülüp yalnız bir şeridi kaplıyordu (kalanı saydamdı) ve her kaydırmada bütün ekranı yeniden çizip takılmaya yol açıyordu; kaldırıldı. Açılış animasyonu artık sonunda takılı kalıp pencerenin bulanıklığını kapatmıyor. Asıl neden perdeydi: pencerelerin arkasındaki karartma perdesinin solma animasyonu sonunda takılı kalıyor ve üstündeki bütün pencerelerin (film penceresi, diğer pencereler, galeri) buzlanmasını kapatıyordu; düzeltildi.
+- Pencerelerin içindeki menüler de tuştan doğar: film penceresindeki ⋯ (Luna Analiz) gibi bir pencerenin içindeki tuşlar dönüşmeye hiç katılmıyordu; artık menü tuşun yerinde açılır, tuş menüye dönüşür ve kapanınca geri döner.
+- Pencere içinde açılan menülerin “iki kez açılıyor” gibi görünmesi düzeltildi: menüyle birlikte büyüyen kenar çizgisi, buzlu pencerenin içinde ekrana göre değil pencereye göre yerleşip menünün yanında ayrı bir kutu gibi akıyordu.
+- “+ Listeye” artık geri de alır: filmin bulunduğu listede ✓ görünür, tıklayınca o listeden çıkar
+- “Çıkınca haber ver” zili yalnız henüz çıkmamış filmlerde ve dizilerde görünür; zil ve “Asistana sor” tuşu yanındaki tuşlarla aynı camı kullanır
+- Şarkı, podcast ve sesli kitapta aynı oynatıcı: videosu olan her şeyde (YouTube’dan gelen şarkılar dahil) beğen tuşlarının yanında video tuşu; ±10 sn ve hız menüsü şarkılarda da var (şarkıların hızı ayrı hatırlanır)
+- Videolu podcast bölümlerinde beğen tuşunun yanında video tuşu: video tam ekran değil, sol tarafta kapağın yerinde aynı saniyeden oynar (bölüm başa sarmaz); tekrar basınca kapağa döner
+- Film penceresinde arkadaş puanları listesi artık izleme sağlayıcılarının logolarının altında kalmıyor
+- Podcast ve sesli kitap ekranındaki defter tam ekran pencere yerine filmlerdeki gibi tuşun altında küçük panel olarak açılır; ses paneli ve altyazı seçici de filmlerdeki gibi tuştan büyüyerek açılıp geri kapanır (camları artık bulanık)
+- F11 tam ekran uyarısı yukarıdan kayarak gelir ve kayarak gider
+- Video tuşu: müzik çalmaya devam eder, kapağın yerinde bulanık kapak üstünde “Video yükleniyor…” ve dönen çember görünür; video hazır olunca o karttan büyüyerek, sesle aynı saniyeden gelir. YouTube şarkısında ses hiç durmaz: video sayfanın içinde sessiz oynar ve çalan sesin saniyesini izler; küçük oynatıcıya geçince video kapanmaz, kayarak küçük oynatıcıya iner, geri dönünce yeniden yüklenmeden büyür
+- Ana sayfada izlemeye başladığın filmde “Fragman” tuşu gösterilmez
+- Podcast videosunda altyazı artık resmin üstüne basılmaz (sözler zaten sağda); video açılınca resim ve ses aynı saniyeden birlikte başlar
+- Podcast ve sesli kitapta oynat tuşunun iki yanında 10 sn geri / 10 sn ileri; ses düzeyinin yanında YouTube’daki gibi hız menüsü (0,5×–2×), seçilen hız sonraki bölümlerde de kalır
+- Eksik 12 İngilizce arayüz metni eklendi [external]
+
+## 3.5.2CC
+
+- İndirilmemiş filmlerde sağ tık "Kaynak ekle…"; diğerlerinde "Kaynağı değiştir…"; "Bu film bilgisayarında yok" penceresinde torrent / web kaynak seçimi.
+- Diskte olmayan dosyayı silerken "Silinemedi" hatası yerine kütüphaneden kaldırılır.
+- Siteden gelen videolarda donma azaltıldı: ileri sarma önizlemesi açılışta ve yükleme sırasında aynı siteden ayrıca veri çekmez.
+- Film elle "İzlendi" işaretlenince de puan sorulur.
+- DeepSeek asistan komutları: düşünen modelde araç çağrısından sonra 400 hatası düzeltildi.
+- DeepSeek: Düşünme düğmesi DeepSeek düşünmesini açıp kapatır; kısa, ona özel sistem notu.
+- API profillerinde hazır DeepSeek seçeneği: adres ve model kendiliğinden dolar, yalnız anahtar girilir.
+- Sesli asistan: daha kısa, direkt ve sıcak (liste yok, en çok 1-2 öneri); yanıt yazısı ses bitene kadar ekranda kalır; film oynarken de "Luna" diye seslenilebilir.
+- Asistan "YouTube'da X kanalına git" gibi isteklerde siteyi açmak yerine orada arar.
+- Kitaplarda yazı %500'e kadar büyütülebilir; yazısını pikselle sabitleyen EPUB'larda da harfler büyür (önce yalnız satır arası açılıyordu).
+- Kitap okurken web videosu alttaki küçük oynatıcıda görünür (siyah kalmıyordu); "Siteye dön" kitaptan da siteye götürür, kitap kaldığı yerde bekler.
+
+## 3.5.1CC
+
+- Her siteden "Luna'da oynat": uzun ses (10 dk+) podcastlere, kısa ses müziğe, video oynatıcıya gider. Web videosunda sağ tık "Podcastlere taşı".
+- Podbee desteği: bölüm sayfası doğrudan çalar, podcast sayfası bütün bölümleriyle podcastlere eklenir.
+- Podcast sayfası çalma listesi gibi: büyük kapak, çal, abone ol, bölümlerde arama ve tablo.
+- Abone olunan podcastlerin yeni bölümleri kontrol edilir: zile bildirim düşer, tıklayınca çalar; rafta "Yeni" etiketi.
+- Podcast sağ tık menüsü: en yeni bölümü çal, sitesini aç, bağlantıyı kopyala, abonelikten çık. YouTube dışı bölümlerde "Sitede aç".
+- Siteden gelen podcast bölümleri kaldığı yerden devam eder; Luna yenilenince video ekranı açılmaz.
+- Müzik ve kitaplarda İndirmeler sekmesi, Beğendiklerim yanında İndirilenler; indirilen şarkılarda yeşil indirildi işareti. YouTube listeleri gerçek adlarıyla gelir.
+
+## 3.5.0CC
+
+- Yakında: henüz çıkmamış film ve bölümlerde İzle düğmesi yok; "Henüz çıkmadı · tarih" ya da "Şimdilik sinemalarda · dijitalde tarih" yazar. Festival tarihleri artık çıkış sayılmaz, kısa süreli İzle görünmesi düzeldi.
+- Kaynak ekle penceresinde "Web'de ara" en üstte ve doğru yazımla.
+- İndirmelerde durdur/başlat tek düğme; dosya adına tıklayınca oynar. Aktif indirme en üstte, bitenlerde durdur düğmesi yok.
+- Bildirimler film penceresinin üstünde görünür, 3 saniyede kaybolur; aynı indirme bildirimi iki kez gelmez.
+- Kopya bölümler filmlerdeki gibi üst üste kart: üzerine gelince açılır, her kopyada Yerel/Web etiketi var.
+- Seçtiğin ses ve altyazı dili dizi başına ve genel olarak hatırlanır.
+- Keşfet sürüklemesinde takılma azaltıldı (bildirim ve disk yazımı sürükleme sırasında bekletilir). Hâlâ tam akıcı değil.
+- Luna Closed 3.5.0 lunaplayer.org'da yayınlandı (tek sürüm). Closed hata bildirimine "Hata ayıklama geçmişini ekle" kutusu eklendi; bu dev kaynağında yok.
+
+## 3.4.9CC
+
+- Kütüphanedeki bir dosya açılamazsa (bozuk ya da desteklenmiyor) oynatıcı boş kalmaz; o film ya da bölümün eklenti kaynakları açılır, oradan oynatılabilir ya da indirilebilir.
+- Yeni bildirimler sağ üstte birkaç saniye görünen, tıklanabilir pop-up'lar olarak çıkar (indirme başladı, indirme bitti, yeni bölüm) ve zilde de kalır. İndir'e basınca artık görünür bir bildirim gelir.
+- Bölüm bilgi penceresinde o bölüm için alınmış sahne ve kelime notları görünür; nota tıklayınca o ana gidilir.
+- Bilgisayarında olmayan film ve bölümlerde eklentilerden 4K / 1080p / 720p izleme seçenekleri: her kalitenin en çok paylaşılan kaynağı, boyutu ve paylaşan sayısıyla; tıklayınca oynar, sağ tıkla indirilir. ⋯ menüsünde "Kaynak ekle…" (indirilmişlerde "Başka kaynak ekle…") torrent ve web kaynaklarını açar, seçilen kaynak ayrı kopya olarak indirilir.
+- Oynatıcıda önceki bölüm düğmesi (bilgisayarda yoksa eklentiden) ve sağda cam görünümlü Bölümler paneli: sezonlar, izlendi/oynuyor/bilgisayarında/eklentiden/çıkış tarihi durumları, tıklayınca oynatma.
+- Bölüm kartlarındaki "i" artık bölümün kendi detayını açar: TMDB görseli, özeti, yönetmen, senarist, konuk oyuncular, puan ve izlendi düğmesi.
+- Bölüm adları Türkçe çevirisi olmayınca İngilizce TMDB adından gelir ("4. Bölüm" yerine gerçek ad); boş özet de İngilizceden tamamlanır.
+- OpenSubtitles: ara sıra gelen 403 yanıtı artık "API anahtarı geçersiz" sayılmaz; Luna kendisi birkaç kez yeniden dener. Anahtar hatası yalnız sunucu anahtarı reddettiğini söylerse gösterilir.
+- İzlemeye devam et: daha önce izlendi işaretlenmiş bir bölüm ya da film yeniden açılıp yarıda bırakılınca listede yine görünür.
+- Kütüphane sayfasında "Bitirdim" (✓) düğmesi basılınca yeşile döner; film ya da dizinin tamamı izlendi olunca 1–10 puan penceresi açılır.
+- "Kayıtlı video açılamadı" penceresinde, eklenti varsa filmin torrent kaynakları da listelenir.
+- Keşfet sıraları fareyle basılı tutup yana sürüklenebilir; sona yaklaşınca yeni afişler yüklenir (Sana özel sıraları sevdiğin türlerden devam eder).
+- Keşfet › Sana özel: düğmeye ikinci kez basınca kapanır; en altta sevdiğin türlerden sayfa sayfa yüklenen sonsuz bir liste var (Film/Dizi seçimine uyar).
+- Takip kontrolü her çalıştığında debug günlüğüne "follow_check" kaydı düşer (yalnız sayılar).
+- Zil › Takip ettiklerin: "Şimdi kontrol et" düğmesi bütün takipleri hemen TMDB'ye sorar; yanında son kontrol zamanı görünür.
+- Keşfet › Sana özel: diziler için iki yeni sıra: beğendiğin ve izlediğin dizilere göre "Sana uygun diziler" ve sevdiğin türlerden en beğenilen diziler. Kategoriler’de Film ya da Dizi seçilince Sana özel de yalnız onu gösterir.
+- Torrentten yalnız video ve altyazı dosyaları iner; videosu olmayan (program vb. içeren, sahte olabilecek) kaynak hiç indirilmez ve uyarı verilir.
+- Torrent kaldırma penceresi ekranın ortasında açılır. Bölüm kaynak penceresinde de İzle'deki gibi “Webde ara” var.
+- Bilgisayarda olmayan bölüm izlendi işaretlenince kütüphanedekiler gibi “✓ İzlendi” etiketi gösterir.
+- Bölümün çıkıp çıkmadığı daha sıkı: TMDB tarihi ABD günü olduğu için bölüm ertesi günden itibaren çıkmış sayılır; çıkış günü “Bugün çıkıyor · kaynak henüz olmayabilir” yazar (kaynak listesi yine açılabilir).
+- Beğendim sonrası çıkan puan balonu, altındaki “Bu film bilgisayarında yok · İndir” kutusunun arkasında kalmıyor.
+- Metinle torrent araması (Knaben): kaynak listesine yazdığın arama Knaben'de olduğu gibi aranır (bölüm “S01E07” biçimine çevrilir), eklentiler bir şey bulamazsa da sorulur. Sonuçlar eklentilerinkiyle aynı listede, en çok paylaşılan üstte; aynı torrent iki kez görünmez. Ayarlar › Eklentiler'den kapatılabilir; Knaben'e yalnız arama metni gider.
+- Kaynak listesinde aramanın tamamı değiştirilebilir: ad ve sezon/bölüm tek kutuda (“VisionQuest S1B7”; S01E07, S1:B7, 1x07 de olur). Ara deyince Luna o başlığı bulur, bulunanı gösterir ve eklentilere yeniden sorar (IMDb numarası da yazılabilir). Sorulan eklentiler görünür; henüz çıkmamış bölümde çıkış tarihi yazar.
+- Bilgisayarda olmayan bölüm kartına sağ tıklayınca menü açılır: Kaynakları göster, En iyi kaynakla oynat, İzlendi/İzlenmedi olarak işaretle, Bölüm adını kopyala, TMDB'de aç. Eklentiden izlenip biten bölüm de izlendi sayılır.
+- Biten indirmeler ana sayfada bir kez görününce oradan kalkar (İndirmeler sayfasında durur); bitince zil bildirimlerine “İndirme tamamlandı” düşer, tıklayınca İndirmeler açılır.
+- Luna Analiz varsayılan olarak kapalı gelir; açıp kapatma hatırlanır, analiz başlayınca kendiliğinden açılır.
+- Uzantı yönetimi Chrome’daki uzantılar sayfası gibi: arama, Geliştirici modu, Uzantılarım / Klavye kısayolları menüsü ve simge, sürüm, açıklama, Ayrıntılar, Kaldır ve aç/kapat düğmesi olan kartlar. Mağaza bağlantısı yapıştırıp “İncele” deme adımı kaldırıldı.
+- Her uzantının Ayrıntılar sayfası var: açıklama, sürüm, boyut, kimlik, arka plan çalışanı, izinler, site erişimi, klavye kısayolları, uzantı seçenekleri, web sitesi, Chrome Web Store sayfası, kaynak klasörü ve kaldırma.
+- Geliştirici modunda paketlenmemiş klasör veya ZIP/CRX yüklenebiliyor, uzantılar tek tek ya da “Güncelle” ile hep birlikte yeniden yükleniyor.
+- Chrome Web Store’dan kurulum Google Çeviri, Grammarly gibi eski 1024 bit anahtarlı eklentilerde “CRX geliştirici imzası doğrulanamadı” hatası vermiyor.
+- Mağazanın “Chrome’a ekle” düğmesi .crx dosyası indirmeye kalkınca indirme yerine Luna’nın “eklensin mi?” kartı açılıyor.
+- Sayfa çevirisi Chrome’daki gibi Google Çeviri ile yapılıyor: sayfanın dili kendiliğinden bulunuyor, her dildeki sayfa çevrilebiliyor ve model indirme beklenmiyor. İnternet yoksa cihazdaki yerel çeviri devreye giriyor. Seçili metin çevirisi de aynı yolu kullanıyor.
+- Sabitlenen eklentinin paneli artık Luna penceresinin içinde, Chrome’daki gibi simgenin altında açılıyor ve açık sayfayı tanıyor: Dark Reader gibi eklentiler “about:” yerine gezdiğin siteyi görüyor ve siteye özel ayar yapılabiliyor. Panel sayfaya ya da Luna’ya tıklayınca, simgeye yeniden basınca veya sekme değişince kapanıyor.
+- Adres çubuğundaki eklentiler (yapboz) düğmesi yanındaki düğmelerle aynı renk, boyut ve çizgide; daha sade bir yapboz simgesi var.
+- Stremio eklentisi (ör. Torrentio) kuruluyken film sayfasındaki “İzle” düğmesi eklentilerdeki kaynakları açıyor. web araması artık kaynaklar panelinde “Webde ara” olarak duruyor.
+- Eklenti kaynaklarından torrent oynatırken “Bilgiler alınıyor”da takılma düzeldi: Torrentio kaynaklarının çoğu tracker adresi olmadan geliyordu ve Luna dosya listesini yalnız DHT ile arıyordu. Artık her torrente bilinen açık tracker’lar ekleniyor; kimse paylaşmıyorsa 2 dakika sonra “başka bir kaynak dene” uyarısı çıkıyor.
+- Eklenti kaynakları en çok paylaşılandan (seed) en aza sıralanıyor.
+- Gölgeli altyazılar (Sinema ve Klasik sarı) Netflix’teki gibi pürüzsüz: kalın ve koyu siyah kenar yerine ince, yarı saydam bir kenar ve yumuşak bir gölge var.
+- Keşfet › Kategoriler’de seçili Film ya da Dizi’ye yeniden basınca seçim kalkıyor ve Keşfet’in genel sayfasına dönülüyor.
+- Dizi seçiliyken “Yeni başlayan diziler”, “Bu hafta yeni bölümü çıkan diziler” ve “Yakında başlayacak diziler”; Film seçiliyken “Yeni çıkan filmler” ve “Yakında” satırları var, seçtiğin türe göre. Genel Keşfet sayfasına da “Yeni başlayan diziler” eklendi.
+- Dizi ve film takibi: bir başlığın sayfasındaki zil düğmesiyle takip et. Luna takip ettiklerini birkaç saatte bir TMDB’den kontrol ediyor; yeni bölüm çıkınca ya da film yayımlanınca bildirim bırakıyor (Luna arkadayken Windows bildirimi de, Ayarlar’daki “bölüm” bildirimi açıksa).
+- Ayarlar düğmesinin yanında Bildirimler düğmesi: okunmamış sayısı, bildirim listesi (tıklayınca başlık açılıyor) ve sıradaki bölüm tarihiyle “Takip ettiklerin” listesi.
+- Dizi sayfasında TMDB’deki bütün sezonlar ve bölümler görünüyor; bilgisayarında olmayan bölümler soluk kartla duruyor. Tıklayınca o bölümün eklentilerdeki (ör. Torrentio) kaynak listesi açılıyor, hangisini oynatacağını sen seçiyorsun. Ayarlar › Oynatma ve bağlantılar’daki “Otomatik kaynak eşleştirme” açıksa Luna kaynağı kendisi seçip oynatıyor: önce en çok paylaşılan 1080p, yoksa en yakın kalite (720p, sonra 4K). Henüz yayımlanmamış bölümler çıkış tarihiyle gösteriliyor.
+- Oynatıcıdaki “Sonraki bölüm” (düğme, N tuşu ve bölüm bitince 8 saniyelik geri sayım) sıradaki bölüm bilgisayarında yoksa onun da kaynak listesini açıyor (otomatik eşleştirme açıksa kaynağı kendisi seçip oynatıyor); sezonun son bölümünden sonra yeni sezonun ilk bölümüne geçiyor.
+- Webden kaydedilmiş bir dizi bölümünün bağlantısı artık açılmıyorsa “Kayıtlı video açılamadı” yerine o bölümün eklentilerdeki kaynak listesi açılıyor (İzle’deki liste: Oynat / İndir); kaynak sayfasını açma seçeneği de duruyor.
+- Henüz yayımlanmamış bir bölüme “Sonraki bölüm” ya da bölüm kartıyla gidince “kaynak bulunamadı” yerine “Bu bölüm henüz çıkmadı · çıkış: 1 Ocak 2027” (tarih belli değilse onu) diyor; bölüm bitince çıkmamış bölüme geri sayım başlamıyor. Eski kayıtlı bölüm listeleri yayın tarihleriyle bir kez yenileniyor.
+- Torrentler sırayla iniyor: yeni bir bölüm ya da film oynatınca veya indirince ondan önceki yarım indirmeler duraklıyor, bütün bağlantı yenisine kalıyor. Yenisi bitince ya da kaldırılınca en son duraklatılan kendiliğinden devam ediyor. Duraklatılmış bir indirmeyi elle sürdürmek de onu öne alıyor; elle duraklatılan sıraya geri girmiyor. Luna açılınca kalan indirmelerden yalnız en yenisi sürüyor.
+
+## 3.4.8CC
+
+- Sabitlenen eklentiye tıklayınca eklentinin kendi paneli simgenin altında açılıyor. Tarayıcıda sekme açıkken “Luna penceresi kapalı” hatası verip hiç açılmıyordu.
+- Web bölümüne girince sabitlenen eklenti simgeleri hemen görünüyor; eskiden eklenti yöneticisini açmadan çıkmıyordu.
+- Chrome Web Store’da mağazanın kendi “Chrome’a ekle” düğmesi çalışıyor: Luna eklentiyi Google’dan alıp imzasını doğruluyor ve Chrome’daki gibi tek bir “Eklentiyi ekle” sorusuyla kuruyor. Ayrı “Luna’ya kur” düğmesi, yönetim ekranına geçiş ve mağaza ipucu kaldırıldı.
+- İndirme sürerken sekme kapatılabiliyor; indirme arka planda sürüyor ve İndirmeler’den izlenebiliyor. Sekme indirme bitince kendiliğinden tamamen kapanıyor.
+- Sayfa çevirisi tarayıcılardaki gibi çalışıyor: önce ekranda görünen kısım çevrilip hemen sayfaya yazılıyor, sonra sayfanın geri kalanı parça parça çevriliyor. Kaydırınca ya da sonradan gelen yazılar (akışlar, açılan menüler) kendiliğinden çevriliyor; sayfanın yalnız ilk bölümü çevrilip tekrar çevir’e basmak gerekmiyor.
+- Tarayıcıda sekme açıkken tepsi simgesine tıklamak veya “Luna’yı göster” Luna’yı yeniden öne getiriyor; klavye medya tuşları ve Upscaler altyazı penceresi de sekme açıkken çalışıyor. [external]
+
+## 3.4.7D
+
+- Eklenti düğmesi ve sabitlenen eklentiler artık okuma modu düğmesinin yanında, adres çubuğunun içinde duruyor; adres metni düğmelerin altında kalmadan kendi alanında kısaltılıyor.
+- Sabitlenen eklentilerin gerçek simgeleri görünüyor: 19/38 px manifest simgeleri ve paket simge tablosu birlikte okunuyor.
+- Sabitlenen bir eklentiye tıklanınca ayrı bir pencere veya sekme yerine, tıklanan simgenin altında çerçevesiz bir eklenti paneli açılıyor; sayfaya ya da araç çubuğuna dönünce kendiliğinden kapanıyor.
+- Sayfa sağ tık ve araçlar menülerinde “Orijinal dilinde göster / Özgün sayfaya dön” yalnız sayfa çevrildikten sonra görünüyor; çevrilmemiş sayfada yerini “Sayfayı çevir” alıyor.
+
+## 3.4.6C
+
+- Sayfa çevirisinden sonra adres çubuğundan veya sağ tıktaki “Orijinal dilinde göster” seçeneğinden özgün sayfaya dönebilirsin.
+- Adres çubuğundaki Eklentiler menüsünden kurulu eklentileri sabitleyebilir, sabitlemeyi kaldırabilir ve kendi arayüzlerini açabilirsin. Sabitleme tercihin saklanır.
+- Bildirimler açık tarayıcı menülerinin üzerini kapatmaz; dar pencerelerde eklenti menüsü ekrana sığar.
+
+## 3.4.5C
+
+- Web bildirimleri ve içe aktarma önerileri adres çubuğunun altında görünür; adresi kapatmaz.
+- Sağ tık menüsünden sayfa özgün diline döndürülebilir.
+- Yerel çeviri dil dosyaları cihazda kalıcı saklanır ve yeniden kullanımda doğrulanarak açılır.
+
+## 3.4.4C
+
+- Web’de seçili metin ve sayfa çevirisi cihazında çalışır; asistan sohbeti, API anahtarı veya token gerektirmez. Türkçe dahil sekiz dil desteklenir.
+- Dil dosyaları ilk kullanımda doğrulanarak indirilir ve sonraki kullanımlar için saklanır. İndirme ve çeviri durumu gösterilir; hata sonrası yeniden denenebilir.
+- Seçili metin çevirisi kaynak/hedef dil seçimi ve kopyalama düğmesi bulunan ayrı bir pencerede açılır. Sayfa çevirisinde özgün metne dönülebilir.
+
+## 3.4.3
+
+- Web koleksiyonlarında alıntılar tam metin, resimler büyütülebilir önizleme olarak açılır. Kaynak sayfa ve alıntının ilgili bölümü ayrı düğmeyle açılır.
+- Resim adresi eksik olduğunda sayfadaki gerçek görsel adresi alınır; eski eksik kayıtlar açıkça belirtilir.
+
+## 3.4.2C
+
+- Chrome Web Store sayfasından Luna’ya kur düğmesiyle ve yeni indirilen CRX paketleriyle doğrudan kurulum önizlemesine geçilir; İndirilenler bölümüne gitmek gerekmez. ZIP/CRX ve klasör seçimi korunur.
+- Web açılış sayfasından da koleksiyonlara ulaşılabilir. Aynı sitenin sayfaları, alıntıları ve medyaları tek açılır grupta toplanır.
+- Koleksiyon panelinden kayıt veya koleksiyon silinebilir; işlemden önce onay istenir. Aynı sayfanın seçili alıntıları birleştirilebilir.
+
+## 3.4.1C
+
+- Web koleksiyonları adres çubuğundan, sayfadan ayrılmadan açılan bir panelde gezilebilir. Kayıt açıldığında panel kapanır.
+- Aynı sayfadan farklı metin alıntıları kaydedilebilir; alıntı, resim, video ve ses kayıtlarının kaynak sitesi gösterilir.
+- Koleksiyonlardaki web bağlantıları açılırken koleksiyon penceresinin açık kalması düzeltildi.
+
+## 3.4.0C
+
+- Önceki Web oturumunu açarken kurtarma penceresi sayfaların tüm kaynaklarını beklemeden kapanır; sekmeler arka planda yüklenmeye devam eder.
+- Mini oynatıcı ve Web görünümünde fare imlecinin oynatıcı tarafından gizlenmesi düzeltildi.
+
+## 3.3.9C
+
+- Web sayfalarını, bağlantıları, resimleri, video ve ses bağlantılarını sağ tıkla mevcut koleksiyonlarına ekleyebilirsin.
+- Adres ve arama alanlarında sağ tıkla düzenleme, yapıştırıp gitme ve arama seçenekleri eklendi. Seçili metni kopyalayabilir veya tercih ettiğin arama motorunda arayabilirsin.
+- Kategori yüklemesi bağlantı hatasından sonra yeniden denenebilir; mikrofon kısayolu bırakıldığında bekleyen kayıt başlangıcı iptal edilir.
+
+## 3.3.8CC — 2026-10-28
+
+- Asistan: "tarayıcıyı aç", "web’i aç" Luna’nın tarayıcısını açıyor (önceden bu adda bir film arıyordu).
+- Asistan (yerel model): model aracı yazı olarak yazarsa (<tool_call>…) Luna onu gerçek araç çağrısı olarak çalıştırıyor; yazı cevapta görünmüyor.
+- Asistan (yerel model): model döngüye girip aynı satırı tekrar tekrar yazarsa tekrarlar atılıyor; yanıtların bir üst sınırı var.
+- Asistan: film, müzik ve kitap talimatlarının başında da emoji kullanmaması söyleniyor.
+
+## 3.3.7CC — 2026-10-28
+
+- Asistan: istenen şarkı arşivde ve listelerde yoksa YouTube’dan bulunup sormadan çalınıyor ("getireyim mi" kartı yok); "rahatlatıcı bir şey aç" gibi isteklerde de doğrudan çalıyor.
+- Asistan: emoji kullanmıyor ve cevabın sonuna "başka bir şey ister misin" gibi soru eklemiyor.
+- Asistan (yerel model): modele yalnız bulunulan bölümün araçları gönderiliyor (önceden her istekte ~37 bin karakterlik bütün araç listesi gidiyordu); kütüphane düzenleme araçları yalnız düzenleme isteğinde ekleniyor. "request exceeds" bağlam hatası ve yavaşlık bunun içindi.
+
+## 3.3.6CC — 2026-10-28
+
+- Sesli asistan: yanıt sesi için ElevenLabs desteği. Ayarlar › Sesli asistan › Ses servisi: kendi API anahtarınla hesabındaki seslerden biri ve model (Hızlı Flash v2.5 ya da En doğal Multilingual v2) seçilir. Hak biterse ya da bağlantı olmazsa Microsoft sesi okur. Kitap sesli okuma değişmedi.
+
+## 3.3.5CC — 2026-10-28
+
+- Sesli asistan: "Luna, …" diye seslenirken de asistan penceresinin yazı kutusu sesine göre hareket eden dalgaya dönüşüyor (önceden yalnız "Luna" deyip bekleyince çıkıyordu).
+
+## 3.3.4CC — 2026-10-28
+
+- Sesli asistan: model sesli konuştuğunu biliyor; yumuşak, nazik ve kısa konuşan, kullanıcının ne izleyip dinlediğini bilen bir arkadaş gibi yanıt veriyor. Liste dökmek yerine asıl merak edileni tek cümleyle söylüyor ("En son ne izledim?" sorusuna son izleneni söyler).
+
+## 3.3.3CC — 2026-10-28
+
+- Analiz: yorumlar İngilizce olsa da sonuç Türkçe yazılıyor (küçük yerel modeller isteğin sonunda ayrıca hatırlatılıyor).
+- Sesli asistan: asistan penceresi açıkken üstünde boş bir kutu (katman hatası) çıkmıyor; sesin durumu yalnız yazı kutusundaki dalgada gösteriliyor.
+
+## 3.3.2CC — 2026-10-28
+
+- Analiz (yerel model): "Yapay zekânın cevabı okunamadı" hatası düzeltildi. Kısa yorumlar ayıklanınca numaralar aralıklı kalıyor, küçük model ise cevabı 1, 2, 3 diye numaralıyordu; artık her grup modele 1’den numaralanıyor ve cevap Luna’da asıl yorumlara eşleniyor.
+
+## 3.3.1CC — 2026-10-28
+
+
+## 3.3.0CC — 2026-10-28
+
+- Analiz (yalnız yerel model): tek satırlık, sadece emoji olan ve tekrar eden yorumlar modele gönderilmeden yıldızlarından etiketleniyor; kalan yorumlar sayıya göre değil uzunluğa göre gruplanıyor (kısa yorumlar bir arada, uzun denemeler ayrı); bir film için okunan yorumlar hatırlanıyor, sonraki analizde yalnız yeni yorumlar okunuyor (son 30 eser). API ile çalışan modeller eskisi gibi.
+
+## 3.2.9CC — 2026-10-28
+
+- Analiz (yerel model): 30 yoruma kadar her şey düşünerek okunuyor; daha fazlasında yorum grupları hızlı (düşünmeden) okunup yalnız son özet düşünerek çıkarılıyor; 60 yorumun üstünde özet de hızlı modda. Böylece bağlam taşmıyor ve analiz kısalıyor.
+
+## 3.2.8CC — 2026-10-28
+
+- Analiz: yerel model (LM Studio) Letterboxd yorumlarını her zaman düşünme moduyla okuyor; sohbetin Düşünme ya da Flash ayarı buna karışmıyor.
+
+## 3.2.7CC — 2026-10-28
+
+- Analiz: Letterboxd sayfaları tamamen görünmeyen bir pencerede okunuyor; ekranda bir şey açılmıyor. Pencere yalnız gerçek bir "insan mısın" kontrolü çıkarsa öne geliyor.
+
+## 3.2.6CC — 2026-10-28
+
+- Analiz: Letterboxd sayfası açıldığı hâlde okunmuyordu (sayfa durumu yanlış çözülüyordu); artık sayfa yüklenir yüklenmez yorumlar okunup pencere kapanıyor.
+
+## 3.2.5CC — 2026-10-28
+
+- Analiz: Letterboxd sayfaları Luna tarayıcısının profiliyle (aynı çerezlerle), ekran dışında duran gerçek bir pencerede açılıyor; film bağlantısı (TMDB → Letterboxd) da bu yoldan bulunuyor. Sayfa 8 saniyede açılmazsa pencere ekrana gelir, kontrolü kullanıcı geçer. Her adım debug kaydına yazılıyor.
+
+## 3.2.4CC — 2026-10-28
+
+- Analiz: Letterboxd yorumları düz indirmeyi reddedince (403) Luna sayfayı görünmeyen bir tarayıcı penceresinde açıp yorumları oradan okuyor. Site "insan mısın" kontrolü isterse pencere öne gelir; kontrolü kullanıcı geçer.
+- Sesli asistan: Flash kapalıysa sesli istekler de Flash'sız, seçilen ayarla çalışıyor.
+
+## 3.2.3CC — 2026-10-28
+
+- Asistan (Flash ve sesli): cümlenin kalıbına değil anlamına bakıyor; "Google'da ara", "YouTube'da şu kanalı bul", "Spotify'a git" gibi istekleri nasıl söylenirse söylensin yeni sekmede açıyor.
+- Sesli asistan: "sevmedim / değiştir / başka bir şey aç" çalan şarkıyı değiştiriyor (aynı sanatçıdan ya da benzer tarzda); beğenilmeyen şarkı bir daha seçilmiyor. "Bunu beğendim" beğenilenlere ekliyor; durdur/sonraki/ses/"bu ne şarkı" da anlaşılıyor.
+- Sesli asistan: müzik ilk kelimeden itibaren kısılıyor ve Luna konuşmasını bitirene kadar arada yükselmiyor.
+- Sesli asistan: konuşurken yazı kutusunda yalnız sesine göre hareket eden dalga görünüyor.
+- "Web de X'e git" (boşluklu) artık tarayıcı isteği olarak anlaşılıyor.
+
+## 3.2.2CC — 2026-10-28
+
+- Sesli asistan: asistan penceresi açıkken sesle konuşunca yazı kutusu sesine tepki veren bir çizgiye dönüşüyor ve söyledikleri/cevap onun yanında görünüyor.
+- Sesli asistan: ayarlardaki seçimlerin hemen kaydedildiği yazıyor (Kaydet gerekmiyor).
+
+## 3.2.1CC — 2026-10-28
+
+- Sesli asistan: şarkı adları "(Official Video)", "[Lyrics]", "| kanal" gibi ekler olmadan gösterilip okunuyor.
+- Sesli asistan: Luna dinlerken, düşünürken ve konuşurken çalan müziğin sesi kısılıyor, bitince geri geliyor.
+- Sesli asistan: "Luna" duyulunca kısa bir ses çalıyor; ardından bir şey söylenmezse 8 saniyede kendiliğinden kapanıyor. Takılan bir adım 1 dakikada kendini bitiriyor.
+- Sesli asistan: "Luna" dinlenirken balonun altındaki küçük nokta yerine balonun çevresinde yumuşak bir halka yanıyor.
+
+## 3.2.0CC — 2026-10-28
+
+
+## 3.1.9CC — 2026-10-28
+
+
+## 3.1.8CC — 2026-10-28
+
+- Sesli asistan: "Tarkan" deyince "Tarık" çalıyordu. Yapay zekânın söylenmeyen bir ad eklemesi artık engelleniyor (söylenen kelimelere benzemeyen kısım atılıyor) ve YouTube'da adı geçen sanatçının şarkısı öne alınıyor.
+- Sesli asistan: kısa basılı tutma kaydı da artık WAV olarak alınıyor.
+
+## 3.1.7CC — 2026-10-28
+
+- Sesli asistan: yapay zekâya isteğin konuşmadan yazıya çevrildiği ve kelimelerin yanlış duyulmuş olabileceği söyleniyor; kastedileni anlayıp adları düzelterek uyguluyor ("Sezan Aksu" → Sezen Aksu, "tarikanın kuzu kuzu" → Tarkan - Kuzu Kuzu). Şarkılar "Sanatçı - Şarkı adı" biçiminde aranıyor.
+
+## 3.1.6CC — 2026-10-28
+
+- Sesli asistan: dinlerken, düşünürken ya da cevap okurken tekrar "Luna" dersen baştan başlıyor (cevap susar, yeni isteğini dinler).
+- Sesli asistan: tek başına "Luna" daha çabuk algılanıyor (kısa kelimeden sonra 0,45 sn sessizlik yetiyor).
+- Sesli asistan: şarkı eşleştirmesi tam kelimeyle yapılıyor ("tarika" artık "Tarikat" listesini açmıyor); YouTube'dan şarkı uzunluğundaki (1,5–8 dk) ilk sonuç çalınıyor, belgesel/konuşma videoları atlanıyor.
+- Sesli asistan: Web bölümünde küre artık sayfanın ve web balonunun üstünde.
+
+## 3.1.5CC — 2026-10-28
+
+- Sesli asistan: "Luna" diye uyandırdıktan sonra isteğin başında tekrar "Luna" dersen artık isteğin parçası sayılmıyor (tuşla konuşurken de).
+
+## 3.1.4CC — 2026-10-28
+
+- Sesli asistan: **"Luna" deyince dinleme** (Ayarlar → Sesli asistan, isteğe bağlı). "Luna, Sezen Aksu çal" ya da önce "Luna" deyip sonra isteğini söyle; sustuktan sonra (0,8 / 1,2 / 2 sn, seçilebilir) kendisi bitirir. Ses yalnız bu bilgisayarda Whisper ile dinlenir. Film oynarken dinlemez. Dinlerken asistan balonunda küçük bir nokta yanar.
+- Sesli asistan: küreye tıklayınca asistan penceresi açılıyor.
+- Sesli asistan: Web bölümünde küre sayfanın altında kalıyordu; artık sayfanın üstünde görünüyor ve web balonunun yerine geçiyor.
+
+## 3.1.3CC — 2026-10-28
+
+- Sesli asistan: şarkı istekleri doğrudan çalıyor (müzik çalarda), kart, soru ya da web araması yok. Yer söylenmezse önce kütüphane ve listelerine, yoksa YouTube'a bakılır; "webde" dersen doğrudan YouTube'dan, "kütüphanemde" dersen yalnız kütüphaneden çalar. Cevap yalnız "Çalıyorum: …".
+- Asistan: "Nerede aransın?" kartında Webde seçilince şarkılar için site listesi değil, çalma kartı (Çal / Kütüphaneye ekle ve çal) geliyor.
+
+## 3.1.2CC — 2026-10-28
+
+- Sesli asistan: asistan penceresi açıkken küre pencerenin altında kalıyordu; artık pencerenin başlığındaki Luna noktasının yerine geçiyor, söylediklerin hemen yanında görünüyor.
+
+## 3.1.1CC — 2026-10-28
+
+- Sesli asistan: sesle açılan asistan penceresi artık kapatılabiliyor.
+- Sesli asistan: asistan balonu kaybolup aynı yerde sese tepki veren küreye dönüşüyor (ayrı bir küre çıkmıyor).
+- "Nerede aransın?" kartına yazarak ya da sesle verilen cevap artık kartın cevabı sayılıyor; Whisper'ın yanlış duyduğu "Bebde", "Vep de" gibi söyleyişler de "Webde" olarak anlaşılıyor. Whisper'a Luna'nın sık kelimeleri ipucu olarak veriliyor.
+- Gizlilik: ses kaydının baytları artık debug günlüğüne yazılmıyor.
+
+## 3.1.0CC — 2026-10-28
+
+- Yeni: **Sesli asistan** (yerel model). Ayarlar → Hesaplar ve anahtarlar → Sesli asistan. Kısayolu (varsayılan Ctrl+Space) basılı tut, konuş, bırak: asistan balonu sesine tepki veren bir küreye dönüşür, söylediklerin yanında cam bir balonda görünür, cevap kısa ve sesli gelir ("Açıyorum." gibi). Sohbet penceresi yalnız cevap bir kart gerektirdiğinde açılır. Yazıya çevirme bu bilgisayarda Whisper ile yapılır; altyazı stüdyosuyla aynı kurulum kullanılır, ikinci kez indirilmez. Yanıt sesi kitap sesli okumadaki doğal seslerden seçilir.
+
+## 3.0.9CC — 2026-10-27
+
+- Flash: "Nerede arayayım?" seçimi Luna kart tasarımına geçti (başlık, iki seçenek kartı, açıklamalı); ayrı mesaj balonu kalktı.
+- Flash açıkken Düşünme anahtarı kapalı görünüyor ve altında "Flash karar veriyor" yazıyor.
+
+## 3.0.8CC — 2026-10-27
+
+- Asistan (yerel model): Yanıt biçimi menüsüne **⚡ Flash** modu eklendi. Açıkken Luna mesaja önce düşünmeden hızlıca bakar: basit soru ve işler düşünmeden yapılır, karmaşık işlerde düşünme kendiliğinden açılır. Şarkı, film ya da kitap istenip nerede aranacağı söylenmediyse "Kütüphanemde / Webde" düğmeleri çıkar, yalnız seçilen yerde aranır. Yanıtın altında ⚡ ya da 🧠 hangi yolun seçildiğini gösterir. Flash kapalıyken her şey eskisi gibi çalışır.
+
+## 3.0.7CC — 2026-10-27
+
+- Asistan: web komutları: "webde beni X'e götür", "X sitesini aç" siteyi açıyor; "youtube'dan son şarkısını aç" önceki konuşmadan kişiyi bulup YouTube'da en yenilere göre sıralı arıyor. Vikipedi, IMDb, Letterboxd, Reddit, Ekşi gibi siteler de anlaşılıyor.
+
+## 3.0.6CC — 2026-10-27
+
+- Asistan: "arat" istekleri artık yapay zekâdan geçiyor; önceki konuşmaya bakıp "onun en iyi albümünü arat", "bunu arat" gibi göndermeleri gerçek adlarla değiştirerek tarayıcıda arıyor. Yapay zekâya ulaşılamazsa isteğin kendi kelimeleri aranıyor.
+
+## 3.0.5CC — 2026-10-27
+
+- Asistan: "internette" demeden de arama yapıyor: "mick gordon diye arat", "X'i arat", "X diye ara" tarayıcıda arama sekmesi açıyor. Yalnız "ara" (ör. "annemi ara") arama sayılmıyor.
+
+## 3.0.4CC — 2026-10-27
+
+- Asistan: "internette X diye arat", "tarayıcıda X'i ara" gibi istekler artık sohbette cevaplanmıyor; Luna'nın tarayıcısında, seçili arama motoruyla arama sekmesi açılıyor.
+
+## 3.0.3CC — 2026-10-27
+
+- Asistan: sayfa notunun açılır kutusu pencerenin dışına taşıyordu; artık mesajın genişliğinde, pencerenin içinde açılıyor.
+- Asistan: okunan sayfa "Kaynaklar" satırında tekrar gösterilmiyor (zaten sayfa notunda var).
+- Asistan (küçük pencere): yanıt altındaki öneri düğmeleri (Yeniden üret, Önemli noktaları açıkla…) küçük haplara dönüştü, daha az yer kaplıyor.
+
+## 3.0.2CC — 2026-10-27
+
+- Asistan (yerel model): Qwen gibi küçük modeller cümle ortasına Çince karakter karıştırıyor ve Luna'nın [ALINTI SONU …] işaretini cevaba kopyalıyordu. Modele bunları yapmaması söyleniyor; yine de gelirse cevaptan temizleniyor (sohbette Çince/Japonca/Korece yazılmışsa karakterlere dokunulmuyor).
+
+## 3.0.1CC — 2026-10-27
+
+- Asistan (yerel model): "Düşünme" anahtarı kapalıyken bile Qwen3 düşünmeye devam ediyordu; model adı "Qwen 3 4B" gibi boşluklu yazılınca tanınmıyordu. Artık "Qwen 3", "qwen3", "qwen-3" gibi her yazılış tanınıyor ve düşünme gerçekten kapanıyor.
+
+## 3.0.0CC — 2026-10-27
+
+- Asistan: "Okunan sayfa" bilgisi Kopyala / Sabitle satırına taşındı; tek satır, üzerine gelince ya da klavyeyle odaklanınca tamamı görünüyor.
+- Asistan: aynı YouTube videosunda adres ekleri (&t= gibi) değişince yanlışlıkla "Sayfa değişti" uyarısı çıkıyordu; düzeltildi.
+- Asistan (yerel model): Qwen3'ün düşünmeyi kapatma komutu (/no_think) modelin kendi talimatına uygun olarak mesajın sonuna ekleniyor (önceden sistem talimatına ekleniyordu).
+
+## 2.9.9CC — 2026-10-27
+
+- Açılır menüler: yukarı açılan kısa menüler (ör. asistanda Yanıt biçimi) düğmeden kopup ekranın üstünde asılı kalıyordu; artık düğmenin hemen üstünde açılıyor.
+- Asistan: Yanıt biçimi menüsüne "Düşünme" anahtarı eklendi (yerel ve özel sunucu profillerinde). Kapalıyken Qwen3 gibi modeller hızlı yanıt veriyor, açıkken cevaptan önce düşünüyor.
+
+## 2.9.8CC — 2026-10-27
+
+- Asistan (yerel model): Qwen3 modellerinde (LM Studio, Ollama) düşünme modu otomatik kapatılıyor (/no_think), basit sorulara çok daha hızlı yanıt geliyor. Bir yerel model düşünmesini yanıtın içine <think> olarak yazarsa o kısım gösterilmiyor.
+
+## 2.9.7CC — 2026-10-27
+
+- Web mini oynatıcı: duraklatıp yeniden başlatınca kayboluyordu (sayfanın "ses çalıyor" bilgisi bir an düşüyor, gizli sayfa bunu tekrar bildirmiyordu). Mini oynatıcı artık sen kapatana ya da siteye dönene kadar açık kalıyor; duraklat/oynat simgesi videonun gerçek durumunu gösteriyor.
+
+## 2.9.6CC — 2026-10-27
+
+- Ana sayfa slaytı: seçili çizgide ilerleme animasyonu görünmüyordu, çizgi hep dolu turuncu duruyordu. Sebep, seçili çizginin zeminini de turuncuya boyayan eski bir stil kuralıydı; zemin yeniden sönük, turuncu dolum soldan sağa ilerliyor ve bitince sıradaki slayta geçiyor.
+
+## 2.9.5CC — 2026-10-27
+
+- Ana sayfa slaytı: seçili çizgideki turuncu dolum alttaki gri çizgiyle tam üst üste oturmuyordu ve sol ucu düz görünüyordu; dolum artık genişliği artarak ilerliyor, iki ucu da yuvarlak ve çizgiyle aynı hizada.
+
+## 2.9.4CC — 2026-10-27
+
+- YouTube özeti (yerel model ve diğer sağlayıcılar): altyazı hiç gelmiyordu. Türkçe altyazı istendiğinde YouTube otomatik çeviriye "çok fazla istek" (429) diyor ve hiçbir altyazı inmiyordu; artık videonun kendi dilindeki altyazı, sonra İngilizce alınıyor.
+
+## 2.9.3CC — 2026-10-27
+
+
+## 2.9.2CC — 2026-10-27
+
+
+## 2.9.1CC — 2026-10-27
+
+- Asistan (yerel model ve diğer sağlayıcılar): YouTube videosunda altyazı çekilirken yeni bir animasyon görünüyor ("Videonun altyazısını çekiyorum"); yanıtın altındaki "Okunan sayfa" satırı altyazıdan okunup okunmadığını söylüyor ("Altyazıdan okundu" ya da "Altyazı alınamadı, yalnız sayfa metni").
+
+## 2.9.0CC — 2026-10-27
+
+- YouTube özeti (yerel model ve diğer sağlayıcılar): altyazı indirilip okunduktan sonra hemen siliniyordu; artık yarıda kalan bir indirmenin geride bıraktığı klasörler de 15 dakika sonra temizleniyor.
+
+## 2.8.9CC — 2026-10-27
+
+- Web mini oynatıcı: "Siteye dön" düğmesi geri geldi (yazılı, oklu); videonun açıldığı sekmeye döner. Yalnız web videolarının mini oynatıcısında.
+
+## 2.8.8CC — 2026-10-27
+
+- Asistan: sayfa şeridi küçük bir "✧ Sayfa" çipine dönüştü ve "Yanıt biçimi" satırına yerleşti (↻ güncelle, × ayır; ayrıntılar üzerine gelince). Küçük asistan penceresi biraz büyüdü, yanıtlara daha çok yer kalıyor.
+
+## 2.8.7CC — 2026-10-27
+
+- Asistan: yanıt gelince sohbet artık en alta kaymıyor; yanıtın başı görünür kalıyor, uzun yanıtı yukarıdan okuyabiliyorsun.
+- Asistan: "Ayır" artık sayfayı gerçekten ayırıyor; sonraki sorular sayfasız cevaplanıyor, "Sayfaya bağla" ile ya da sayfa hakkında bir şey sorunca yeniden bağlanıyor. Sayfa şeridi yazma kutusunun hemen üstüne taşındı.
+
+## 2.8.6CC — 2026-10-27
+
+- Web: tarayıcıda video oynarken başka bölüme geçince artık düz şerit yerine filmlerdeki gibi mini oynatıcı çıkıyor; küçük karede videonun kendisi oynuyor, oynat/duraklat, 10 sn geri/ileri, ilerleme çubuğu ve Web'e dön düğmesi var.
+- Asistan: Brave Search desteği. Ayarlar › Hesaplar ve anahtarlar'a Brave Search anahtarı girilirse yerel model (LM Studio, Ollama), OpenAI ve Claude profillerinde asistan internette arayabiliyor; Gemini kendi Google aramasını kullanmaya devam ediyor.
+
+## 2.8.5CC — 2026-10-27
+
+- Asistan: kütüphanende olmayan önerilen filmler ve diziler ("Dış öneri") artık tıklanabiliyor; tıklayınca sayfası açılıyor, üzerine gelince afişi görünüyor. "Dış öneri" etiketi duruyor.
+
+## 2.8.4CC — 2026-10-27
+
+- Ana sayfa ve Keşfet vitrini: slayt, seçili çizginin dolma animasyonu bitince değişiyor; çizgi artık slaytın gerisinde kalmıyor (web veya oynatıcıdan dönünce ve fare üzerindeyken de aynı hızda). Fare üzerindeyken çizgi durup kaldığı yerden devam ediyor.
+
+## 2.8.3CC — 2026-10-27
+
+- Web’den Film’e dönünce kaldığın yere dönersin: Luna Web’de fragman açtığın film penceresi (arama, Keşfet, kütüphane) kapanmaz, web açıkken gizlenir ve Film’e tıklayınca aynen geri gelir. Film’deyken Film’e yeniden tıklamak ana sayfaya götürür. Müzik ve Kitap için de aynı.
+
+## 2.8.2CC — 2026-10-27
+
+- Luna Web: adres kapsülünün yuvarlak sınırı artık üç noktayı da içine alıyor (içteki düğmeye basınca beliren eski halka kaldırıldı).
+- Luna logosuna tıklayınca ayrı menü açılmıyor; şerit genişleyip açık kalıyor. Koleksiyonlar ve Ayarlar şeridin sonunda. Klasik görünüm seçeneği Araçlar’da.
+- Film penceresinden fragman (veya başka bağlantı) Luna Web’de açılınca pencere kapanıyor; tarayıcı arkada kalmıyor.
+- Tarayıcı üst satırı hiçbir durumda iki satıra kırılmıyor; yer imleri kendi satırında.
+
+## 2.8.1CC — 2026-10-27
+
+- Luna Web bildirimleri adres kapsülünden konuşuyor: favori, kopyalama, indirme, izin, hata, çeviri ve eklenti bildirimleri buzlu cam bir kapsül olarak adresin yerinde belirir, sonra adrese geri döner. Sayfa artık aşağı kaymıyor. Kısa bilgiler 3 sn kalır (altta biten çizgi), hatalar 8 sn; düğmeli olanlar (Tekrar dene, İptal, Kurulumu incele) ve kapatma düğmesi kapsülün içinde.
+- Müziği içe aktar düğmesi adres kapsülünde artık nefes almıyor, düz düğme.
+
+## 2.8.0CC — 2026-10-27
+
+- Luna Web: adres kapsülündeki düğmelere (Luna, okuma, yer imi, indirme, araçlar) tıklamak artık adresi genişletmiyor; düğmeler yerinde kalıp tıklanabiliyor. Adres yalnız yazı alanına tıklanınca genişliyor.
+- Araçlar düğmesi çeviri simgesi yerine üç nokta.
+
+## 2.7.9CC — 2026-10-27
+
+- Luna Web: Araçlar (çeviri) düğmesi adres kapsülünün içinde, en sağda. Tek satır görünümde ana sayfa düğmesi kaldırıldı (başlangıç sayfası + ile açılır).
+- Logo üzerine gelince genişlerken artık sekmelerin üstünü kapatmıyor; adres çubuğu gibi yer açıp satırı kaydırıyor.
+
+## 2.7.8CC — 2026-10-27
+
+- Luna Web: adres çubuğu pencerenin ortasında; tıklayınca iki yana doğru genişliyor. Sekmeler soldaki alanı kullanıyor. Çok dar pencerede adres sekmelerin ardından gelir.
+
+## 2.7.7CC — 2026-10-27
+
+- Luna Web tek satır: geri, ileri ve yenile logonun hemen yanında. Luna logosu artık tam görünüyor (önceden yalnız nokta kalıyordu); üzerine gelince genişleyip Film, Müzik, Kitap ve Web’i gösteriyor, tıklayınca tam menü açılıyor.
+- Adres çubuğu tıklanmadıkça dar duruyor, tıklayınca genişliyor; sekmelere daha çok yer kalıyor.
+
+## 2.7.6CC — 2026-10-27
+
+- Luna Web yeni tek satır görünüm: Luna menüsü logoya küçüldü (Film, Müzik, Kitap, Koleksiyonlar, Ayarlar logodan açılır), sekmeler ve adres aynı satırda. Video sayfasında "Luna" düğmesi adresin içinde. Düğmeler Luna’nın yuvarlak düğme ve hap sekmesi tasarımında.
+- Eski görünüme dönmek için: logo menüsünde "Klasik tarayıcı görünümü" ya da Araçlar’da "Tek satır tarayıcı görünümü" kutusu.
+
 ## 2.7.5CC — 2026-10-27
 
 - 2.7.3 ve 2.7.4 geri alındı: web videosunda çubuk davranışı 2.7.2 ile aynı.
@@ -13,6 +551,9 @@
 ## 2.7.2CC — 2026-10-27
 
 - Web videosu başlarken çubuk kısa bir an bekleyip sonra kayar: videonun açıldığı ilk anda ekran takılırken siyah bar görünmesin diye.
+
+## 2.7.1CC — 2026-10-27
+
 
 ## 2.7.0CC — 2026-10-27
 
@@ -86,6 +627,9 @@
 ## 2.5.4CC — 2026-10-27
 
 - Neler yeni ekranı herkes için yeni tasarımda: daha ince başlık, altında "… sürümünden bu yana N güncelleme" satırı ve renkli noktalı liste; bulanık video arka plan korunur.
+
+## 2.5.3CC — 2026-10-27
+
 
 ## 2.5.2CC — 2026-10-27
 
@@ -233,6 +777,10 @@
 
 - Web’de gezinirken reklam engellemenin oluşturduğu gereksiz yük azaltıldı; sayfa yükleme deneyimi iyileştirildi.
 
+## 2.2.0C — 2026-10-27
+
+- Güncelleme penceresindeki boş yenilik metni düzeltildi. Normal kullanıcılar, atladıkları sürümlerin yeniliklerini kısa ve tekrarsız bir özette görür.
+
 ## 2.1.9C
 
 - Kopya film afişleri kapalıyken tek başlık ve bilgi satırı gösterir; yana açıldığında her kopyanın bilgileri görünür.
@@ -247,6 +795,7 @@
 
 - Reklam engelleyici eklenti yönetimi, asistan balonu yerine yalnız gerçek web sekmesinin profilini kullanır.
 
+- Dev İzle, ayrıntı penceresini kapatarak Luna Web’de yeni sekme açar; gizli pencereler tarayıcı etkileşimini engellemez.
 - YouTube playlist aktarımı tek videoyu çalmak yerine mevcut şarkı seçme ve liste oluşturma penceresini kullanır. Aktarım oku hafifçe vurgulanır.
 - Ana sayfadaki film kopyaları üst üste toplanıp yana açılır. Web başlıklarındaki sezon ve bölüm bilgileri dizi olarak ayrıştırılır.
 - Kategoriler, mevcut Keşfet görünümünün içeriklerini filtreleyen açılır menüdür. Ana sayfanın seçim düğmesi ortak cam görünümünü kullanır.
@@ -258,6 +807,7 @@
 
 ## 2.1.4
 
+
 - Rust tarayıcı modülünün dosya açıklaması düzeltildi; E0753 derleme hatası giderildi.
 - Klip başlangıç ve bitiş alanları dakika:saniye veya saat:dakika:saniye biçiminde gösterilir ve düzenlenir. Geçersiz zamanlar kaydedilmez.
 
@@ -267,6 +817,7 @@
 - Luna Web Araçlar bölümüne kullanıcının sağladığı uBlock Origin Lite Manifest V3 paketiyle aç/kapat düğmesi eklendi. Otomatik oynatma yalnız ses kaynaklarını ve 8 saniyeden kısa klipleri atlar. Playlist bağlantıları mevcut müzik içe aktarma ekranını açar.
 - HDR kaynağı ve oynatıcının renk çıkışı ayrı gösterilir; HDR çıkış politikası ekranın otomatik bildirilen yeteneklerini izler.
 - Arkadaş önerileri seçilen kişilerin içe aktarılmış kayıtlarını kullanır; eksik tür ve süre bilgileri TMDB ile tamamlanır. Arkadaş puanları ilgili kişinin film değerlendirme sayfasını açar. TMDB puanları açıkça etiketlenir.
+- Keşfet’e film/dizi, kategori ve süre filtreleri eklendi. Geniş asistanın arkasındaki detay penceresi bulanıklaştırıldı; cam düğmelerin okunabilirliği iyileştirildi. Hatırlanan kopya seçimi sıfırlama üç noktaya taşındı.
 
 ## 2.1.3
 
@@ -319,11 +870,15 @@
 - Ana sayfada Bu akşam ne izlesem düğmesi, önerileri devam kartıyla aynı alanda yumuşak geçişle açar; sayfaya yeniden gelince devam kartı gösterilir. Arkadaş seçimine yuvarlak profil fotoğrafları eklendi.
 - Tarayıcıdan video açılmasını engelleyen oynatıcı referrer doğrulaması düzeltildi; yalnız güvenli HTTP(S) kaynak adreslerine izin verilir.
 
+## 2.0.5C — 2026-10-25
+
+
 ## 2.0.4C — 2026-10-25
 
 - Yanıt biçimi ve tarayıcı arama motoru seçimleri Luna temasına uygun, klavyeyle kullanılabilen menülere dönüştürüldü. Başlangıç araması ile adres çubuğu birbirinden ayrıldı.
 - Letterboxd profil fotoğraflarında Gravatar desteği ve yeni fotoğraf ayrıştırıcısıyla yeniden deneme eklendi.
 - Tarayıcıda diğer siteler için Luna’da oynat erişimi açıldı; erişilebilir video, HLS/DASH, ses ve altyazı kaynakları mevcut oynatıcıya aktarılır.
+
 
 ## 2.0.3C — 2026-10-25
 
@@ -418,6 +973,9 @@
 
 - Kütüphanede / Fark etmez seçimi Benim için seç yanında iki belirgin, kayar göstergeli düğme oldu.
 
+## 1.8.6C — 2026-10-24
+
+
 ## 1.8.5C — 2026-10-24
 
 - Analiz odak seçenekleri analiz öncesi zevk tercih penceresine taşındı. Eleştiriliyorsa uyar açıklaması gerçek davranışına uygun hale getirildi.
@@ -429,6 +987,9 @@
 ## 1.8.3C — 2026-10-24
 
 - EPUB sayfa notlarına okuyucu sayfası eklendi; defterden alınan notlar sayfa etiketini korur. Eski notların kayıtlı konumu okuyucuda ziyaret edilince sayfa etiketi tamamlanır.
+
+## 1.8.3CC — 2026-10-24
+
 
 ## 1.8.2C — 2026-10-24
 
@@ -498,6 +1059,12 @@
 - JustWatch sonuçları ve önbelleği yalnız seçilen ülkeye aittir; farklı ülkeye geri düşmez. F11 bildirimi küçültülüp üst gezinme çubuğundan uzaklaştırıldı.
 - Yerel, yayımlanmamış sürüm. Kontroller ve sınırlar: docs/LUNA-1.7.2C-UI.md. Commit/push/release/kurulum paketi yok; push Claude’da.
 
+## 1.7.1C — Luna 2 PDF arayüz ve kullanım düzeltmeleri
+
+Kullanıcının onluk devir kuralıyla önceki yerel 1.6.11C numarası 1.7.1C olarak düzeltildi; özellikler aynı.
+
+UP/ses/altyazı düzeni, donanım/RAM rehberi, yerel AI token sayacı, elle altyazı arama, kompakt stüdyo, menü/yorum/afiş konumu, dizi bölüm sayıları ve sürüm yenilik penceresi. Ayrıntı ve sınırlar: docs/LUNA-1.6.11C-PDF.md.
+
 ## 1.6.10C — 2026-10-23 (local, unreleased)
 - Merge the cumulative beta source package over local 1.6.9C without reverting SQLite, Foliate, playback clock, native safety or lazy views.
 - Add saved library filters/comparison, browser tab groups and notebook improvements, assistant/taste/text fixes and native book/frame fixes.
@@ -537,6 +1104,7 @@
 - **Backups:** the one-file backup carries the web history and settings like the rest of your data (it is your own file). "Clear browsing data" removes the history from the app; make a new backup afterwards if you keep old ones.
 - Checks: `npm run test:web-plus` (31 checks on the models and the native-side guards), `npm run test:find-page` (10 checks of the find script in a real Chromium: what it skips, that the page is never changed, wrap-around, limits; caught a collapsed-range bug in the first version), `npm run test:web-ui` (17 end-to-end flows in a real Chromium with a mocked native layer). The last two are local tools and need Playwright.
 
+
 ## Unreleased — Luna Web "moonlight" pass: command palette, quick searches, history, pinned tabs, a livelier start page, Listen (not yet released)
 
 - **Command palette (Ctrl+K):** one box for everything. In Web: this page's commands (reading view, translate, favourite, zoom, pin, copy link …), open tabs, favourites, history, search engines and quick searches; an address or a search typed into it is offered too. In the library (Film, Music, Books): jump to any part or page, open Settings, Collections, History, the assistant, "open a file / link", the tour, or any film or series you own (opens its details). Case, accents and the Turkish İ/ı do not matter; one short word also matches letters in order ("rdv" finds Reading view).
@@ -553,6 +1121,7 @@
 
 ## Unreleased — Luna Web: reading view, smarter address bar, per-site zoom, search engines, recent visits, tab menu (not yet released)
 
+- **Reading view (F9, the book button in the address bar, or Tools › Reading view):** the page's text in a calm reader drawn by Luna: Night, Sepia and Paper themes, text size (also Ctrl +/−), serif or sans, narrow or wide page, a contents list from the page's headings, minutes and words, a reading progress line, lists and tables kept. **Find inside it with Ctrl+F** (F3 / Enter for the next match, Shift for the previous one; accents, case and the Turkish İ/ı do not matter, table cells included). Copy the whole text or hand it to the assistant ("Ask Luna"). No link in it is live and no page script runs; the page layer is hidden while it is open, and Esc or F9 brings the page back with the keyboard on the book button. A long page or one read while loading says so. The choices are remembered.
 - **Zoom remembered per site:** zoom a site once (Ctrl +/−, the Tools menu or the page's own Ctrl+wheel) and its pages open at that zoom again; other sites open at 100 %; Ctrl+0 forgets it. Up to 200 sites, on this computer only.
 - **Continue reading on the start page:** pages in your reading list that you have not finished, newest first, with how far you got; a click opens the page where you stopped.
 - **Address suggestions:** while you type, the address bar offers open tabs ("Switch to tab"), favourites and recently visited pages that contain every typed word (accents, case and the Turkish dotted/dotless i do not matter). The typed text always comes first, as an address to open or a web search. Up/Down, Enter and Esc work; the list is an accessible combobox (listbox, active option announced) and the page layer underneath is cut out like the tools menu, so the list is never hidden behind the page.
@@ -847,6 +1416,7 @@ Bug pass.
 - **Esc closes windows:** Esc now closes the window on top everywhere, as a click beside it does. Before, many didn't close on Esc (open link, subtitle search, confirmations, the music link…). A window over the film or a book closes alone; the film keeps playing.
 - **Reader › comics in Luna Dev:** CBZ comics stayed on "…" and never showed a page in the development build (React's double mount left a "closed" flag set). The installed build wasn't affected.
 - **Reader › Esc in the search box:** closes the panel now (a note being written is still not thrown away by Esc). The contents button opens on the contents again, not on the last search.
+- (Dev only: the browser mock can now deliver events and acts as a small mpv, so playback can be tried there.)
 
 ## 1.3.7CC — 2026-10-21 (beta, not built yet: tried with Luna Dev.cmd)
 
@@ -961,6 +1531,7 @@ Bug pass.
 
 ## 1.1.6CC — 2026-10-21 (beta, not built yet: tried with Luna Dev.cmd)
 
+- **Luna updates itself (new):** a while after opening (at most twice a day) Luna looks at its GitHub releases; when a new version is out a card at the bottom says "Luna 1.2.0 is ready" with **Update**, What's new, Later and Skip this version. Update downloads it, checks the signature, installs it and reopens Luna; your data stays. The portable zip and the developer build open the download page instead.
 - **Settings › General › Updates:** check now, "Tell me when a new version is out", and **Get beta versions too** (off by default; turning it on warns that betas may have bugs and offers to back up first).
 - The version number in Settings now really follows the changes (it had stayed at 1.1.1 since 1.1.1CC).
 
@@ -1143,3 +1714,6 @@ A large correctness and packaging release.
 - GPL-3.0 license, third-party notices (mpv GPLv2+, yt-dlp Unlicense, fonts OFL).
 - Build documentation for fetching mpv and producing both packages.
 
+## 0.2.3 and earlier
+
+See the git history and the previous GitHub releases.

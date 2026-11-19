@@ -23,6 +23,11 @@ test('OpenAI reasoning models (o-series, gpt-5) get max_completion_tokens and no
     assert.equal(r.temperature, undefined, model); assert.equal(r.max_tokens, undefined, model); assert.equal(r.max_completion_tokens, 900, model);
   }
   // an OpenAI-compatible server keeps the widely supported fields whatever the model is called
+  const gemmaBody = { contents: [{ role: 'user', parts: [{ text: 'x' }] }] };
+  assert.equal(Q.toOpenAiRequest(gemmaBody, 'google/gemma-4-e2b', 'custom').reasoning_effort, 'none');
+  assert.equal(Q.toOpenAiRequest(gemmaBody, 'Gemma 4 e2b', 'custom').reasoning_effort, 'none');
+  assert.equal(Q.toOpenAiRequest({ ...gemmaBody, lunaThink: true }, 'Gemma 4 e2b', 'custom').reasoning_effort, undefined);
+  assert.equal(Q.toOpenAiRequest(gemmaBody, 'llama3', 'custom').reasoning_effort, undefined);
   const c = Q.toOpenAiRequest({ contents: [{ role: 'user', parts: [{ text: 'x' }] }], generationConfig: { temperature: 0.2, maxOutputTokens: 900 } }, 'gpt-5', 'custom');
   assert.equal(c.temperature, 0.2); assert.equal(c.max_tokens, 900);
 });
@@ -64,6 +69,9 @@ test('JSON answers: fenced, bare and wrapped objects are read; text without JSON
   assert.deepEqual(P.extractJsonObject('```json\n{"a":1}\n```'), { a: 1 });
   assert.deepEqual(P.extractJsonObject('Here: {"a":{"b":2}} done'), { a: { b: 2 } });
   assert.deepEqual(P.extractJsonObject('\uFEFF{"ok":true}'), { ok: true });
+  assert.deepEqual(P.extractJsonObject('```json\n{"a":[{"b":1},{"c":"}]"}\n}\n```'), { a: [{ b: 1 }, { c: "}]" }] });
+  assert.deepEqual(P.extractJsonObject('{"a":[1,2,],}'), { a: [1, 2] });
+  assert.throws(() => P.extractJsonObject('{"a":"cut} off'), /could not be read/);
   assert.throws(() => P.extractJsonObject('Sorry, I cannot.'), /had no JSON/);
   assert.throws(() => P.extractJsonObject('{broken'), /no JSON|could not be read/);
   assert.throws(() => P.extractJsonObject('{"a":1'), /could not be read|no JSON/);

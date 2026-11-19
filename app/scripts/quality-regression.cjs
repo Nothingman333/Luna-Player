@@ -109,7 +109,10 @@ test('ErrorBoundary: any thrown value becomes an Error; the copied detail is sho
 // ---- native argument hardening (source structure; Rust is compile-checked, not run, on Linux) ----
 test('Source guard: yt-dlp gets the link only after "--"', () => {
   const rs = read('src-tauri/src/yt.rs');
-  assert.match(rs, /fn with_url/); assert.equal((rs.match(/run\(ytdlp, &with_url\(/g) || []).length, 2, 'stream and info both use it');
+  assert.match(rs, /fn with_url/);
+  // a search ("ytsearchN:words") is not a link and is built by Luna itself
+  const all = (rs.match(/run\(ytdlp, (?!&\["--flat-playlist", &format!\("ytsearch)/g) || []).length, safe = (rs.match(/run\(ytdlp, &with_url\(/g) || []).length;
+  assert(safe >= 2 && safe === all, 'every yt-dlp call (sound, picture, info) uses it');
   assert.doesNotMatch(rs, /run\(ytdlp, &\[[^\]]*\burl\]\)/, 'no direct positional url remains');
 });
 test('Source guard: removing an indexer plugin accepts a bare file name only', () => {

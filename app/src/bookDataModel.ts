@@ -6,7 +6,7 @@ export function validIsbn(raw:string):string {
  if(/^\d{9}[\dX]$/.test(value)){const sum=[...value].reduce((n,c,i)=>n+(c==="X"?10:Number(c))*(10-i),0);return sum%11===0?value:"";}
  return "";
 }
-export const cleanBookQuery=(s:string)=>s.replace(/\.(epub|pdf|cbz|mobi|azw3|fb2)$/i,"").replace(/[_]+/g," ").replace(/\b(?:OCR|PDF|EPUB|CBZ)\b/gi,"").replace(/[()[\]]/g," ").replace(/\s+/g," ").trim();
+export const cleanBookQuery=(s:string)=>s.replace(/\.(epub|pdf|cbz|mobi|azw3|fb2|mp3|m4a|m4b|aac|flac|ogg|opus|wav)$/i,"").replace(/[_]+/g," ").replace(/\b(?:OCR|PDF|EPUB|CBZ)\b/gi,"").replace(/[()[\]]/g," ").replace(/\s+/g," ").trim();
 export const bookFold=(s:string)=>s.normalize("NFKD").replace(/[\u0300-\u036f]/g,"").replace(/ı/g,"i").toLowerCase().replace(/[^\p{L}\p{N}]+/gu," ").trim();
 export function publicImage(raw:unknown):string {try{const u=new URL(String(raw||""));if(!["http:","https:"].includes(u.protocol)||u.username||u.password)return "";if(u.protocol==="http:")u.protocol="https:";return u.href;}catch{return "";}}
 export const plainBookText=(s:unknown)=>String(s||"").replace(/<[^>]*>/g," ").replace(/&(?:amp|quot|apos|nbsp|lt|gt|#\d+|#x[\da-f]+);/gi,entity=>{const named:Record<string,string>={amp:"&",quot:'"',apos:"'",nbsp:" ",lt:"<",gt:">"},key=entity.slice(1,-1).toLowerCase();if(key in named)return named[key];const n=key.startsWith("#x")?parseInt(key.slice(2),16):parseInt(key.slice(1),10);return Number.isInteger(n)&&n>=0&&n<=0x10ffff?String.fromCodePoint(n):entity;}).replace(/\s+/g," ").trim().slice(0,12000);
@@ -17,4 +17,28 @@ export function resolveBookAssignments<T extends {path:string;title:string;autho
  if(!Array.isArray(assignments)||!assignments.length||assignments.length>100)throw Error("Bir işlemde 1–100 kitap belirt.");
  const assigned=new Set<string>();
  return assignments.map(a=>{if(!a||typeof a.title!=="string"||!Array.isArray(a.shelves)||!a.shelves.every((x:unknown)=>typeof x==="string")||(a.readLater!==undefined&&typeof a.readLater!=="boolean"))throw Error("Geçersiz raf işlemi.");const matches=books.filter(b=>bookFold(b.title)===bookFold(a.title)&&(!a.author||bookFold(b.author)===bookFold(a.author)));if(matches.length!==1)throw Error(`Kitap tekil eşleşmedi: ${a.title}. Yazar/baskı seçilmeli; hiçbir kayıt değiştirilmedi.`);if(assigned.has(matches[0].path))throw Error("Aynı kitap birden fazla kez seçildi; tek bir raf işlemi belirt.");assigned.add(matches[0].path);const shelves=[...new Set<string>(a.shelves.map((x:string)=>x.trim()).filter(Boolean))];if(shelves.length>20||shelves.some(s=>s.length>60))throw Error("Raf adı/listesi çok uzun.");return{book:matches[0],shelves,readLater:a.readLater};});
+}
+
+/** A file-ish book name made readable: "Kesin İnançlar (Eric Hoffer) (z-library.sk, 1lib.sk) (2)" → title "Kesin İnançlar",
+ *  author "Eric Hoffer". Download-site tags, copy numbers and format words go; an author already known is kept. */
+export function splitBookName(rawTitle:string,rawAuthor=""):{title:string;author:string}{
+ let t=rawTitle.replace(/\.(epub|pdf|cbz|mobi|azw3|fb2)$/i,"").replace(/_+/g," ");
+ t=t.replace(/[([][^)\]]*(?:z-?lib|1lib|libgen|anna'?s|archive|\.[a-z]{2,4})[^)\]]*[)\]]/gi," ").replace(/[([]\s*\d{1,3}\s*[)\]]/g," ").replace(/(?:OCR|PDF|EPUB|retail|z-?library)/gi," ");
+ let author=rawAuthor.trim();
+ const who=t.match(/\(([^()\d]{3,60})\)/);
+ if(who&&who[1].trim().split(/\s+/).length<=5){if(!author||author.toLocaleLowerCase()==="unknown"||author.toLocaleLowerCase()==="bilinmiyor")author=who[1].trim();t=t.replace(who[0]," ");}
+ // "Yazar - Kitap" when no author is known
+ const dash=!author&&t.match(/^\s*([^-–]{3,50}?)\s+[-–]\s+(.{2,})$/);
+ if(dash&&dash[1].trim().split(/\s+/).length<=4){author=dash[1].trim();t=dash[2];}
+ // "Yazar Kitap Yazar" (audiobook files): the name at both ends is the author
+ if(!author){const w=t.trim().split(/\s+/);for(let k=Math.min(4,Math.floor((w.length-1)/2));k>=1;k--){const a=w.slice(0,k).join(" "),z=w.slice(-k).join(" ");if(a.toLocaleLowerCase()===z.toLocaleLowerCase()){author=a;t=w.slice(k,-k).join(" ");break;}}}
+ return{title:t.replace(/[()[\]]/g," ").replace(/\s+/g," ").trim()||rawTitle.trim(),author};
+}
+/** Whether a found book is really this one: the same title (or one starting the other), and a shared author word when both are known. */
+export function sameBook(want:{title:string;author:string},got:{title:string;author:string}):boolean{
+ const n=(x:string)=>x.replace(/[İIı]/g,"i").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g,"").replace(/[^\p{L}\p{N}]+/gu," ").trim();
+ const a=n(want.title.replace(/[;:].*$/,"")),b=n(got.title.replace(/[;:].*$/,""));if(!a||!b)return false;
+ if(!(a===b||(Math.min(a.length,b.length)>=6&&(a.startsWith(b)||b.startsWith(a)))))return false;
+ const wa=n(want.author),wb=n(got.author);if(!wa||!wb)return true;
+ const words=new Set(wa.split(" ").filter(w=>w.length>2));return wb.split(" ").some(w=>words.has(w));
 }

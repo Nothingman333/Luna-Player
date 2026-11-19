@@ -1,10 +1,10 @@
 /* Command palette (Ctrl+K): a calm glass sheet above everything, in the part's own accent. */
-.lp-backdrop { position:fixed; inset:0; z-index:900; display:flex; justify-content:center; align-items:flex-start; padding:12vh 20px 20px; background:rgba(6,6,8,.55); backdrop-filter:blur(6px); animation:lp-fade .14s ease-out; }
+.lp-backdrop { position:fixed; inset:0; z-index:900; display:flex; justify-content:center; align-items:flex-start; padding:12vh 20px 20px; background:rgba(6,6,8,.55); backdrop-filter: var(--glass-scrim); animation:lp-fade .14s ease-out; }
 @keyframes lp-fade { from { opacity:0; } to { opacity:1; } }
 @keyframes lp-rise { from { opacity:0; transform:translateY(-8px) scale(.985); } to { opacity:1; transform:none; } }
 .lp-panel { width:min(640px,100%); max-height:min(560px,76vh); display:flex; flex-direction:column; border-radius:18px; overflow:hidden; color:var(--text);
   background:linear-gradient(180deg,rgba(34,33,38,.97),rgba(22,22,26,.98)); border:1px solid rgba(255,255,255,.1);
-  box-shadow:0 30px 90px rgba(0,0,0,.6),0 0 0 1px rgba(var(--acc-rgb),.08),inset 0 1px 0 rgba(255,255,255,.05); animation:lp-rise .18s cubic-bezier(.2,.8,.2,1); }
+  box-shadow:0 30px 90px rgba(0,0,0,.6),0 0 0 1px rgba(var(--acc-rgb),.08),var(--glass-light); animation:lp-rise .18s cubic-bezier(.2,.8,.2,1); }
 .lp-search { display:flex; align-items:center; gap:12px; padding:16px 18px; border-bottom:1px solid rgba(255,255,255,.07); color:var(--accent); }
 .lp-search input { flex:1; min-width:0; background:none; border:0; outline:0; color:var(--text); font:inherit; font-size:15px; }
 .lp-search input::placeholder { color:#7c7c87; }

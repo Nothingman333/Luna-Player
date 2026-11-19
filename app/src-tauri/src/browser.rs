@@ -3,6 +3,8 @@
 mod playback;
 #[path = "browser_media_info.rs"]
 mod media_info;
+#[path = "browser_translation_cache.rs"]
+mod translation_cache;
 use std::{collections::{BTreeSet, HashSet}, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, Webview, WebviewBuilder, WebviewUrl};
@@ -191,7 +193,13 @@ fn watch(view: &Webview, app: AppHandle, id: u32) -> Result<(), String> {
                 let (mut has_link,mut has_selection,mut editable)=(Default::default(),Default::default(),Default::default());
                 unsafe{target.HasLinkUri(&mut has_link)?;target.HasSelection(&mut has_selection)?;target.IsEditable(&mut editable)?;}
                 let (has_link,has_selection,editable):(bool,bool,bool)=(has_link.into(),has_selection.into(),editable.into());
-                if editable || (!has_link&&!has_selection){return Ok(())}
+                if editable {return Ok(())}
+                let mut kind=Default::default(); unsafe{target.Kind(&mut kind)?;}
+                let media_type=match kind { webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND_IMAGE=>"image", webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND_VIDEO=>"video", webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND_AUDIO=>"audio", _=>"page" };
+                let mut has_source=Default::default(); unsafe{target.HasSourceUri(&mut has_source)?;}
+                let mut source=PWSTR::null(); let has_source:bool=has_source.into();
+                if has_source {unsafe{target.SourceUri(&mut source)?;}}
+                let source=if has_source{take_pwstr(source)}else{String::new()};
                 let(mut link,mut text,mut page)=(PWSTR::null(),PWSTR::null(),PWSTR::null());
                 if has_link{unsafe{target.LinkUri(&mut link)?;}}
                 if has_selection{unsafe{target.SelectionText(&mut text)?;}}
@@ -200,7 +208,7 @@ fn watch(view: &Webview, app: AppHandle, id: u32) -> Result<(), String> {
                 let text=if has_selection{take_pwstr(text)}else{String::new()};
                 let page=take_pwstr(page);
                 let mut point=Default::default();unsafe{args.Location(&mut point)?;args.SetHandled(true)?;}
-                event(&menu_app,id,"context",serde_json::json!({"url":link.chars().take(2048).collect::<String>(),"text":text.chars().take(8000).collect::<String>(),"page":page,"x":point.x,"y":point.y}).to_string());
+                event(&menu_app,id,"context",serde_json::json!({"source":source.chars().take(8192).collect::<String>(),"type":media_type,"url":link.chars().take(2048).collect::<String>(),"text":text.chars().take(8000).collect::<String>(),"page":page,"x":point.x,"y":point.y}).to_string());
                 Ok(())
             }));
             let _=unsafe{menu_core.add_ContextMenuRequested(&handler,&mut token)};
@@ -332,8 +340,16 @@ pub async fn browser_create(app: AppHandle, caller: Webview, id: u32, url: Strin
             .data_directory(profile).disable_drag_drop_handler().focused(false)
             .browser_extensions_enabled(true)
             .initialization_script(include_str!("../../src/browserSearchLinks.js"))
+            .initialization_script(include_str!("../../src/browserStoreButton.js"))
             .on_navigation(move |url| {
                 if url.scheme() == "about" { return !nav_started.load(Ordering::SeqCst); }
+                // The store's own install button (browserStoreButton.js) lands here; Luna still verifies and asks.
+                if url.scheme() == "https" && url.host_str() == Some("chromewebstore.google.com") {
+                    if let Some(ext) = url.path().strip_prefix("/luna-install/") {
+                        if ext.len() == 32 && ext.bytes().all(|c| (b'a'..=b'p').contains(&c)) { event(&nav_app, id, "store-install", ext.to_string()); }
+                        return false;
+                    }
+                }
                 let allowed = checked_url(url.as_str()).is_ok();
                 event(&nav_app, id, if allowed { "navigate" } else { "blocked" }, url.to_string());
                 allowed
@@ -368,13 +384,25 @@ pub async fn browser_create(app: AppHandle, caller: Webview, id: u32, url: Strin
     result
 }
 
+/// Closes a tab that was kept only for its downloads, once they have all ended.
+pub(crate) fn close_parked(app: &AppHandle, id: u32) {
+    if let Some(view) = app.get_webview(&label(id)) { playback::close(&view, id); let _ = view.close(); }
+    if let Ok(mut ids) = app.state::<BrowserState>().0.lock() { ids.remove(&id); }
+}
+
 #[tauri::command]
 pub async fn browser_action(app: AppHandle, caller: Webview, id: u32, action: String, url: Option<String>, zoom: Option<f64>, force: Option<bool>) -> Result<(), String> {
     trusted(&caller)?;
     if action == "close" {
         if force.unwrap_or(false) {crate::browser_downloads::abort_tab(&app,id).await?;}
-        if app.state::<crate::browser_downloads::Downloads>().0.lock().map_err(|e|e.to_string())?.iter().any(|row|row.tab==id&&(matches!(row.state.as_str(),"running"|"paused")||row.can_resume)) {
-            return Err("Bu sekmede indirme sürüyor. Önce İndirmeler ekranından iptal et veya tamamlanmasını bekle.".into());
+        // Like a normal browser, closing a tab never stops its download: WebView2 ties the download to the tab's
+        // webview, so the tab is hidden, muted and kept until its downloads end (browser_downloads closes it then).
+        if crate::browser_downloads::has_active(&app, id) {
+            if let Some(view) = app.get_webview(&label(id)) { playback::close(&view, id); let _ = mute(&view, true); view.hide().map_err(|e| e.to_string())?; }
+            crate::browser_downloads::park(id);
+            set_user_muted(id, false);
+            if let Ok(mut media)=PAGE_MEDIA.lock(){media.remove(&id);}
+            return Ok(());
         }
         if let Some(view) = app.get_webview(&label(id)) { playback::close(&view,id);view.close().map_err(|e| e.to_string())?; }
         app.state::<BrowserState>().0.lock().map_err(|e| e.to_string())?.remove(&id);
@@ -492,6 +520,26 @@ pub async fn browser_bounds(app: AppHandle, caller: Webview, id: u32, x: f64, y:
     view.show().map_err(|e| e.to_string())
 }
 
+/// The mini video of a background tab (browserMini.js): "on" / "off" / "state" / "seek" (seconds) / "seek-to" (0–1).
+#[tauri::command]
+pub async fn browser_mini(app: AppHandle, caller: Webview, id: u32, action: String, value: Option<f64>) -> Result<serde_json::Value, String> {
+    trusted(&caller)?;
+    if !matches!(action.as_str(), "on" | "off" | "state" | "seek" | "seek-to") { return Err("Unknown mini action".into()); }
+    let value = value.filter(|v| v.is_finite() && v.abs() <= 86400.).unwrap_or(f64::NAN);
+    let view = tab(&app, id)?;
+    let arg = if value.is_nan() { "NaN".to_string() } else { value.to_string() };
+    let script = format!("({})({},{})", include_str!("../../src/browserMini.js").split_once("*/").map_or("", |x| x.1).trim(), serde_json::to_string(&action).map_err(|e| e.to_string())?, arg);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let tx = Mutex::new(Some(tx));
+    view.eval_with_callback(script, move |value| {
+        if let Ok(mut sender) = tx.lock() { if let Some(sender) = sender.take() { let _ = sender.send(value); } }
+    }).map_err(|e| e.to_string())?;
+    let raw = tokio::time::timeout(std::time::Duration::from_secs(3), rx).await.map_err(|_| "Mini video timed out")?.map_err(|_| "Page closed")?;
+    // ExecuteScript returns the JSON string the script built, itself JSON-encoded.
+    let text: String = serde_json::from_str(&raw).unwrap_or_default();
+    Ok(serde_json::from_str(&text).unwrap_or(serde_json::json!({ "ok": false })))
+}
+
 #[tauri::command]
 pub async fn browser_media(app: AppHandle, caller: Webview, id: u32,probe_only:Option<bool>) -> Result<serde_json::Value, String> {
     trusted(&caller)?;
@@ -538,7 +586,12 @@ pub async fn browser_read(app: AppHandle, caller: Webview, id: u32) -> Result<se
     let text = result.get("text").and_then(|v| v.as_str()).ok_or("Page could not be read")?;
     if text.trim().is_empty() || text.chars().count() > 24000 { return Err("No readable page text; video and protected frames cannot be read".into()); }
     // The native URL is authoritative. Page JavaScript cannot substitute a different source.
-    let mut source = before; source.set_query(None); source.set_fragment(None);
+    let mut source = before;
+    // A YouTube watch address is only its video id: without it the video can be neither summarized nor have subtitles.
+    let video = (matches!(source.host_str(), Some("youtube.com" | "www.youtube.com" | "m.youtube.com")) && source.path() == "/watch")
+        .then(|| source.query_pairs().find(|(k, _)| k == "v").map(|(_, v)| v.into_owned())).flatten();
+    source.set_query(None); source.set_fragment(None);
+    if let Some(video) = video { source.query_pairs_mut().append_pair("v", &video); }
     result["url"] = source.to_string().into();
     Ok(result)
 }
@@ -546,7 +599,7 @@ pub async fn browser_read(app: AppHandle, caller: Webview, id: u32) -> Result<se
 #[tauri::command]
 pub async fn browser_translation(app: AppHandle, caller: Webview, id: u32, action: String, payload: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
     trusted(&caller)?;
-    if !matches!(action.as_str(), "snapshot" | "apply" | "restore") { return Err("Unknown translation action".into()); }
+    if !matches!(action.as_str(), "snapshot" | "apply" | "restore" | "language") { return Err("Unknown translation action".into()); }
     let payload = payload.unwrap_or(serde_json::json!({}));
     if payload.to_string().len() > 800_000 { return Err("Translation payload too large".into()); }
     let view = tab(&app, id)?;
@@ -567,10 +620,14 @@ pub async fn browser_translation(app: AppHandle, caller: Webview, id: u32, actio
     if action == "snapshot" {
         let rows = value.get("rows").and_then(|r| r.as_array()).ok_or("No translation text")?;
         if rows.len() > 180 || value.get("token").and_then(|t| t.as_str()).is_none_or(|t| t.len() > 80) { return Err("Invalid translation snapshot".into()); }
+        // A page session hands out its text in chunks, so ids continue across snapshots: strictly increasing.
         let mut total = 0;
-        for (i, row) in rows.iter().enumerate() {
+        let mut last: Option<u64> = None;
+        for row in rows {
             let text = row.get("text").and_then(|t| t.as_str()).ok_or("Invalid translation text")?;
-            if row.get("id").and_then(|n| n.as_u64()) != Some(i as u64) || text.chars().count() > 1800 { return Err("Invalid translation segment".into()); }
+            let id = row.get("id").and_then(|n| n.as_u64()).ok_or("Invalid translation segment")?;
+            if id >= 6000 || last.is_some_and(|l| id <= l) || text.chars().count() > 1800 { return Err("Invalid translation segment".into()); }
+            last = Some(id);
             total += text.chars().count();
         }
         if total > 24000 { return Err("Translation snapshot too large".into()); }
@@ -703,4 +760,96 @@ pub fn debug_open_log(app:AppHandle,caller:Webview)->Result<(),String>{
     std::fs::OpenOptions::new().create(true).append(true).open(&path).map_err(|e|e.to_string())?;
     std::process::Command::new("notepad.exe").arg(&path).spawn().map_err(|e|e.to_string())?;
     Ok(())
+}
+
+/// Resolve a lazy-loaded image at the context-menu location, without exposing IPC to sites.
+#[tauri::command]
+pub async fn browser_collection_target(app: AppHandle, caller: Webview, id:u32, page:String, x:f64, y:f64) -> Result<serde_json::Value,String> {
+    trusted(&caller)?;
+    if !x.is_finite()||!y.is_finite()||x<0.||y<0.||x>32768.||y>32768. {return Err("Invalid target position".into());}
+    let view=tab(&app,id)?;
+    let before=view.url().map_err(|e|e.to_string())?;
+    if before.as_str()!=page {return Err("Page changed".into());}
+    checked_url(before.as_str())?;
+    let script=include_str!("../../src/browserCollectionTarget.js").replace("__LUNA_X__",&x.to_string()).replace("__LUNA_Y__",&y.to_string());
+    let(tx,rx)=tokio::sync::oneshot::channel();let tx=Mutex::new(Some(tx));
+    view.eval_with_callback(script,move|value|{if let Ok(mut sender)=tx.lock(){if let Some(sender)=sender.take(){let _=sender.send(value);}}}).map_err(|e|e.to_string())?;
+    let raw=tokio::time::timeout(std::time::Duration::from_secs(2),rx).await.map_err(|_|"Collection capture timed out")?.map_err(|_|"Page closed")?;
+    if view.url().map_err(|e|e.to_string())?!=before{return Err("Page changed".into());}
+    let text:String=serde_json::from_str(&raw).unwrap_or_default();
+    let value:serde_json::Value=serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+    if value.is_null(){return Ok(value);}
+    let source=value.get("source").and_then(|s|s.as_str()).ok_or("Missing media source")?;
+    if source.len()>8192{return Err("Media address too long".into());}checked_url(source)?;
+    Ok(value)
+}
+
+
+/// A JPEG of what the tab shows right now, for the glass behind Luna's menus over the page (the page window
+/// sits above Luna's own, so CSS blur cannot see it). Stays in memory, is never written or logged.
+#[tauri::command]
+pub async fn browser_snapshot(app: AppHandle, caller: Webview, id: u32) -> Result<tauri::ipc::Response, String> {
+    trusted(&caller)?;
+    let view = tab(&app, id)?;
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<Vec<u8>, String>>();
+    let tx = std::sync::Arc::new(Mutex::new(Some(tx)));
+    let fail = tx.clone();
+    view.with_webview(move |platform| {
+        use windows::Win32::Foundation::HGLOBAL;
+        use windows::Win32::System::Com::{IStream, StructuredStorage::CreateStreamOnHGlobal, STATFLAG_NONAME, STATSTG, STREAM_SEEK_SET};
+        use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_JPEG;
+        let send = move |r: Result<Vec<u8>, String>| { if let Some(s) = tx.lock().ok().and_then(|mut t| t.take()) { let _ = s.send(r); } };
+        let started = (|| -> windows_core::Result<()> { unsafe {
+            let core = platform.controller().CoreWebView2()?;
+            let stream: IStream = CreateStreamOnHGlobal(HGLOBAL::default(), true)?;
+            let keep = stream.clone();
+            let handler = webview2_com::CapturePreviewCompletedHandler::create(Box::new(move |result| {
+                let bytes = (|| -> windows_core::Result<Vec<u8>> {
+                    result?;
+                    let mut stat = STATSTG::default();
+                    keep.Stat(&mut stat, STATFLAG_NONAME)?;
+                    let len = (stat.cbSize as usize).min(24 << 20);
+                    keep.Seek(0, STREAM_SEEK_SET, None)?;
+                    let mut buf = vec![0u8; len];
+                    let mut read = 0u32;
+                    keep.Read(buf.as_mut_ptr() as *mut _, len as u32, Some(&mut read)).ok()?;
+                    buf.truncate(read as usize);
+                    Ok(buf)
+                })();
+                send(bytes.map_err(|e| e.to_string()));
+                Ok(())
+            }));
+            core.CapturePreview(COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_JPEG, &stream, &handler)
+        } })();
+        if let Err(e) = started { if let Some(s) = fail.lock().ok().and_then(|mut t| t.take()) { let _ = s.send(Err(e.to_string())); } }
+    }).map_err(|e| e.to_string())?;
+    let bytes = tokio::time::timeout(std::time::Duration::from_secs(2), rx).await.map_err(|_| "Snapshot timed out")?.map_err(|_| "Page closed")??;
+    if bytes.is_empty() { return Err("Empty snapshot".into()); }
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Download an immutable language file, never arbitrary URLs or page text.
+#[tauri::command]
+pub async fn browser_translation_model(app: AppHandle, caller: Webview, hash: String, cached_only: Option<bool>) -> Result<tauri::ipc::Response, String> {
+    trusted(&caller)?;
+    if hash.len()!=64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) { return Err("Invalid model hash".into()); }
+    let registry:serde_json::Value=serde_json::from_str(include_str!("../../public/translation/registry.json")).map_err(|e|e.to_string())?;
+    let entry=registry.as_object().into_iter().flat_map(|m|m.values()).filter_map(|m|m.as_object()).flat_map(|m|m.values()).find(|f|f["expectedSha256Hash"].as_str()==Some(hash.as_str())).ok_or("Unknown language model")?;
+    let url=entry["name"].as_str().ok_or("Missing model URL")?;
+    let size=entry["size"].as_u64().filter(|s|*s>0&&*s<=80_000_000).ok_or("Invalid model size")?;
+    let parsed=reqwest::Url::parse(url).map_err(|e|e.to_string())?;
+    if parsed.scheme()!="https" || !matches!(parsed.host_str(),Some("bergamot.s3.amazonaws.com"|"firefox-settings-attachments.cdn.mozilla.net")){return Err("Invalid model origin".into());}
+    use sha2::{Digest,Sha256};
+    let cache_dir=app.path().app_local_data_dir().map_err(|e|e.to_string())?.join("translation-models");
+    let cached=cache_dir.join(format!("{hash}.bin"));
+    if let Some(data)=translation_cache::read_model(&cached,size,&hash){return Ok(tauri::ipc::Response::new(data));}
+    if cached_only.unwrap_or(false){return Err("LOCAL_MODEL_MISSING".into());}
+    let client=reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(std::time::Duration::from_secs(180)).build().map_err(|e|e.to_string())?;
+    let mut response=client.get(parsed).send().await.map_err(|_|"Dil dosyası indirilemedi; bağlantını kontrol et.")?.error_for_status().map_err(|_|"Dil sunucusu yanıt vermedi.")?;
+    if response.content_length().is_some_and(|n|n!=size){return Err("Model size mismatch".into());}
+    let mut data=Vec::with_capacity(size as usize);
+    while let Some(chunk)=response.chunk().await.map_err(|e|e.to_string())? {if data.len()+chunk.len()>size as usize{return Err("Model exceeds expected size".into());}data.extend_from_slice(&chunk);}
+    if data.len()!=size as usize || format!("{:x}",Sha256::digest(&data))!=hash{return Err("Model integrity check failed".into());}
+    translation_cache::write_model(&cached,&data)?;
+    Ok(tauri::ipc::Response::new(data))
 }

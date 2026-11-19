@@ -35,10 +35,10 @@
           let body;
           if (/external_ids/.test(path)) body = { imdb_id: "tt0" + path.match(/\d+/)[0] };
           else if (/^\/find\//.test(path)) body = { movie_results: [hit(3, false)], tv_results: [] };
-          else if (/\/season\/\d+$/.test(path)) body = { episodes: Array.from({ length: 8 }, (_, i) => ({ episode_number: i + 1, name: "Episode " + (i + 1), overview: "", still_path: null, runtime: 50 })) };
+          else if (/\/season\/\d+$/.test(path)) body = { episodes: Array.from({ length: 8 }, (_, i) => ({ episode_number: i + 1, name: "Episode " + (i + 1), overview: "", still_path: null, runtime: 50, air_date: i < 6 ? "2026-01-0" + (i + 1) : "2027-01-01" })) };
           else if (path === "/genre/movie/list") body = { genres: [{ id: 18, name: "Drama" }, { id: 878, name: "Science Fiction" }] };
           else if (/credits|keywords/.test(path)) body = { cast: [], keywords: [] };
-          else if (/^\/(movie|tv)\/\d+$/.test(path)) body = { ...hit(+path.match(/\d+/)[0] - 100, tv), genres: [{ name: "Drama" }], runtime: 118, number_of_seasons: 3 };
+          else if (/^\/(movie|tv)\/\d+$/.test(path)) body = { ...hit(+path.match(/\d+/)[0] - 100, tv), genres: [{ name: "Drama" }], runtime: 118, number_of_seasons: 3, ...(tv ? { last_episode_to_air: { season_number: 3, episode_number: +(localStorage.getItem("mockEp") || 4), air_date: "2026-11-01", name: "Mock episode" }, next_episode_to_air: { season_number: 3, episode_number: +(localStorage.getItem("mockEp") || 4) + 1, air_date: "2026-11-10", name: "" } } : { release_date: localStorage.getItem("mockRelease") || "2026-12-01" }) };
           else body = { results: Array.from({ length: 14 }, (_, i) => hit(i + (path.length % 5), tv || (path.includes("trending") && i % 4 === 1))) };
           return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
         };
@@ -89,6 +89,7 @@
           if (cmd === "scan_folders" && location.search.includes("lib")) return args.folders.flatMap((f) => /dizi|series/i.test(f)
             ? ["Severance/Season 1/01 - Good News About Hell.mkv", "Severance/Season 1/02 - Half Loop.mkv", "Severance/Season 2/01 Hello Ms Cobel.mkv"].map((x) => f + "/" + x)
             : ["Dune.Part.Two.2024.1080p.mkv", "Dune Part Two (2024) 2160p HDR.mkv", "Inception.2010.mkv", "Paprika.2006.mkv"].map((x) => f + "/" + x)).map((x) => window.__renamed?.[x] ?? x);
+          if (cmd === "live_caption_status") return { running: false, path: "", generation: 0, error: "" };
           if (cmd === "plugins_list" || cmd === "fonts_list" || cmd === "torrent_list" || cmd === "scan_folders") return [];
           if (cmd === "plugin:dialog|open") return window.__pick ?? "C:/Films";
           if (cmd === "list_dir") { const files = JSON.parse(localStorage.getItem("files") || "[]").filter((f) => f.startsWith(args.path + "/") && !f.slice(args.path.length + 1).includes("/"));
@@ -188,6 +189,11 @@
           if (cmd === "cbz_pages") return ["1.png", "2.png", "3.png"];
           if (cmd === "cbz_page") return (await fetch("/__t/" + args.name)).arrayBuffer();
           if (cmd === "books_default_dir") return "C:/Luna Books";
+          if (cmd === "downloads_inventory") return [{ path: "C:/Users/me/Downloads/Luna Video/Big Buck Bunny.mp4", name: "Big Buck Bunny.mp4", size: 734003200, modified: 1763300000 }, { path: "C:/Users/me/Downloads/Luna Müzik/Clair de Lune.m4a", name: "Clair de Lune.m4a", size: 8400000, modified: 1763200000 }, { path: "C:/Luna Books/Mary Shelley - Frankenstein.epub", name: "Mary Shelley - Frankenstein.epub", size: 520000, modified: 1763100000 }];
+          if (cmd === "knaben_search") return { hits: [
+            { title: args.query.replace(/ /g, ".") + ".1080p.WEB.H264-FLUX", hash: "69502F808FE6944D02E1835247FA20C580C37CC7", magnetUrl: "magnet:?xt=urn:btih:69502f808fe6944d02e1835247fa20c580c37cc7&dn=x", bytes: 1073741824, liveSeeders: 230, tracker: "Nyaa" },
+            { title: args.query.replace(/ /g, ".") + ".720p.WEB", hash: "AA02F808FE6944D02E1835247FA20C580C37CC7A", magnetUrl: "magnet:?xt=urn:btih:aa02f808fe6944d02e1835247fa20c580c37cc7a&dn=y", bytes: 524288000, liveSeeders: 41, tracker: "EZTV" },
+          ] };
           if (cmd === "addon_get") { if (!args.url.includes("mock")) throw "Couldn't reach the addon"; return mockAddon(args.url); }
           if (cmd === "paths_exist") return args.paths.map((p) => !p.includes("Arrival"));
           if (cmd === "http_text_at") { const r = await fetch(args.url); if (!r.ok) throw "HTTP " + r.status; return [r.url, await r.text()]; }
@@ -213,6 +219,26 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // ?fakeTmdb: TMDB answers from here after a real-feeling delay (Discover and title windows without a key)
+      if (/[?&]fakeTmdb/.test(location.search)) {
+        localStorage.setItem("tmdbKey", "mock-key");
+        const real = window.fetch.bind(window), wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const film = (i) => ({ id: 1000 + i, title: "Mock Film " + i, release_date: "2026-0" + (1 + (i % 9)) + "-10", poster_path: "/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg", backdrop_path: "/hZkgoQYus5vegHoetLkCJzb17zJ.jpg",
+          vote_average: 6 + (i % 4), overview: "A mock overview for film " + i + ". ".repeat(1) + "Lorem ipsum dolor sit amet, consectetur adipiscing elit.", genre_ids: [27] });
+        window.fetch = async (u, o) => {
+          const url = String(u && u.url || u);
+          if (!url.includes("api.themoviedb.org")) return real(u, o);
+          await wait(450);
+          const path = new URL(url).pathname.replace("/3", "");
+          let body;
+          if (/\/credits$/.test(path)) body = { cast: Array.from({ length: 12 }, (_, i) => ({ id: i, name: "Actor " + i, character: "Role " + i, profile_path: null })) };
+          else if (/^\/(movie|tv)\/\d+$/.test(path)) { const id = +path.split("/")[2]; body = { ...film(id - 1000), genres: [{ name: "Korku" }], runtime: 93 }; }
+          else body = { page: 1, total_pages: 1, results: Array.from({ length: 20 }, (_, i) => film(i)) };
+          return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+        };
+      }
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

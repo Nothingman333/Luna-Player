@@ -1,0 +1,676 @@
+/* Luna's cinema language (design pass 2026-11-16).
+   One glass system, one signature (the projector light on the top edge of glass) and motion you can feel.
+   Rollback: git tag tasarim-oncesi-2026-11-16. */
+:root {
+  /* Liquid Glass (glisse): little frost, lively colour; small controls also bend the light (--glass-lens) */
+  --glass-1: blur(3px) saturate(150%);       /* floating controls */
+  --glass-2: blur(8px) saturate(150%);       /* menus, panels, windows: a touch more frost so text stays readable */
+  --glass-scrim: blur(12px) saturate(115%);  /* the curtain behind a window */
+  --glass-light: inset 0 0 0 .5px rgba(255, 255, 255, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.13); /* glisse edge + rim shine */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-pop: cubic-bezier(0.34, 1.32, 0.64, 1);
+}
+
+/* ---------- press feedback: every button gives a little under the finger ---------- */
+/* `scale` (not `transform`) so it stacks on top of any transform a button already has. */
+button { transition: scale 0.14s var(--ease-out); }
+button:active:not(:disabled):not([aria-disabled="true"]) { scale: 0.96; }
+
+/* ---------- player: the controls float over the film as one glass island ---------- */
+.root.playing .bottom {
+  isolation: isolate; padding: 64px 36px 30px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.5) 70%);
+}
+.root.playing .bottom::before {
+  content: ""; position: absolute; z-index: -1; inset: 44px 16px 14px; border-radius: 24px; pointer-events: none;
+  background: rgba(16, 16, 20, 0.56); -webkit-backdrop-filter: var(--glass-1); backdrop-filter: var(--glass-1);
+  border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: var(--glass-light), 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.root.playing .top, .root.playing .bottom { transition: opacity 0.3s ease, transform 0.5s var(--ease-out); }
+.root.playing.idle .bottom { transform: translateY(36px); }
+.root.playing.idle .top { transform: translateY(-24px); }
+
+/* on-screen messages (2×, volume, seek) land with a short punch */
+.osd {
+  background: rgba(16, 16, 20, 0.6); box-shadow: var(--glass-light), 0 10px 30px rgba(0, 0, 0, 0.4);
+  animation: lunaOsd 0.34s var(--ease-pop) both;
+}
+@keyframes lunaOsd { from { opacity: 0; scale: 0.7; filter: blur(6px); } }
+
+/* ---------- panels and menus open from where you clicked ---------- */
+.tracks, .sync, .sub-search { transform-origin: 85% 100%; animation: lunaRise 0.3s var(--ease-out) both; }
+.cm:not(.player-submenu) { animation: lunaDrop 0.22s var(--ease-out) both; }
+@keyframes lunaRise { from { opacity: 0; transform: translateY(14px) scale(0.94); filter: blur(4px); } }
+@keyframes lunaDrop { from { opacity: 0; transform: translateY(-6px) scale(0.94); filter: blur(3px); } }
+
+/* windows rise out of a curtain that slowly blurs the room */
+.modal { animation: lunaModal 0.42s var(--ease-out) both; }
+.modal-bg { animation: lunaScrim 0.3s ease backwards; } /* not "both": a held opacity animation makes the curtain a backdrop root and every window on it loses its blur */
+/* no filter blur in the entrance: blurring a whole large window (title detail with cast photos) each frame made it
+   stutter in; opacity + transform stay on the compositor */
+@keyframes lunaModal { from { opacity: 0; transform: translateY(24px) scale(0.95); } }
+@keyframes lunaScrim { from { opacity: 0; } }
+
+/* ---------- pages ---------- */
+/* Tabs and Film/Müzik/Kitap: a view transition (softly() in Morph.ts). The page you leave fades out drifting back while
+   the new one glides in from the side you moved to, at the same moment, so no empty or black frame shows between them. */
+.shell { overflow-x: hidden; }
+.shell-body { animation: none; }
+html { --vt-dir: 1; }
+html[data-nav-dir="back"] { --vt-dir: -1; }
+::view-transition-old(root), ::view-transition-new(root) {
+  animation-duration: 0.48s; animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1); animation-fill-mode: both;
+}
+::view-transition-old(root) { animation-name: lunaPageOut; }
+::view-transition-new(root) { animation-name: lunaPageIn; }
+@keyframes lunaPageOut { to { opacity: 0; translate: calc(var(--vt-dir) * -56px) 0; scale: 0.985; } }
+@keyframes lunaPageIn { from { opacity: 0; translate: calc(var(--vt-dir) * 72px) 0; } }
+/* the header doesn't move with the page: its pill already slides to the new tab */
+.app-header { view-transition-name: luna-header; }
+::view-transition-group(luna-header), ::view-transition-new(luna-header) { animation: none; }
+::view-transition-old(luna-header) { display: none; }
+
+/* A film page opens over the shelves as a box growing out of the poster; the shelves stay visible under it until the
+   box has filled the window (no black around it), then rest hidden. Back shows them at once, where you left them. */
+.root > .shell { isolation: isolate; }
+.root > .details { position: absolute; inset: 0; z-index: 2; background-color: var(--bg); }
+.shell.covered { visibility: hidden; opacity: 0; pointer-events: none; transition: visibility 0s linear 0.85s, opacity 0s linear 0.85s; }
+
+/* opening and closing windows/panels from their button: see Morph.ts */
+/* the soft rim that travels with the growing box: a shadow under its edge and the projector line on its top, so the
+   edge reads as a lifted card instead of a hard rectangular cut */
+.morph-rim {
+  position: fixed; pointer-events: none; will-change: left, top, width, height;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09), var(--glass-light), 0 0 0 1px rgba(0, 0, 0, 0.25),
+    0 16px 40px rgba(0, 0, 0, 0.45);
+}
+/* while a box grows or shrinks its glass is plain tinted (no live blur, no lens): cheap to redraw every frame, so
+   big windows such as a title's sheet move smoothly; the blur comes on when the box has landed */
+[data-morphing], [data-morphing] * { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+[data-morphing] .luna-lens { display: none; }
+
+/* ---------- liquid glass (Glisse) under the floating buttons: see LiquidGlass.tsx ---------- */
+.luna-lens.lg-glass {
+  position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
+  --lg-glass: rgba(22, 22, 26, 0.3); --lg-blur: 3px;
+  --lg-glass-bend: 0.5; --lg-glass-dispersion: 0.3; --lg-rim-shine: 0;
+  transition: --lg-glass 0.2s ease;
+}
+:is(.hdr-btn, .round.gear, label.search, .hero-actions > .ghost, .hero-choose, .notify-btn, .act, .glass-ib):has(> .luna-lens) { position: relative; }
+html[data-liquid-glass] :is(.hdr-btn, .round.gear, label.search, .hero-actions > .ghost, .hero-choose, .home-feature-toggle, .hero-arrow, .notify-btn, .act, .glass-ib):has(> .luna-lens) {
+  isolation: isolate; background: transparent !important; border-color: transparent !important;
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+}
+html[data-liquid-glass] :is(.hdr-btn, .round.gear, label.search, .hero-actions > .ghost, .hero-choose, .home-feature-toggle, .hero-arrow, .notify-btn, .act, .glass-ib):has(> .luna-lens):not(:focus-visible) { box-shadow: none !important; }
+:is(button, label):hover > .luna-lens.lg-glass, label.search:focus-within > .luna-lens.lg-glass { --lg-glass: rgba(255, 255, 255, 0.1); }
+.hero-choose[aria-expanded="true"] > .luna-lens.lg-glass, .home-feature-toggle[aria-expanded="true"] > .luna-lens.lg-glass { --lg-glass: rgba(var(--acc-rgb), 0.22); }
+
+/* glass on a film page takes the poster's colour, like glass over a photo takes the photo's tone */
+.details.tinted .d-hero .hero-actions > .ghost, .details.tinted .d-hero .hero-actions > .act,
+.details.tinted .d-gallery-trigger, .details.tinted .hero-choose {
+  background: color-mix(in srgb, rgb(var(--tint-rgb)) 16%, rgba(20, 20, 23, 0.55));
+  border-color: rgba(var(--tint-rgb), 0.35);
+}
+
+/* concentric corners: inner radius = outer radius - the padding between them */
+.cm { border-radius: 14px; }
+.cm-item { border-radius: 8px; }            /* 14 - 6 */
+.tracks { border-radius: 20px; }
+.tracks .titem { border-radius: 8px; }      /* panel padding is 18, so the floor value */
+.wp-pop { border-radius: 18px; }            /* items 6 = 18 - 12 inset look */
+
+/* posters arrive one after another the first time a shelf opens */
+.grid > * { animation: lunaCard 0.5s var(--ease-out) both; }
+.grid > :nth-child(2) { animation-delay: 0.03s; } .grid > :nth-child(3) { animation-delay: 0.06s; }
+.grid > :nth-child(4) { animation-delay: 0.09s; } .grid > :nth-child(5) { animation-delay: 0.12s; }
+.grid > :nth-child(6) { animation-delay: 0.15s; } .grid > :nth-child(7) { animation-delay: 0.18s; }
+.grid > :nth-child(8) { animation-delay: 0.21s; } .grid > :nth-child(9) { animation-delay: 0.24s; }
+.grid > :nth-child(10) { animation-delay: 0.27s; } .grid > :nth-child(11) { animation-delay: 0.3s; }
+.grid > :nth-child(n+12) { animation-delay: 0.33s; }
+@keyframes lunaCard { from { opacity: 0; transform: translateY(18px) scale(0.97); } }
+
+/* ---------- small labels: sentence case instead of spaced capitals ---------- */
+.plv-kicker, .ws-grp, .ts-books h4, .ts-coll .gh, .su-body h3, .pl-th, .ask-group-h, .lp-head, .lp-group,
+.browser-help h4, .reader-toc b, .browser-continue-card .cc-host, .browser-greet, .browser-suggest-row > em,
+.web-history-list h4, .browser-start-greeting, .web-keys h4, .rc-kicker,
+.taste-lab-box h4, .taste-lab-ai h4, .taste-lab-arow.head, .taste-lab-why-h {
+  text-transform: none !important; letter-spacing: 0 !important;
+}
+.reader-toc b, .browser-continue-card .cc-host, .browser-suggest-row > em, .web-history-list h4,
+.browser-start-greeting, .web-keys h4, .lp-group, .browser-greet { font-size: 12px !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  button:active:not(:disabled) { scale: none; }
+  .osd, .tracks, .sync, .sub-search, .cm, .modal, .modal-bg, .grid > * { animation: lunaFade 0.15s ease backwards !important; }
+  .root.playing.idle .bottom, .root.playing.idle .top { transform: none; }
+}
+@keyframes lunaFade { from { opacity: 0; } }
+
+/* ---------- sliding pill: Film/Müzik/Kitap/Web and the page tabs (see useSlidingPill in Screens.tsx) ---------- */
+.mode-switch, .app-header .tabs { position: relative; }
+.slide-pill { position: absolute; left: 0; top: 0; z-index: 0; pointer-events: none; opacity: 0; }
+.mode-switch > .slide-pill { background: var(--accent); border-radius: 16px; box-shadow: var(--glass-light), 0 4px 14px rgba(var(--acc-rgb), 0.28); }
+.app-header .tabs > .slide-pill { background: rgba(255, 255, 255, 0.08); border-radius: 19px; }
+/* the slide itself is a Web Animation (useSlidingPill); only the colour fades here */
+[data-pill-ready] > .slide-pill { transition: background-color 0.35s ease, box-shadow 0.35s ease, opacity 0.2s ease; }
+.mode-switch > .mode-btn, .app-header .tabs > .tab { position: relative; z-index: 1; }
+.mode-switch > .mode-btn.on, .app-header .tabs > .tab.on { background: transparent; }
+.mode-switch > .mode-btn { transition: color 0.3s ease, scale 0.14s var(--ease-out); }
+.mode-switch > .mode-btn .lbl { transition: opacity 0.25s ease; }
+@media (prefers-reduced-motion: reduce) { [data-pill-ready] > .slide-pill { transition: opacity 0.15s ease; } }
+.app-header .tabs > .tab.on:not(:focus-visible) { box-shadow: none; }
+.app-header .tabs > .slide-pill { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
+html[data-mode="music"] .app-header .tabs > .slide-pill, html[data-mode="books"] .app-header .tabs > .slide-pill { background: rgba(var(--acc-rgb), 0.14); }
+
+/* ---------- one glass for everything that floats ---------- */
+/* Menus and popovers (the ⋯ menus, analysis options, friends' ratings) were solid boxes; they are the same glass as
+   the windows now. `html` in front outweighs the screens' own CSS that loads later. */
+html :is(.cm, .la-opts, .friends-ratings, .wp-pop, .sync, .sub-search, .disc-filter-menu, .fc-pop, .fc-rate, .song-rate,
+  .lp-menu, .share-pop, .update-popup, .bxp-sheet, .mini-vol-pop, .tr-menu, .tr-pop, .assistant-more[open] > div,
+  .browser-ctx-pop, .browser-luna-pop, .browser-suggest-pop, .browser-tab-menu, .browser-tools-pop) {
+  background: linear-gradient(160deg, rgba(42, 42, 48, 0.62), rgba(18, 18, 22, 0.76));
+  -webkit-backdrop-filter: var(--glass-2); backdrop-filter: var(--glass-2);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: var(--glass-light), 0 18px 48px rgba(0, 0, 0, 0.5);
+}
+/* on a film page they take the poster's tone, like the buttons */
+html .details.tinted :is(.la-opts, .friends-ratings) {
+  background: linear-gradient(160deg, color-mix(in srgb, rgb(var(--tint-rgb)) 14%, rgba(36, 36, 42, 0.64)), rgba(18, 18, 22, 0.78));
+}
+/* the friends' list opens over the boxes above it, not under them */
+.friends-watched:has(.friends-ratings) { position: relative; z-index: 3; }
+
+/* boxes on a film page ("file not found", relink in bulk) are glass over the backdrop, not flat panels */
+.d-body > .luna-extra {
+  background: rgba(20, 20, 24, 0.5); border-color: rgba(255, 255, 255, 0.1);
+  -webkit-backdrop-filter: var(--glass-1); backdrop-filter: var(--glass-1); box-shadow: var(--glass-light);
+}
+.dlp { box-shadow: var(--glass-light); }
+.details.tinted :is(.d-body > .luna-extra, .dlp) { background: color-mix(in srgb, rgb(var(--tint-rgb)) 10%, rgba(20, 20, 23, 0.55)); }
+.details.tinted .dlp:not(.missing) { border-color: rgba(var(--tint-rgb), 0.3); }
+
+/* ---------- Luna Web keeps Luna's frame ---------- */
+/* The compact web bar's Luna mark sits exactly where the main header's mark sits (48px in, 76px tall bar), so
+   switching between Film/Müzik/Kitap and Web no longer makes the logo jump. */
+@media (min-width: 761px) {
+  html .browser-shell.is-compact .browser-chrome { min-height: 76px; padding: 18px 18px 18px 41px; }
+}
+
+/* ---------- glass everywhere: the bars ---------- */
+/* Luna Web's bar is the same glass as the main header (it was a solid strip, so Web felt like another app). */
+html .browser-shell .browser-chrome, html .browser-shell.is-compact .browser-chrome {
+  background: rgba(10, 10, 11, 0.55); -webkit-backdrop-filter: var(--glass-1); backdrop-filter: var(--glass-1);
+  box-shadow: var(--glass-light);
+  /* backdrop-filter makes the bar its own layer: lift the whole bar so its drop-downs (tools, extensions,
+     address suggestions) sit above the page instead of under it (they showed as empty black boxes) */
+  position: relative; z-index: 30;
+}
+/* the expanded Luna rail in Web: glass like the Film/Müzik/Kitap switch */
+html .browser-luna-anchor:is(:hover, .is-open) .browser-luna-rail {
+  background: rgba(28, 28, 33, 0.6); -webkit-backdrop-filter: var(--glass-1); backdrop-filter: var(--glass-1);
+}
+/* music dock and the book reader's bars float over the page as glass, keeping their own tint */
+html .mu-dock { -webkit-backdrop-filter: var(--glass-1); backdrop-filter: var(--glass-1); box-shadow: var(--glass-light), 0 12px 40px rgba(0, 0, 0, 0.45); }
+
+/* ---------- skeletons: the page keeps its shape while it loads ---------- */
+/* placeholder cards carry their title lines too, so nothing below jumps when the real cards arrive */
+.disc-card.ghost-card::after, .bk-card.ghost-card::after {
+  content: ""; display: block; height: 11px; width: 72%; margin: 10px 0 22px; border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06); box-shadow: 0 17px 0 -1px rgba(255, 255, 255, 0.035);
+}
+.bk-card.ghost-card .bk-cover, .disc-hero.placeholder {
+  background-color: #17171b;
+  background-image: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.045) 50%, transparent 70%);
+  background-size: 220% 100%; animation: shimmer 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ghost-card .disc-poster, .bk-card.ghost-card .bk-cover, .disc-hero.placeholder { animation: none; }
+}
+
+/* ---------- glass everywhere: the pieces left solid (user list 2026-11-17) ---------- */
+/* small flags on cards and posters: the floating-control glass */
+html :is(.disc-flag, .tmdb-badge, .library-rating-badge, .library-copy-badge, .copies-n, .thumb-src, .thumb-done, .done-badge, .my-score, .taste-lab-flag, .badges .qb) {
+  background: rgba(14, 14, 17, 0.5); -webkit-backdrop-filter: var(--glass-1); backdrop-filter: var(--glass-1);
+  border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: var(--glass-light);
+}
+/* the coloured quality flags keep their colour as text, the plate is glass */
+html .badges .qb.hdr { color: #f3c969; } html .badges .qb.uhd { color: #fff; } html .badges .qb.srt { color: #8fd3ff; }
+
+/* detail pages (film, series, book): round action buttons and the ask chips */
+html :is(.hero-actions, .td-actions, .bk-d-acts, .bk-d-actions) .act,
+html .la-gear, html .book-ask-shortcut {
+  background: rgba(255, 255, 255, 0.07); -webkit-backdrop-filter: var(--glass-1); backdrop-filter: var(--glass-1);
+  border-color: rgba(255, 255, 255, 0.16); box-shadow: var(--glass-light);
+}
+html :is(.hero-actions, .td-actions, .bk-d-acts, .bk-d-actions) .act:hover, html .la-gear:hover, html .book-ask-shortcut:hover { background: rgba(255, 255, 255, 0.14); }
+/* accent buttons and the assistant bubble: tinted glass, the accent shows through */
+html .la-head .primary, html .ai-bubble {
+  background: rgba(var(--acc-rgb), 0.78); -webkit-backdrop-filter: var(--glass-1); backdrop-filter: var(--glass-1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 10px 30px rgba(var(--acc-rgb), 0.25);
+}
+
+/* Luna Web start page: search, recent sites, destinations and the lower cards */
+html :is(.browser-start-search, .browser-top-site, .browser-destination, .browser-lower-grid > *) {
+  background: rgba(255, 255, 255, 0.045); -webkit-backdrop-filter: var(--glass-1); backdrop-filter: var(--glass-1);
+  border-color: rgba(255, 255, 255, 0.1); box-shadow: var(--glass-light);
+}
+/* Luna Web menus over the page: the panel glass */
+html :is(.browser-tab-menu, .browser-ctx-pop, .browser-collections-pop, .browser-tools-pop, .browser-extensions-pop, .browser-suggest) {
+  background: rgba(20, 20, 24, 0.72); -webkit-backdrop-filter: var(--glass-2); backdrop-filter: var(--glass-2);
+  border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: var(--glass-light), 0 24px 70px rgba(0, 0, 0, 0.55);
+}
+/* Luna Web's right-click / tab menu. The page window is above Luna's, so it cuts a hole for the menu; the menu waits
+   for the hole (.is-wait), then grows from the pointer with a short spring. Behind it Luna shows a picture of the page
+   (.wm-page, sharp) and inside it the same picture blurred (.wm-glass): real glass over the page, glisse style. Closing
+   fades over that picture before the hole shuts, so nothing dark flashes. Rows share one sliding plate (menuPlate.ts). */
+html .browser-tab-menu {
+  background: linear-gradient(160deg, rgba(48, 48, 56, 0.86), rgba(22, 22, 27, 0.9) 60%);
+  -webkit-backdrop-filter: var(--glass-2); backdrop-filter: var(--glass-2);
+  border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 14px;
+  box-shadow: var(--glass-light), 0 12px 28px rgba(0, 0, 0, 0.38), 0 2px 6px rgba(0, 0, 0, 0.22);
+  overflow: hidden; isolation: isolate; animation: none;
+}
+html .browser-tab-menu.is-wait { opacity: 0; pointer-events: none; }
+html .browser-tab-menu.is-open { animation: wm-in .26s cubic-bezier(.22, 1, .36, 1) both; }
+html .browser-tab-menu.is-open > :is(button, hr) { animation: wm-rows .3s cubic-bezier(.22, 1, .36, 1) both; }
+html .browser-tab-menu:is(.is-closing, .is-uncut) { opacity: 0; transform: scale(.97); pointer-events: none;
+  transition: opacity .13s cubic-bezier(.4, 0, 1, 1), transform .13s cubic-bezier(.4, 0, 1, 1); }
+@keyframes wm-in { from { opacity: 0; transform: scale(.92); } 60% { opacity: 1; } }
+@keyframes wm-rows { from { opacity: 0; transform: translateY(-4px); } }
+html .browser-tab-menu.has-glass { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none;
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 0 0 .5px rgba(255, 255, 255, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 12px 28px rgba(0, 0, 0, 0.36), 0 2px 6px rgba(0, 0, 0, 0.2); }
+.wm-glass { position: absolute; inset: 0; z-index: -1; overflow: hidden; border-radius: inherit; pointer-events: none; }
+.wm-glass img { position: absolute; max-width: none; filter: blur(22px) saturate(1.7) brightness(.82); transform: translateZ(0); }
+.wm-glass::after { content: ""; position: absolute; inset: 0; background: linear-gradient(160deg, rgba(40, 40, 46, 0.52), rgba(20, 20, 24, 0.66)); }
+.wm-page { position: fixed; z-index: 399; overflow: hidden; pointer-events: none; }
+.wm-page img { position: absolute; max-width: none; }
+html .browser-tab-menu > :is(button, hr) { position: relative; z-index: 1; }
+html .browser-tab-menu.has-plate > button:hover, html .browser-tab-menu.has-plate > button:focus-visible { background: transparent; }
+html .browser-tab-menu:not(.has-plate) button:hover, html .browser-tab-menu:not(.has-plate) button:focus-visible { background: rgba(255, 255, 255, 0.09); }
+html .browser-tab-menu > .cm-plate { background: rgba(255, 255, 255, 0.11); border-radius: 8px; }
+@media (prefers-reduced-motion: reduce) {
+  html .browser-tab-menu.is-open, html .browser-tab-menu.is-open > * { animation: none; }
+  html .browser-tab-menu:is(.is-closing, .is-uncut) { transform: none; }
+}
+
+/* title detail: a big glass window full of photos. Scaling it re-blurs its glass every frame and it stutters,
+   so it only fades and rises; a new title in the same place re-runs it (keyed), so window to window has motion too */
+.modal.td { animation: lunaTdIn .3s var(--ease-out) both; will-change: transform, opacity; }
+@keyframes lunaTdIn { from { opacity: 0; transform: translateY(18px); } }
+@media (prefers-reduced-motion: reduce) { .modal.td { animation: none; } }
+/* a card clicked by mouse gets focus back when the window closes: no square ring around the whole card */
+.disc-card:focus-visible { box-shadow: none !important; }
+.disc-card:focus-visible .disc-poster { box-shadow: var(--ring); }
+
+.act.on > .luna-lens.lg-glass { --lg-glass: rgba(var(--acc-rgb), 0.28); }
+
+/* glisse-style menus: the look stays Luna's; one plate slides under the hovered row (menuPlate.ts) and the menu
+   grows out of its corner with a quick spring instead of a slow blurred drop */
+.cm:not(.player-submenu) { animation: lunaMenuIn .18s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes lunaMenuIn { from { opacity: 0; transform: scale(.94); } }
+.cm-plate {
+  position: absolute; top: 0; left: 0; z-index: 0; pointer-events: none; border-radius: 8px; opacity: 0;
+  background: rgba(var(--acc-rgb), 0.2);
+  transition: transform .1s cubic-bezier(.2, .8, .2, 1), width .1s cubic-bezier(.2, .8, .2, 1), height .1s cubic-bezier(.2, .8, .2, 1), opacity 80ms ease-out;
+}
+.cm-plate.on { opacity: 1; }
+.cm-plate.danger { background: rgba(229, 72, 77, 0.18); }
+.cm.has-plate > .cm-item { position: relative; z-index: 1; }
+.cm.has-plate > .cm-item:hover, .cm.has-plate > .cm-item:focus-visible { background: transparent; }
+@media (prefers-reduced-motion: reduce) { .cm-plate { transition: opacity 80ms ease-out; } .cm:not(.player-submenu) { animation: lunaFade .1s ease-out both; } }
+@keyframes lunaFade { from { opacity: 0; } }
+
+/* ---------- one glass for the title page (glisse recipe, Luna colours) ----------
+   rating badges, quality chips, the copy cards and every round action (vote buttons included) share the same
+   material: dark see-through fill, 3px frost with lively colour, a hairline edge and a rim of light on top */
+html {
+  --lg-fill: rgba(40, 40, 40, 0.62);
+  --lg-fill-hover: rgba(70, 70, 70, 0.62);
+  --lg-edge: inset 0 0 0 0.5px rgba(255, 255, 255, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.13);
+}
+html :is(.copy, .hero-actions .act, .td-actions .act, .vote-wrap .act) {
+  background: var(--lg-fill) !important; border: 0 !important; box-shadow: var(--lg-edge) !important;
+  -webkit-backdrop-filter: var(--glass-1); backdrop-filter: var(--glass-1);
+}
+html .vote-wrap { background: none !important; border: 0 !important; box-shadow: none !important; padding: 0 !important; }
+html :is(.hero-actions .act, .td-actions .act, .vote-wrap .act, .copy):hover { background: var(--lg-fill-hover) !important; }
+/* chosen state: the same glass, tinted with Luna's accent, no thick orange frame */
+html :is(.hero-actions .act, .td-actions .act, .vote-wrap .act).on, html .copy.on {
+  background: rgba(var(--acc-rgb), 0.22) !important;
+  box-shadow: inset 0 0 0 0.5px rgba(var(--acc-rgb), 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.16) !important;
+}
+html :is(.hero-actions .act, .td-actions .act, .vote-wrap .act).on.bad { background: rgba(229, 72, 77, 0.2) !important; box-shadow: inset 0 0 0 0.5px rgba(229, 72, 77, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.16) !important; }
+/* rating badges and quality chips look like the provider chips ("Abonelikle"): one dark pill with a hairline
+   border; only the text keeps its colour (TMDB/accent, HDR gold, ...) */
+html .d-meta :is(.rating, .my-score), html .d-body .badges .qb, html .td :is(.tmdb-badge, .my-score) {
+  display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 10px; border-radius: 999px;
+  background: var(--panel) !important; border: 1px solid var(--line) !important; box-shadow: none !important;
+  font-size: 12px; font-weight: 600; line-height: 1;
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+/* "Kopyaladığın bağlantı" offer: Close is a real button, as tall as Import */
+.clip-offer .chip { height: 34px; padding: 0 16px; font-size: 13px; border-radius: 999px; }
+html .copy { border-radius: 14px; }
+
+/* smooth title window and scrolling: live blur is the costliest thing WebView2 draws. The curtain behind a title
+   window is a plain dark veil (nothing to blur through it anyway), the window itself is near-solid, and the small
+   flags on cards in long scrolling rows don't blur, so scrolling doesn't redraw dozens of blurs every frame */
+.modal-bg:has(> .modal.td) { background: rgba(0, 0, 0, 0.74); -webkit-backdrop-filter: none; backdrop-filter: none; }
+html .modal.td { background: rgb(22, 22, 25) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+:is(.disc-card, .poster, .plg-card, .bk-card, .thumb) :is(.disc-flag, .tmdb-badge, .library-rating-badge, .library-copy-badge, .copies-n, .thumb-src, .thumb-done, .done-badge, .my-score, .taste-lab-flag, .qb) {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important; background-color: rgba(18, 18, 22, 0.78);
+}
+.td-cast2 { animation: lunaFade .2s ease-out both; }
+/* the title window holds still and invisible until its content is in, then rises once (TasteUI TitleDetail) */
+/* opacity 0.001, not 0: the browser draws it while waiting, so the first frames of the rise aren't spent painting
+   the backdrop picture and the text (that made the rise start slow and then snap to the end) */
+html .modal.td.td-wait { animation: none; opacity: 0.001; }
+.modal-bg:has(> .modal.td.td-wait) { cursor: progress; }
+
+/* while the page scrolls (rubberBand.ts installScrollCalm): lenses and the header's blur rest as plain glass */
+/* the header is left alone: it is a small strip, and its glass switching to flat grey and back on every scroll was the
+   flicker on its right-hand buttons */
+/* while scrolling only the costly refraction rests; the frost and the tint stay, so a button keeps its look instead of
+   flipping to flat grey and back */
+.shell.is-scrolling .luna-lens.lg-glass { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+.shell.is-scrolling .luna-lens.lg-glass * { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+
+/* the title window turns to glass once it has landed (glisse: see-through dark, frost, hairline edge, rim light);
+   the curtain behind it is lighter so the page shows blurred through the window */
+.modal-bg:has(> .modal.td) { background: rgba(0, 0, 0, 0.5); }
+html .modal.td.td-landed {
+  /* will-change: opacity (kept for the rise) switches the window's backdrop blur off in Chromium/WebView2: the page
+     behind stayed sharp and the glass only looked see-through. Once landed it goes. */
+  will-change: auto;
+  background: rgba(22, 22, 27, 0.82) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(170%) !important; backdrop-filter: blur(30px) saturate(170%) !important;
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.13), 0 30px 80px rgba(0, 0, 0, 0.55);
+}
+html .modal.td:not(.td-landed) { background: rgba(24, 24, 28, 0.96) !important; }
+
+/* the showcase behind everything kept the GPU busy every frame: all six backdrops zoomed (Ken Burns) though only one
+   shows, and the progress line animated its width (a layout every frame). Now only the shown backdrop moves, the
+   line grows on the compositor, and both rest while a window is open over them (its glass then has a still
+   picture to blur instead of re-blurring a moving one each frame) */
+.hero .hero-bg:not(.on) { animation-play-state: paused; }
+.hero-dot-fill { width: 100%; transform-origin: left center; animation-name: dotfill-x; }
+@keyframes dotfill-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+body:has(.modal-bg) :is(.hero-bg, .hero-dot-fill) { animation-play-state: paused !important; }
+/* the same inside a window that scrolls: its buttons' lenses and small glass pieces rest while it moves
+   (measured in a title window: ~60 fps with them, ~178 without); the window's own glass stays */
+.modal.is-scrolling * { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+
+/* a face with no photo (only a letter) has nothing to wait for: no endless shimmer */
+.face:not(:has(img)) { animation: none; }
+
+/* header buttons: the bell carried the gear's class and spun 60° like a gear. It rings now: a short swing from its
+   top that dies out, the way a real bell moves. Other round buttons no longer twist their icon; it lifts a touch. */
+.round:hover svg { transform: scale(1.08); transition: transform .32s cubic-bezier(.22, 1, .36, 1); }
+.round[aria-label="Geri"]:hover svg { transform: translateX(-2px); }
+.gear:not(.notify-btn):hover svg { transform: rotate(45deg); transition: transform .7s cubic-bezier(.22, 1, .36, 1); }
+.notify-btn svg { transform-origin: 50% 12%; }
+.notify-btn:hover svg { transform: none; animation: bellRing .9s cubic-bezier(.36, .07, .19, .97) both; }
+.notify-btn:active svg { animation: none; transform: scale(.92); transition: transform .08s ease-out; }
+@keyframes bellRing {
+  0% { transform: rotate(0); } 12% { transform: rotate(14deg); } 26% { transform: rotate(-11deg); }
+  40% { transform: rotate(7deg); } 54% { transform: rotate(-4deg); } 68% { transform: rotate(2deg); } 100% { transform: rotate(0); }
+}
+/* the unread count arrives with a small pop */
+.notify-badge { animation: badgePop .42s cubic-bezier(.22, 1.4, .36, 1) both; }
+@keyframes badgePop { from { transform: scale(.4); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .round:hover svg, .gear:not(.notify-btn):hover svg { transform: none; }
+  .notify-btn:hover svg, .notify-badge { animation: none; }
+}
+
+/* Settings (and the other big glass workspaces): they scaled up from 94 % with an overshoot while the whole-screen
+   blur faded in behind, and the first frames went to painting the big glass box, so it started late and jumped.
+   Now: the box is painted first (held at opacity .001 for 40 ms), then grows from the top right, where the gear is,
+   on one smooth curve with no bounce; the side list follows a moment later, row by row. */
+.chat-scrim { animation: wsScrim .28s cubic-bezier(.22, 1, .36, 1) both; }
+@keyframes wsScrim { from { opacity: 0; } }
+.chat-ws { transform-origin: 50% 0%; animation: wsIn .42s cubic-bezier(.22, 1, .36, 1) 40ms backwards; }
+/* the window never fades (a fading glass has no blur in Chromium): it unrolls from the top, its contents fade */
+.chat-ws > * { animation: lunaGlassText .3s ease-out 110ms backwards; }
+.set-ws { transform-origin: 88% 0%; }
+@keyframes wsIn { from { transform: translateY(-10px) scale(.93); clip-path: inset(0 0 100% 0 round 24px); } to { clip-path: inset(-60px -80px -100px -80px round 24px); } }
+.set-ws .set-nav-i { animation: wsRow .44s cubic-bezier(.22, 1, .36, 1) both; }
+.set-ws .set-nav-i:nth-child(1) { animation-delay: 90ms; } .set-ws .set-nav-i:nth-child(2) { animation-delay: 110ms; }
+.set-ws .set-nav-i:nth-child(3) { animation-delay: 130ms; } .set-ws .set-nav-i:nth-child(4) { animation-delay: 150ms; }
+.set-ws .set-nav-i:nth-child(5) { animation-delay: 170ms; } .set-ws .set-nav-i:nth-child(6) { animation-delay: 190ms; }
+.set-ws .set-nav-i:nth-child(7) { animation-delay: 210ms; } .set-ws .set-nav-i:nth-child(n+8) { animation-delay: 230ms; }
+@keyframes wsRow { from { opacity: 0; transform: translateX(-8px); } }
+/* the showcase behind rests while a workspace is open, so the curtain's blur has a still picture */
+body:has(.chat-ws-wrap) :is(.hero-bg, .hero-dot-fill) { animation-play-state: paused !important; }
+@media (prefers-reduced-motion: reduce) {
+  .chat-ws { animation: lunaFade .16s ease-out both; }
+  .set-ws .set-nav-i { animation: none; }
+}
+
+/* ---------- everything that floats opens the same way (2026-11-18) ----------
+   Chromium switches backdrop blur off while the glass itself is less than fully opaque, so fading a menu in showed
+   the page sharp through it and the blur "loaded" at the end. The glass never fades now: it grows out of its anchor
+   (scale + translate, which keep any positioning transform) while a clip reveals it, and only the contents fade. */
+@keyframes lunaGlassDown {
+  from { scale: .96; translate: 0 -6px; clip-path: inset(0 0 calc(100% - 20px) 0 round 16px); }
+  to { scale: 1; translate: 0 0; clip-path: inset(-40px -60px -80px -60px round 16px); }
+}
+@keyframes lunaGlassUp {
+  from { scale: .96; translate: 0 8px; clip-path: inset(calc(100% - 20px) 0 0 0 round 16px); }
+  to { scale: 1; translate: 0 0; clip-path: inset(-40px -60px -80px -60px round 16px); }
+}
+@keyframes lunaGlassText { from { opacity: 0; } }
+html body :is(.cm:not(.player-submenu), .la-opts, .friends-ratings.below, .disc-filter-menu, .fc-pop, .fc-rate, .song-rate,
+  .lp-menu, .share-pop, .notify-panel, .luna-select-options, .lx-pop, .mini-vol-pop, .tr-menu, .tr-pop, .update-popup, .assistant-more[open] > div,
+  .browser-ctx-pop, .browser-luna-pop, .browser-suggest-pop, .browser-tools-pop) {
+  animation: lunaGlassDown .26s cubic-bezier(.22, 1, .36, 1) backwards !important;
+}
+html body :is(.tracks, .friends-ratings:not(.below), .sync, .sub-search, .wp-pop) {
+  animation: lunaGlassUp .28s cubic-bezier(.22, 1, .36, 1) backwards !important;
+}
+html body :is(.cm:not(.player-submenu), .la-opts, .friends-ratings, .disc-filter-menu, .fc-pop, .lp-menu, .share-pop,
+  .notify-panel, .luna-select-options, .browser-ctx-pop, .browser-luna-pop, .browser-tools-pop, .tracks, .sync, .sub-search, .wp-pop) > :not(.cm-plate) {
+  animation: lunaGlassText .2s ease-out 50ms backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  html body :is(.cm, .la-opts, .friends-ratings, .disc-filter-menu, .fc-pop, .fc-rate, .song-rate, .lp-menu, .share-pop,
+    .notify-panel, .luna-select-options, .browser-ctx-pop, .browser-luna-pop, .browser-suggest-pop, .browser-tools-pop,
+    .tracks, .sync, .sub-search, .wp-pop) { animation: none !important; }
+}
+
+/* a panel whose contents change (Görüntü ↔ Ses, Kadraj opening) grows to its new height instead of jumping */
+.smooth-h { transition: height .32s cubic-bezier(.22, 1, .36, 1); }
+.vs-pane { animation: vsPane .3s cubic-bezier(.22, 1, .36, 1) backwards; }
+@keyframes vsPane { from { opacity: 0; translate: 0 6px; } }
+
+/* gear panel: Görüntü / Ses is one segmented switch with a sliding plate */
+.player-gear .player-settings-nav {
+  position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 0; padding: 3px; margin: 0 0 14px;
+  border-radius: 12px; background: rgba(255, 255, 255, .06); box-shadow: inset 0 0 0 .5px rgba(255, 255, 255, .08);
+}
+.player-gear .player-settings-nav::before {
+  content: ""; position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px); border-radius: 9px;
+  background: rgba(var(--acc-rgb), .2); box-shadow: inset 0 0 0 .5px rgba(var(--acc-rgb), .55), 0 2px 8px rgba(0, 0, 0, .25);
+  transition: translate .34s cubic-bezier(.22, 1, .36, 1);
+}
+.player-gear .player-settings-nav[data-on="sound"]::before { translate: 100% 0; }
+.player-gear .player-settings-nav > .chip {
+  position: relative; z-index: 1; justify-content: center; min-height: 32px; border: 0 !important;
+  background: transparent !important; box-shadow: none !important; color: var(--muted); transition: color .2s ease-out;
+}
+.player-gear .player-settings-nav > .chip.on { color: var(--text); }
+
+/* picture sliders: one quiet card, two columns, the fill grows from zero so a change reads at a glance */
+.vset .vs-card {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px 20px; padding: 14px 16px; margin: 4px 0 6px;
+  border-radius: 14px; background: rgba(255, 255, 255, .04); box-shadow: inset 0 0 0 .5px rgba(255, 255, 255, .07);
+}
+.vset .vs-card .vslider { display: flex; flex-direction: column; align-items: stretch; text-align: left; gap: 6px; padding: 0; font-size: 12.5px; color: rgba(255, 255, 255, .74); }
+.vs-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.vs-card .vval { font-size: 12px; color: var(--muted); transition: color .2s ease-out; }
+.vs-card .vslider.moved .vval { color: var(--accent); }
+.vs-card input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 18px; margin: 0; background: transparent; cursor: pointer; accent-color: auto; }
+.vs-card input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 4px;
+  background: linear-gradient(to right, rgba(255, 255, 255, .14) min(var(--z), var(--p)), var(--accent) min(var(--z), var(--p)),
+    var(--accent) max(var(--z), var(--p)), rgba(255, 255, 255, .14) max(var(--z), var(--p)));
+}
+.vs-card input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 16px; height: 16px; margin-top: -6px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .45); transition: scale .16s cubic-bezier(.22, 1, .36, 1), box-shadow .16s ease-out;
+}
+.vs-card input[type="range"]:hover::-webkit-slider-thumb { scale: 1.1; }
+.vs-card input[type="range"]:active::-webkit-slider-thumb { scale: 1.18; box-shadow: 0 1px 4px rgba(0, 0, 0, .45), 0 0 0 6px rgba(var(--acc-rgb), .2); }
+.vs-card input[type="range"]:focus-visible { outline: none; }
+.vs-card input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(var(--acc-rgb), .6); }
+.vs-card .vs-switch { grid-column: 1 / -1; margin: 0; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, .07); font-size: 12.5px; }
+@media (max-width: 520px) { .vset .vs-card { grid-template-columns: 1fr; } }
+
+/* the scene/word notebook in the player: a panel above its button, not a full-screen window over the film */
+.tracks.note-pop {
+  display: block; position: absolute; right: -40px; bottom: calc(100% + 64px); min-width: 0;
+  width: min(460px, calc(100vw - 24px)); max-height: min(560px, calc(100dvh - 140px)); padding: 16px 18px;
+  transform-origin: 80% 100%; overscroll-behavior: contain;
+}
+.note-pop .vset-head { margin-bottom: 10px; }
+.note-pop .luna-extra { margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
+
+/* ---------- closing: the same way back (exitGhosts.ts keeps the closed piece for one animation) ---------- */
+@keyframes lunaGlassOutDown {
+  from { clip-path: inset(-40px -60px -80px -60px round 16px); }
+  to { scale: .97; translate: 0 -4px; clip-path: inset(0 0 100% 0 round 16px); }
+}
+@keyframes lunaGlassOutUp {
+  from { clip-path: inset(-40px -60px -80px -60px round 16px); }
+  to { scale: .97; translate: 0 6px; clip-path: inset(100% 0 0 0 round 16px); }
+}
+@keyframes lunaGlassTextOut { to { opacity: 0; } }
+html body :is(.cm, .la-opts, .friends-ratings.below, .disc-filter-menu, .fc-pop, .fc-rate, .song-rate, .lp-menu, .share-pop,
+  .notify-panel, .luna-select-options, .lx-pop, .mini-vol-pop, .tr-menu, .tr-pop, .update-popup).lg-leaving {
+  animation: lunaGlassOutDown .18s cubic-bezier(.4, 0, .8, .3) forwards !important;
+}
+html body :is(.tracks, .friends-ratings:not(.below), .sync, .sub-search, .wp-pop).lg-leaving {
+  animation: lunaGlassOutUp .2s cubic-bezier(.4, 0, .8, .3) forwards !important;
+}
+html body .lg-leaving > * { animation: lunaGlassTextOut .12s ease-in forwards !important; }
+/* the settings / collections window shrinks back toward the gear, its curtain fades */
+html body .chat-ws.lg-leaving { animation: wsOut .22s cubic-bezier(.4, 0, .8, .3) forwards !important; }
+@keyframes wsOut {
+  from { clip-path: inset(-60px -80px -100px -80px round 24px); }
+  to { transform: translateY(-10px) scale(.95); clip-path: inset(0 0 100% 0 round 24px); }
+}
+html body .chat-scrim.lg-leaving { animation: lunaGlassTextOut .22s ease-out forwards !important; }
+[data-ghost] { pointer-events: none !important; }
+
+/* ---------- Settings / Collections list: glisse menu flow ----------
+   one plate follows the pointer (menuPlate.ts) and the chosen row's plate slides to a new choice */
+.set-nav { position: relative; }
+.set-nav > .cm-plate { background: rgba(255, 255, 255, .06); border-radius: 12px; }
+.set-nav.has-plate > .set-nav-i, .set-nav.has-pick > .set-nav-i { position: relative; z-index: 1; }
+.set-nav.has-plate > .set-nav-i:hover { background: transparent; }
+.set-nav.has-pick > .set-nav-i.on { background: transparent; box-shadow: none; }
+.nav-pick {
+  position: absolute; top: 0; left: 0; z-index: 0; pointer-events: none; border-radius: 12px;
+  background: rgba(255, 255, 255, .09); box-shadow: var(--glass-light), inset 2px 0 0 var(--accent);
+  transition: transform .34s cubic-bezier(.22, 1, .36, 1), width .34s cubic-bezier(.22, 1, .36, 1), height .34s cubic-bezier(.22, 1, .36, 1);
+}
+.set-nav-i svg { transition: color .2s ease-out; }
+@media (prefers-reduced-motion: reduce) { .nav-pick { transition: none; } }
+
+/* ---------- glisse values (the reference the user gave: bend .77, dispersion 1.45, 3px frost, rim shine .25) ---------- */
+.luna-lens.lg-glass { --lg-glass-bend: 0.77; --lg-glass-dispersion: 1.45; --lg-blur: 3px; --lg-rim-shine: 0; }
+
+/* ---------- header: one button design (2026-11-18) ----------
+   every header control wears the mode switch's capsule (faint white fill, hairline edge), so the left and right halves
+   are the same design, not just similar ones; no lens, so nothing changes while the page scrolls */
+.app-header :is(label.search, .hdr-btn, .notify-btn, .round.gear) {
+  background: rgba(255, 255, 255, 0.05) !important; border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important; box-shadow: none;
+  transition: background-color .2s ease, border-color .2s ease, color .2s ease;
+}
+.app-header :is(.hdr-btn, .notify-btn, .round.gear):hover, .app-header label.search:hover { background: rgba(255, 255, 255, 0.09) !important; }
+.app-header label.search:focus-within { background: rgba(255, 255, 255, 0.09) !important; border-color: rgba(255, 255, 255, 0.16) !important; }
+.app-header .notify-btn[aria-expanded="true"] { background: rgba(255, 255, 255, 0.12) !important; }
+
+/* the hero's Detaylar / Fragman sit over the hero's dark left fade, where the same clear glass read as an empty ring:
+   they wear the frosted fill "Bu akşam ne izlesem?" shows over the picture, so the hero's glass buttons look alike */
+:is(.home-feature .hero-actions > .ghost, .home-feature .hero-choose, .home-feature .hero-arrow) > .luna-lens.lg-glass { --lg-glass: rgba(38, 38, 44, 0.5); --lg-blur: 10px; }
+:is(.home-feature .hero-actions > .ghost, .home-feature .hero-choose, .home-feature .hero-arrow):hover > .luna-lens.lg-glass { --lg-glass: rgba(58, 58, 66, 0.55); }
+
+/* the hero's and a title page's lines rise in with fadeUp; held at its end ("both") an opacity animation stays live
+   and makes each line its own backdrop root, so the glass buttons in them saw nothing to frost (clear, with a ragged
+   rim), unlike "Bu akşam ne izlesem?" outside. Holding only the start keeps the rise and lets the glass work. */
+html .hero-body > *, html .d-body > *, html .hero, html .d-hero { animation-fill-mode: backwards; }
+
+/* ---------- one edge, one corner (2026-11-18) ----------
+   with the glisse rim off, the glass buttons had no edge while the header's capsules have a hairline: every glass
+   button now wears that same hairline (an outline, drawn over the lens, so it is there from the first frame) */
+html[data-liquid-glass] :is(.hdr-btn, .round.gear, label.search, .hero-actions > .ghost, .hero-choose, .home-feature-toggle, .hero-arrow, .notify-btn, .act, .glass-ib):has(> .luna-lens):not(:focus-visible) {
+  outline: 1px solid rgba(255, 255, 255, 0.1); outline-offset: -1px;
+}
+
+
+
+/* the title window (2026-11-18): one plain frosted window, no separate glisse lens behind it. The lens was measured
+   while the window was still growing (it covered a strip, the rest was clear) and its SVG refraction over the whole
+   screen was redrawn on every scroll frame (the stutter). The rise animation no longer stays held at its end either:
+   a held opacity animation switches the window's own blur off. */
+html .modal.td { animation-fill-mode: backwards; }
+/* curtains with their own frost (gallery, quick create): a held opacity animation switches their blur off */
+html .gal-bg, html .qc-bg { animation-fill-mode: backwards; }
+/* "+ Listeye": a list that already holds the film shows a tick and takes it out on a click */
+html .lp-item.has .lp-tick { color: var(--accent); font-size: 13px; font-weight: 700; }
+html .lp-item.has small { color: var(--accent); }
+
+/* podcast / audiobook screen: the notebook drops below its top-bar button, like the sound panel next to it */
+.mu-np-top .tracks.note-pop { top: calc(100% + 10px); bottom: auto; right: 0; transform-origin: 100% 0; z-index: 30; }
+html body .mu-np-top .tracks.note-pop { animation: lunaGlassDown .26s cubic-bezier(.22, 1, .36, 1) backwards !important; }
+html body .mu-np-top .tracks.note-pop.lg-leaving { animation: lunaGlassOutDown .18s cubic-bezier(.4, 0, .8, .3) forwards !important; }
+/* F11 hint: slides in from the top and back out (exitGhosts.ts plays the leave) */
+@keyframes fullTipIn { from { opacity: 0; translate: 0 -14px; } }
+@keyframes fullTipOut { to { opacity: 0; translate: 0 -14px; } }
+html body .full-tip { animation: fullTipIn .32s cubic-bezier(.22, 1, .36, 1) backwards; }
+html body .full-tip.lg-leaving { animation: fullTipOut .2s cubic-bezier(.4, 0, .8, .3) forwards !important; }
+html body .full-tip.lg-leaving > * { animation: none !important; }
+/* the provider circles keep their stacking order inside their own row, so an open friends list stays on top */
+.ww-fan { isolation: isolate; }
+@media (prefers-reduced-motion: reduce) { html body .full-tip { animation: none; } }
+
+/* a video podcast shown in the left column instead of its cover (the native video is laid over this box) */
+.mu-np-video { width: 100%; max-height: 58vh; aspect-ratio: 16 / 9; flex: none; border-radius: 14px; background: #000; box-shadow: 0 40px 90px rgba(0,0,0,.55); }
+
+/* podcast / audiobook controls: 10 s back and forward beside play, the speed next to the volume */
+.mu-np-ctl .mu-ib.mu-skip { width: 44px; height: 44px; }
+.mu-ib.mu-skip > span { position: absolute; inset: 0; display: grid; place-items: center; padding-top: 1px; font: 700 8.5px "IBM Plex Sans", system-ui, sans-serif; pointer-events: none; }
+.mu-np-vol .chip.mu-speed { min-width: 52px; justify-content: center; font-variant-numeric: tabular-nums; }
+.mu-np-vol .chip.mu-speed.on { color: var(--accent); border-color: rgba(var(--acc-rgb), .55); }
+.mu-np-video-btn.on { color: var(--accent) !important; }
+
+/* while the video loads: the cover, blurred, with a spinner and a line; the picture then grows out of it */
+.mu-np-video { position: relative; overflow: hidden; display: grid; place-items: center; animation: lunaGlassText .25s ease backwards; }
+.mu-np-video-bg { position: absolute; inset: -20px; width: calc(100% + 40px); height: calc(100% + 40px); object-fit: cover; filter: blur(22px) brightness(.55); transform: scale(1.05); }
+.mu-np-video-wait { position: relative; display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-radius: 999px; font-size: 14px; color: #fff; background: rgba(0,0,0,.38); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.mu-np-spin { width: 20px; height: 20px; border-radius: 50%; border: 2px solid rgba(255,255,255,.22); border-top-color: var(--accent); animation: buffer-spin .8s linear infinite; }
+.mu-np-video.failed .mu-np-video-wait { color: #f3b0b6; }
+@media (prefers-reduced-motion: reduce) { .mu-np-spin { animation-duration: 2.4s; } .mu-np-video { animation: none; } }
+
+/* a YouTube song's picture, in the page: fades and settles in over the blurred cover once its first frame is there */
+.mu-pic-float { position: fixed; z-index: 71; pointer-events: none; border-radius: 14px; overflow: hidden; }
+body.pl-open .mu-pic-float { z-index: 307; }
+.mu-pic-float.in-dock { border-radius: 8px; }
+.mu-pic-float.moving { transition: left .4s cubic-bezier(.22, 1, .36, 1), top .4s cubic-bezier(.22, 1, .36, 1), width .4s cubic-bezier(.22, 1, .36, 1), height .4s cubic-bezier(.22, 1, .36, 1), border-radius .4s ease; }
+.mu-np-yt { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; opacity: 0; transform: scale(.96); transition: opacity .45s ease, transform .5s cubic-bezier(.22, 1, .36, 1); }
+.mu-pic-float.ready .mu-np-yt { opacity: 1; transform: none; }
+.mu-dock-pic { display: block; flex: none; width: 76px; height: 43px; border-radius: 8px; background: #000; }
+@media (prefers-reduced-motion: reduce) { .mu-np-yt { transition: opacity .2s linear; transform: none; } .mu-pic-float.moving { transition: none; } }
+
+/* Chromium drops a glass's blur while an opacity animation holds its last frame (fill both / forwards). Every entrance
+   below ends at the element's own style, so letting go after the end changes nothing you see and brings the blur back.
+   (.hud-vol and the Web tab menu end on a transform of their own and keep theirs.) */
+html :is(.modal, .modal-bg, .cm, .tracks, .sync, .sub-search, .toast, .next-up, .osd, .tl-bg, .chat-panel, .up-hint, .rate-card,
+  .lightbox, .chat-scrim, .chat-ws, .disc-card, .mu-dock, .pl-card, .lp-menu, .ai-bubble, .gal-bg, .song-rate, .disc-filter-menu,
+  .browser-image-lightbox, .browser-talk, .browser-suggest, .browser-tools-pop, .browser-extensions-pop, .browser-collections-pop,
+  .browser-ctx-pop, .lx-pop, .lx-toast, .lx-rsvp, .la-opts, .notice-toast, .rc-persona, .qc-bg, .player-episodes, .voice-line):not(.lg-leaving) {
+  animation-fill-mode: backwards;
+}

@@ -42,6 +42,6 @@ Güncel çalışma kopyası ayrı hazırlık klasörüne alındı. Ortak commit 
 - Headless Edge + sahte Tauri: dört lazy ekran açıldı, ilk yüklemede UI kodu ertelendi. Foliate eski CFI/highlight/akış/script engeli/klavye/arama/TTS fixture'ı geçti.
 - Aynı sahte bağlantıyla 1280 ve 640 px film karşılaştırması ekrana sığdı, 30 dakikalık süre farkı göründü, Web defteri sentetik kaydı gösterdi; dar görünüm ekran görüntüsü incelendi. Bu gerçek Windows Luna penceresi değildir.
 
-Yerel kanıtlar: `C:\Users\fatme\Documents\Luna-Paket-Birlestirme-2026-10-23` altındaki `patch-check.log`, `merge-plan.json`, `declaration-merge.json`, `regression.log`, `build.log`, `lint.log`, `cargo-check.log`, `native-book-check.log`, `views-qa-result.json`, `reader-qa-result.json`, `package-ui-result.json`. Test sayfaları ve harness ana depoya aktarılmaz.
+Yerel kanıtlar: `~\Documents\Luna-Paket-Birlestirme-2026-10-23` altındaki `patch-check.log`, `merge-plan.json`, `declaration-merge.json`, `regression.log`, `build.log`, `lint.log`, `cargo-check.log`, `native-book-check.log`, `views-qa-result.json`, `reader-qa-result.json`, `package-ui-result.json`. Test sayfaları ve harness ana depoya aktarılmaz.
 
 Gerçek kullanıcı penceresi, kayıtların SQL geçişi, oynatma/SMTC/gapless ve hesap/dış servis testleri kullanıcı tarafından doğrulanmalıdır. 1.6.9C belgesindeki libmpv, dış program ve dağıtım sınırları geçerlidir. Bu birleşim o açık işleri bitmiş saymaz.

@@ -7,17 +7,18 @@ import { I, Icon, LunaMark } from "./Screens";
  * First-run presentation: what Luna does and how to use it, one animated scene per step.
  * Someone who saw an older one gets only what's new since (once).
  */
-type Theme = "film" | "music" | "books";
+type Theme = "film" | "music" | "books" | "web";
 type Slide = { eyebrow: string; title: string; text: string; tips: { k?: string; t: string }[]; scene: (p: ScenePosters) => React.ReactNode;
   /** the part's colour while the slide is on */
   theme?: Theme;
-  /** new since the last tour: shown to those who saw that one */
-  fresh?: boolean };
-/** Raised when slides are added: the ones marked fresh are shown once to people who saw the tour before. */
-const TOUR_V = 2;
+  /** the tour version that added the slide: shown once to those who saw an older one */
+  fresh?: number };
+/** Raised when slides are added: slides with a newer fresh than the one seen are shown once to people who saw the tour before. */
+const TOUR_V = 3;
 const MUSIC_D = "M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z";
 const BOOK_D = "M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5";
 const FILM_D = "M4 4h16v16H4zM8 4v16M16 4v16";
+const WEB_D = "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z";
 const SPARK_D = "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z";
 const Eq = () => <div className="eq"><i /><i /><i /><i /><i /></div>;
 /** A sentence read aloud: the word being read lights up, one after another. */
@@ -28,7 +29,7 @@ const Spoken = ({ text }: { text: string }) => {
 const Intro = () => (
   <div className="ts ts-intro">
     <div className="ring r1" /><div className="ring r2" /><div className="ring r3" />
-    <div className="orbit"><span className="o-film"><Icon d={FILM_D} size={14} /></span><span className="o-music"><Icon d={MUSIC_D} size={14} /></span><span className="o-books"><Icon d={BOOK_D} size={14} /></span></div>
+    <div className="orbit"><span className="o-film"><Icon d={FILM_D} size={14} /></span><span className="o-music"><Icon d={MUSIC_D} size={14} /></span><span className="o-books"><Icon d={BOOK_D} size={14} /></span><span className="o-web"><Icon d={WEB_D} size={14} /></span></div>
     <div className="mark"><LunaMark size={120} /></div>
   </div>
 );
@@ -54,25 +55,27 @@ const Poster = ({ src, className, style }: { src: string | null; className?: str
 const ALL: Slide[] = [
   {
     eyebrow: tt("Hoş geldin"), title: "Luna Player",
-    text: tt("Filmlerin, dizilerin, müziğin ve kitapların tek yerde. Ne izleyeceğini, ne dinleyeceğini, ne okuyacağını bilen bir asistanla. Birkaç adımda neler yapabildiğine bakalım."),
+    text: tt("Filmlerin, dizilerin, müziğin, kitapların ve web tek yerde. Ne izleyeceğini, ne dinleyeceğini, ne okuyacağını bilen bir asistanla. Birkaç adımda neler yapabildiğine bakalım."),
     tips: [{ k: "→", t: tt("ile ilerle") }, { k: "Esc", t: tt("ile geç") }],
     scene: () => <Intro />,
   },
   {
-    eyebrow: tt("Üç bölüm"), title: tt("Film, Müzik, Kitap"), fresh: true,
-    text: tt("Luna'nın üç bölümü var, her biri kendi rengiyle. Üst çubuktaki düğmeyle aralarında geçersin; müzik sen film sayfalarında gezerken de çalmaya devam eder."),
-    tips: [{ t: tt("Üst çubukta Film / Müzik / Kitap") }, { t: tt("Ortak geçmiş: izlediğin, dinlediğin, okuduğun her şey") }],
+    eyebrow: tt("Dört bölüm"), title: tt("Film, Müzik, Kitap, Web"), fresh: 3,
+    text: tt("Luna'nın dört bölümü var, her biri kendi rengiyle. Üst çubuktaki düğmeyle aralarında geçersin; müzik sen film sayfalarında ya da web'de gezerken de çalmaya devam eder."),
+    tips: [{ t: tt("Üst çubukta Film / Müzik / Kitap / Web") }, { t: tt("Ortak geçmiş: izlediğin, dinlediğin, okuduğun her şey") }],
     scene: ({ posters }) => (
       <div className="ts ts-modes">
         <div className="sw"><i className="mode-highlight" aria-hidden="true" />
           <span className="m0"><Icon d={FILM_D} size={14} /> {tt("Film")}</span>
           <span className="m1"><Icon d={MUSIC_D} size={14} /> {tt("Müzik")}</span>
           <span className="m2"><Icon d={BOOK_D} size={14} /> {tt("Kitap")}</span>
+          <span className="m3"><Icon d={WEB_D} size={14} /> {tt("Web")}</span>
         </div>
         <div className="cards">
           <div className="mc c0"><Poster src={P(posters, 0)} className="art" /><b>{tt("Film")}</b><em>{tt("Kütüphane, oynatıcı, öneriler")}</em></div>
           <div className="mc c1"><div className="art"><Eq /></div><b>{tt("Müzik")}</b><em>{tt("Arşiv, YouTube, radyo, podcast")}</em></div>
           <div className="mc c2"><div className="art"><i /><i /><i /><i /></div><b>{tt("Kitap")}</b><em>{tt("Okuyucu, sesli okuma, ücretsiz kitaplar")}</em></div>
+          <div className="mc c3"><div className="art"><Icon d={WEB_D} size={34} /></div><b>{tt("Web")}</b><em>{tt("Tarayıcı, videolar, eklentiler")}</em></div>
         </div>
       </div>
     ),
@@ -126,7 +129,7 @@ const ALL: Slide[] = [
   {
     eyebrow: tt("Bağlantı ve torrent"), title: tt("Bir bağlantı yapıştırman yeterli"),
     text: tt("Magnet, .torrent ya da http, m3u8, rtsp gibi ağ bağlantılarını VLC gibi doğrudan açarsın. Torrentler inerken izlenebilir; adı bulunamayan bağlantılar için sana sorulur."),
-    tips: [{ k: "Ctrl+N", t: tt("bağlantı aç") }, { k: "Ctrl+V", t: tt("pencereye yapıştır") }],
+    tips: [{ k: "Ctrl+N", t: tt("bağlantı aç") }, { k: "Ctrl+V", t: tt("pencereye yapıştır") }, { t: tt("Stremio eklentileriyle film sayfasından izle") }],
     scene: () => (
       <div className="ts ts-link">
         <div className="box">
@@ -185,7 +188,7 @@ const ALL: Slide[] = [
     ),
   },
   {
-    eyebrow: tt("Müzik"), title: tt("Dinlediğin her şey"), theme: "music", fresh: true,
+    eyebrow: tt("Müzik"), title: tt("Dinlediğin her şey"), theme: "music", fresh: 2,
     text: tt("Kendi arşivini ekle ya da hiçbir şey indirmeden YouTube'dan çal. Radyo, podcast, eş zamanlı şarkı sözleri, beğendiklerin ve çalma listelerin burada; Spotify ve YouTube listelerini de içe aktarabilirsin."),
     tips: [{ k: "Ctrl+→", t: tt("sonraki şarkı") }, { k: tt("Boşluk"), t: tt("oynat / duraklat") }, { t: tt("Spotify listesi yapıştır › içe aktar") }],
     scene: () => (
@@ -207,7 +210,7 @@ const ALL: Slide[] = [
     ),
   },
   {
-    eyebrow: tt("Kitaplar"), title: tt("Oku ya da dinle"), theme: "books", fresh: true,
+    eyebrow: tt("Kitaplar"), title: tt("Oku ya da dinle"), theme: "books", fresh: 2,
     text: tt("EPUB ve PDF kitaplarını rahat bir okuyucuda aç; kaldığın yer hatırlanır. Luna kitabı doğal seslerle sesli okur, okunan kelimeyi işaretler. Gutenberg, Vikikaynak ve LibriVox'tan ücretsiz kitapları ve sesli kitapları bulup getirir."),
     tips: [{ t: tt("Bir yeri seç › buradan sesli oku") }, { t: tt("Okurken müzik paneli") }, { t: tt("Raflar: okuyorum, bitti, beğendim") }],
     scene: () => (
@@ -228,8 +231,44 @@ const ALL: Slide[] = [
     ),
   },
   {
-    eyebrow: tt("Asistan"), title: tt("Her yerde yanında"), fresh: true,
-    text: tt("Asistan üç bölümün hepsinde çalışır: film önerir ve açar, şarkı çalar ve çalma listesi yapar, ücretsiz kitap bulup getirir. Ekranda ne açık olduğunu görür; bir film ve bir şarkı aynı anda açıksa hangisinden bahsettiğini sana sorar."),
+    eyebrow: tt("Web"), title: tt("İnternet de Luna'nın içinde"), theme: "web", fresh: 3,
+    text: tt("Luna'nın kendi tarayıcısı var. YouTube ve diğer sitelerdeki videoları Luna'nın oynatıcısıyla izlersin; başka sayfaya geçince video küçük pencerede devam eder. Eklentiler, indirmeler ve geçmiş burada; asistan açık sayfayı okuyup sorularını cevaplar."),
+    tips: [{ t: tt("Sayfadaki videoyu Luna'da aç") }, { k: "Ctrl+H", t: tt("tarayıcı geçmişi") }, { t: tt("Asistana “bu sayfayı özetle” de") }],
+    scene: ({ posters }) => (
+      <div className="ts ts-web">
+        <div className="win">
+          <div className="bar"><i /><i /><i /><span className="url"><Icon d={WEB_D} size={12} /> youtube.com/watch</span></div>
+          <div className="page">
+            <Poster src={P(posters, 6)} className="vid" />
+            <div className="side"><i /><i /><i /><i /></div>
+            <div className="take"><Icon d={I.play} size={14} /> {tt("Luna'da izle")}</div>
+          </div>
+        </div>
+        <div className="mini"><Poster src={P(posters, 6)} /><span>{tt("Küçük pencerede devam ediyor")}</span></div>
+        <div className="chips"><span>{tt("Eklentiler")}</span><span>{tt("İndirmeler")}</span><span>{tt("Sayfayı asistana sor")}</span></div>
+      </div>
+    ),
+  },
+  {
+    eyebrow: tt("Yapay zekâ"), title: tt("Senin yerine okur, dinler, özetler"), fresh: 3,
+    text: tt("Luna Analiz bir filmin binlerce yorumunu okuyup sana uyup uymadığını söyler. Luna Özet izlediğin yere kadar olanı spoiler vermeden anlatır. Konuşmaları yazıya döker, altyazıyı çevirir; bir repliği yazınca hangi sahnede geçtiğini bulur."),
+    tips: [{ t: tt("Film sayfasında Luna Analiz") }, { t: tt("Oynatıcıda Luna Özet ve Replik ara") }, { t: tt("Altyazı stüdyosu: yazıya dök, çevir") }],
+    scene: () => (
+      <div className="ts ts-aif">
+        {([[SPARK_D, tt("Luna Analiz"), tt("2.418 yorum okundu · sana uygun %87")],
+          [I.chat, tt("Luna Özet"), tt("Kaldığın yere kadar, spoiler yok")],
+          [I.subs, tt("Altyazı stüdyosu"), tt("Yazıya döküldü · Türkçeye çevrildi")],
+          [I.search, tt("Replik ara"), tt("“Korku zihni öldürür” · 00:41:12")]] as string[][]).map(([ic, h, d], n) => (
+          <div key={n} className="af" style={{ animationDelay: `${0.25 + n * 0.35}s` }}>
+            <i><Icon d={ic} size={18} /></i><div><b>{h}</b><span>{d}</span></div>
+          </div>
+        ))}
+      </div>
+    ),
+  },
+  {
+    eyebrow: tt("Asistan"), title: tt("Her yerde yanında"), fresh: 2,
+    text: tt("Asistan dört bölümün hepsinde çalışır: film önerir ve açar, şarkı çalar ve çalma listesi yapar, ücretsiz kitap bulup getirir, açık web sayfasını okur. Ekranda ne açık olduğunu görür; bir film ve bir şarkı aynı anda açıksa hangisinden bahsettiğini sana sorar."),
     tips: [{ k: "Alt+A", t: tt("her ekrandan aç") }, { t: tt("Büyütünce geniş çalışma alanı, sohbetler saklanır") }, { t: tt("Bilgi soruları Google'da aranır, kaynaklarıyla") }],
     scene: () => (
       <div className="ts ts-ai">
@@ -250,7 +289,7 @@ const ALL: Slide[] = [
     ),
   },
   {
-    eyebrow: tt("Koleksiyonlar"), title: tt("Bir evrenin hepsi, tek listede"), fresh: true,
+    eyebrow: tt("Koleksiyonlar"), title: tt("Bir evrenin hepsi, tek listede"), fresh: 2,
     text: tt("“Dune için koleksiyon yap” de: asistan internette araştırır, filmleri TMDB'de kontrol eder, kitapları ve film müziklerini bulur. Hepsini onayına sunar; istemediklerinin tikini kaldırırsın. Henüz çıkmamış filmler “Çıkması bekleniyor” diye işaretlenir."),
     tips: [{ t: tt("Üst çubukta Koleksiyonlar") }, { t: tt("Elle ekle, Google'da ara, fragmanı izle") }, { t: tt("Sağ tık › Koleksiyona ekle…") }],
     scene: () => (
@@ -279,7 +318,7 @@ const ALL: Slide[] = [
     ),
   },
   {
-    eyebrow: tt("Geçmiş ve güvenlik"), title: tt("Hiçbir şey kaybolmaz"), fresh: true,
+    eyebrow: tt("Geçmiş ve güvenlik"), title: tt("Hiçbir şey kaybolmaz"), fresh: 2,
     text: tt("İzlediğin, dinlediğin ve okuduğun her şey tek bir geçmişte, gün gün durur; asistan da ona bakar. Ayarlar'dan her şeyini tek bir dosyaya yedeklersin. Luna yeni sürümleri kendisi bulur, sorup kurar."),
     tips: [{ t: tt("Koleksiyonlar › Geçmiş") }, { t: tt("Ayarlar › Yedekleme") }, { t: tt("Ayarlar › Genel › güncellemeler") }],
     scene: () => (
@@ -300,7 +339,7 @@ const ALL: Slide[] = [
     ),
   },
   {
-    eyebrow: tt("Kısayollar"), title: tt("Klavyeyle her şey"), fresh: true,
+    eyebrow: tt("Kısayollar"), title: tt("Klavyeyle her şey"), fresh: 2,
     text: tt("Fareye uzanmadan: asistanı Alt+A ile her ekrandan açarsın, dosyayı Ctrl+O ile, bağlantıyı Ctrl+N ile. Yazı yazarken kısayollar araya girmez."),
     tips: [{ k: "Ctrl+K", t: tt("Genel arama") }, { k: "Alt+A", t: tt("asistan") }, { k: "Esc", t: tt("açık olanı kapatır") }],
     scene: () => (
@@ -332,7 +371,7 @@ const ALL: Slide[] = [
 
 const NEWS: Slide = {
   eyebrow: tt("Yenilikler"), title: tt("Luna büyüdü"),
-  text: tt("Son tanıtımdan bu yana Luna'ya müzik, kitaplar, koleksiyonlar ve her bölümde çalışan bir asistan geldi. Kısaca bakalım."),
+  text: tt("Son tanıtımdan bu yana Luna'ya yenilikler geldi. Kısaca bakalım."),
   tips: [{ k: "→", t: tt("ile ilerle") }, { k: "Esc", t: tt("ile geç") }],
   scene: () => <Intro />,
 };
@@ -342,8 +381,11 @@ export const tourSeen = () => store.get("tourDone") === "1" && Number(store.get(
 /** Saw an older tour: the new slides are shown once. */
 export const tourNews = () => store.get("tourDone") === "1" && Number(store.get("tourV") ?? 1) < TOUR_V;
 
+/** The tour version seen before: older slides than this aren't shown again as news. */
+const seenV = () => Number(store.get("tourV") ?? 1);
+
 export function Tour({ onClose, onSettings, posters = [], news = false }: { onClose: () => void; onSettings: () => void; posters?: (string | null)[]; news?: boolean }) {
-  const [SLIDES] = useState(() => (news ? [NEWS, ...ALL.filter((x) => x.fresh), ALL[ALL.length - 1]] : ALL));
+  const [SLIDES] = useState(() => (news ? [NEWS, ...ALL.filter((x) => (x.fresh ?? 0) > seenV()), ALL[ALL.length - 1]] : ALL));
   const [i, setI] = useState(0);
   const [dir, setDir] = useState(1);
   const [leaving, setLeaving] = useState(false);

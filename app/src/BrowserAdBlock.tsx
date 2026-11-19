@@ -9,7 +9,7 @@ let pending:Promise<void>|null=null;
 const subscribers=new Set<()=>void>();
 const subscribe=(f:()=>void)=>{subscribers.add(f);return()=>{subscribers.delete(f);};};
 const publish=(patch:Partial<State>)=>{state={...state,...patch};subscribers.forEach(f=>f());};
-const blockers=(rows:Extension[])=>rows.filter(e=>/uBlock.*Lite/i.test(e.name));
+const blockers=(rows:Extension[]|null)=>(Array.isArray(rows)?rows:[]).filter(e=>/uBlock.*Lite/i.test(e.name));
 async function read(){const rows=await invoke<Extension[]>("browser_extension_manage",{action:"list"});publish({rows,known:true});}
 function run(work:()=>Promise<void>){
  if(pending)return pending;

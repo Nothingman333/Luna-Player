@@ -6,7 +6,7 @@ import { listen } from "@tauri-apps/api/event";
 import { store } from "./library";
 import { loadSubOpts, SubOpts } from "./mpv";
 
-export type UpStatus = { installed: boolean; running: boolean; scaling: boolean; settings: Record<string, string>; hotkey: string };
+export type UpStatus = { installed: boolean; running: boolean; scaling: boolean; settings: Record<string, string>; hotkey: string; profiles: string[] };
 export const upscalerOn = () => store.get("upscaler") === "1"; // true only while a video runs with it
 
 // ---------- the subtitle window (index.html?subs=1) ----------
@@ -104,15 +104,30 @@ export function UpscalerSettings({ inPlayer, onToggle, onSaved, onApply }: {
   const [on, setOn] = useState(upscalerOn());
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState("");
+  const [from, setFrom] = useState("");
   const refresh = () => invoke<UpStatus>("upscaler_status").then((s) => { setSt(s); setVals(s.settings); }).catch((e) => setMsg(String(e)));
   useEffect(() => { refresh(); }, []);
 
   const v = (k: string, d = "") => vals[k] ?? d;
   const put = (k: string, x: string) => setVals((cur) => ({ ...cur, [k]: x }));
+  // Only what was changed here: Lossless Scaling may hold newer values from its own window, and the rest must not overwrite them.
+  const changes = () => {
+    const out: Record<string, string> = {};
+    for (const k of Object.keys(vals)) if (vals[k] !== st?.settings[k]) out[k] = vals[k];
+    if (!st?.settings.HdrSupport && !out.HdrSupport) out.HdrSupport = "true";
+    return out;
+  };
+  const importFrom = async () => {
+    if (!from) return;
+    setBusy(tt("Kaydediliyor…")); setMsg("");
+    try { await invoke("upscaler_import", { from }); setMsg(tt("“{0}” profilinin ayarları alındı.", from)); onSaved?.(); }
+    catch (e) { setMsg(String(e)); }
+    setBusy(""); refresh();
+  };
   const save = async () => {
     setBusy(tt("Kaydediliyor…")); setMsg("");
     try {
-      await invoke("upscaler_save", { values: { ...vals, HdrSupport: vals.HdrSupport ?? "true" } });
+      await invoke("upscaler_save", { values: changes() });
       setMsg(inPlayer ? tt("Uygulandı.") : tt("Kaydedildi. Lossless Scaling'deki “Luna Player” profiline yazıldı."));
       onSaved?.();
     } catch (e) { setMsg(String(e)); }
@@ -149,6 +164,17 @@ export function UpscalerSettings({ inPlayer, onToggle, onSaved, onApply }: {
               : tt("Upscaler her filmde ayrı açılır: oynatıcıdaki UP menüsünden ya da Q tuşuyla. Buradaki ayarlar Lossless Scaling'deki “Luna Player” profiline yazılır.")}
             {st ? (st.running ? (st.scaling ? tt(" · Şu an ölçekliyor") : tt(" · Lossless Scaling açık")) : tt(" · Lossless Scaling kapalı")) : ""}
           </div>
+          {!!st?.profiles?.length && (
+            <div className="up-grid">
+              <label>{tt("Lossless Scaling profilinden al")}
+                <select value={from} onChange={(e) => setFrom(e.target.value)}>
+                  <option value="">{tt("Profil seç")}</option>
+                  {st.profiles.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </label>
+              <button type="button" className="chip" disabled={!from || !!busy} onClick={importFrom}>{tt("Ayarları al")}</button>
+            </div>
+          )}
           <h4 className="up-h">{tt("Kare üretimi")}</h4>
           <div className="up-grid">
             <label>{tt("Tür")}
@@ -274,7 +300,7 @@ export function UpscalerSettings({ inPlayer, onToggle, onSaved, onApply }: {
           </div>
           <div className="up-actions">
             <button className={inPlayer ? "primary sm" : "chip"} onClick={() => (onApply ? onApply(async () => {
-              await invoke("upscaler_save", { values: { ...vals, HdrSupport: vals.HdrSupport ?? "true" } });
+              await invoke("upscaler_save", { values: changes() });
             }, on) : save())} disabled={!!busy}>{busy || (inPlayer ? tt("Uygula") : tt("Lossless Scaling'e kaydet"))}</button>
             {st?.hotkey && <span className="muted small">{tt("Kısayol:")} {st.hotkey}</span>}
           </div>

@@ -90,7 +90,8 @@ export const torrentSrc = (path: string) => store.get("tsrc:" + path) || null;
 /** A torrent video whose file isn't (fully) on disk: shown faded and greyed out. */
 export const isRemote = (path: string) => !!torrentSrc(path) && store.get("tdone:" + path) !== "1";
 
-export type Recent = { path: string; title: string; time: number; duration: number };
+/** `at`: when the place was saved (a rewatch after "watched" shows again in Continue watching) */
+export type Recent = { path: string; title: string; time: number; duration: number; at?: number };
 export const loadRecent = (): Recent[] => {const raw=store.json<unknown>("recent",[]);return Array.isArray(raw)?raw.filter((x):x is Recent=>!!x&&typeof x.path==="string"&&!isYouTubeVideo(x.path)&&typeof x.title==="string"&&Number.isFinite(x.time)&&x.time>=0&&Number.isFinite(x.duration)&&x.duration>=0):[];};
 
 // ---------- file name parsing ----------
@@ -204,6 +205,10 @@ export type Meta = {
   kind: "movie" | "tv";
   title: string;
   year: string;
+  /** "YYYY-MM-DD" release or first air date (missing in metadata saved before it was kept) */
+  release?: string;
+  /** a film's first cinema and first home (digital, disc, TV) release, "YYYY-MM-DD" or null when TMDB has none */
+  cinema?: string | null; home?: string | null;
   overview: string;
   poster: string | null;
   backdrop: string | null;
@@ -215,7 +220,13 @@ export type Meta = {
   airedEpisodes?: number;
   cast: Person[];
 };
-export type Episode = { episode: number; name: string; overview: string; still: string | null; runtime: number | null };
+export type Episode = { episode: number; name: string; overview: string; still: string | null; runtime: number | null;
+  /** "YYYY-MM-DD"; missing in lists saved before it was kept */
+  airDate?: string | null;
+  /** TMDB's crew and guest cast for the episode, and its score */
+  directors?: string[]; writers?: string[]; guests?: { name: string; character: string; profile: string | null }[]; vote?: number };
+/** TMDB's stand-in name for an episode not translated yet ("Bölüm 4", "4. Bölüm", "Episode 4"). */
+export const genericEpisodeName = (n: string) => /^\s*(?:(?:bölüm|episode|folge|épisode|episodio|capítulo)\s*\d+|\d+\.\s*bölüm)\s*$/i.test(n || "");
 
 async function tmdb(path: string, params: Record<string, string> = {}) {
   // a key pasted with a space or a line break at its end was refused as invalid
@@ -230,7 +241,42 @@ async function tmdb(path: string, params: Record<string, string> = {}) {
   return r.json();
 }
 
-export type SearchHit = { id: number; kind: "movie" | "tv"; title: string; year: string; poster: string | null; rating?: number; backdrop?: string | null; overview?: string };
+export type SearchHit = { id: number; kind: "movie" | "tv"; title: string; year: string; poster: string | null; rating?: number; backdrop?: string | null; overview?: string;
+  /** release (film) or first air date (series), "YYYY-MM-DD"; missing in lists cached before it was kept */
+  date?: string };
+const todayKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+/** Not out yet: the release date is after today (or, with no date known, the year is after this one). */
+export const notOut = (date?: string | null, year?: string | number | null) =>
+  date ? date > todayKey() : !!year && Number(String(year).slice(0, 4)) > new Date().getFullYear();
+/** Earliest cinema (TMDB type 3) and home (digital 4, disc 5, TV 6) release of a film, from its release_dates; festival and limited showings don't count. */
+function releaseKinds(results: any[] | undefined): { cinema: string | null; home: string | null } {
+  let cinema: string | null = null, home: string | null = null;
+  for (const c of results ?? []) for (const r of c.release_dates ?? []) {
+    const day = String(r.release_date ?? "").slice(0, 10);
+    if (!day) continue;
+    if (r.type === 3 && (!cinema || day < cinema)) cinema = day;
+    if (r.type >= 4 && r.type <= 6 && (!home || day < home)) home = day;
+  }
+  return { cinema, home };
+}
+/** Can it be watched yet? "soon": not out (date = when, if known); "cinema": only in cinemas so far (date = home release, if known); "out". */
+export function releaseState(m: { kind?: string; release?: string; year?: string; cinema?: string | null; home?: string | null }): { state: "out" | "cinema" | "soon"; date?: string } {
+  const today = todayKey();
+  if (m.kind === "tv" || (m.cinema === undefined && m.home === undefined))
+    return notOut(m.release, m.year) ? { state: "soon", date: m.release } : { state: "out" };
+  if (m.home && m.home <= today) return { state: "out" };
+  const ago = (d: string, days: number) => Date.parse(today) - Date.parse(d) > days * 86400e3;
+  if (m.cinema && m.cinema <= today)
+    // old films often have no home date in TMDB at all: four months after the cinema release counts as out
+    return ago(m.cinema, 120) ? { state: "out" } : { state: "cinema", date: m.home ?? undefined };
+  const next = [m.cinema, m.home].filter((x): x is string => !!x && x > today).sort()[0];
+  if (next) return { state: "soon", date: next };
+  // only a festival or limited showing so far: not out, unless it's long past
+  return m.release && ago(m.release, 365) ? { state: "out" } : { state: "soon" };
+}
+/** "14 Kasım 2026" / "November 14, 2026" */
+export const releaseLabel = (date: string, short = false) =>
+  new Date(date + "T00:00:00").toLocaleDateString(locale(), short ? { day: "numeric", month: "short" } : { day: "numeric", month: "long", year: "numeric" });
 
 /** A film's genres by its name and year (for films that came from Letterboxd without them); [] when not found. */
 export async function tmdbGenresOf(title: string, year?: string): Promise<string[]> {
@@ -250,6 +296,7 @@ const toHit = (h: any, kind?: "movie" | "tv"): SearchHit => ({
   id: h.id, kind: kind ?? (h.media_type === "tv" ? "tv" : "movie"), title: h.title ?? h.name,
   year: (h.release_date ?? h.first_air_date ?? "").slice(0, 4), poster: h.poster_path,
   rating: Math.round((h.vote_average ?? 0) * 10) / 10, backdrop: h.backdrop_path, overview: h.overview,
+  date: h.release_date ?? h.first_air_date ?? undefined,
 });
 
 /** A TMDB list (trending, popular, now playing…), cached for a few hours. */
@@ -303,10 +350,36 @@ async function lookup(p: Parsed): Promise<Meta | null> {
   return hit ? details(p.kind, hit.id) : null;
 }
 
-export async function details(kind: "movie" | "tv", id: number): Promise<Meta> {
-  const d = await tmdb(`/${kind}/${id}`, { language: locale() });
-  // Turkish credits sometimes carry names in the original script (e.g. Japanese); English is always Latin.
-  d.credits = await tmdb(`/${kind}/${id}/credits`, { language: "en-US" }).catch(() => ({ cast: [] }));
+// details asked recently (a card hovered, a window opened again) come from memory: opening a title waited on two or
+// three TMDB calls in a row, and the window filled in piece by piece while it was rising
+const detailMemo = new Map<string, { at: number; p: Promise<Meta> }>();
+export function details(kind: "movie" | "tv", id: number): Promise<Meta> {
+  const k = locale() + ":" + kind + ":" + id, hit = detailMemo.get(k);
+  if (hit && Date.now() - hit.at < 30 * 60e3) return hit.p;
+  const p = fetchDetails(kind, id);
+  detailMemo.set(k, { at: Date.now(), p });
+  p.catch(() => detailMemo.delete(k));
+  if (detailMemo.size > 200) detailMemo.delete(detailMemo.keys().next().value!);
+  return p;
+}
+/** Warm a title's details and its pictures (a Discover card under the pointer), so its window opens complete. */
+export function prefetchDetails(kind: "movie" | "tv", id: number) {
+  if (!store.get("tmdbKey") || !id) return;
+  details(kind, id).then((m) => {
+    for (const src of [m.backdrop && `https://image.tmdb.org/t/p/w1280${m.backdrop}`, m.poster && `https://image.tmdb.org/t/p/w342${m.poster}`]) {
+      if (!src) continue;
+      const img = new Image(); img.decoding = "async"; img.src = src; img.decode?.().catch(() => {});
+    }
+  }).catch(() => {});
+}
+async function fetchDetails(kind: "movie" | "tv", id: number): Promise<Meta> {
+  // the title and its cast at the same time (Turkish credits sometimes carry names in the original script, e.g.
+  // Japanese; English is always Latin)
+  const [d, credits] = await Promise.all([
+    tmdb(`/${kind}/${id}`, { language: locale(), ...(kind === "movie" ? { append_to_response: "release_dates" } : {}) }),
+    tmdb(`/${kind}/${id}/credits`, { language: "en-US" }).catch(() => ({ cast: [] })),
+  ]);
+  d.credits = credits;
   let overview: string = d.overview;
   // the English text is only a fallback: its failure must not lose the whole title
   if (!overview) overview = (await tmdb(`/${kind}/${id}`, { language: "en-US" }).catch(() => null))?.overview ?? "";
@@ -315,6 +388,8 @@ export async function details(kind: "movie" | "tv", id: number): Promise<Meta> {
     kind,
     title: d.title ?? d.name,
     year: (d.release_date ?? d.first_air_date ?? "").slice(0, 4),
+    release: d.release_date ?? d.first_air_date ?? undefined,
+    ...(kind === "movie" && d.release_dates ? releaseKinds(d.release_dates.results) : {}),
     overview,
     poster: d.poster_path,
     backdrop: d.backdrop_path,
@@ -336,15 +411,33 @@ export async function seasonEpisodes(tvId: number, season: number): Promise<Epis
   const k = seasonKey(tvId, season);
   const cached = store.json<Episode[] | null>(k, null);
   // an empty list is never trusted: a season announced but not listed yet used to stay empty for ever
-  if (Array.isArray(cached)&&cached.length>0&&cached.every(e=>e&&Number.isInteger(e.episode)&&typeof e.name==="string")) return cached;
+  // (lists saved before air dates were kept are fetched again once, so episodes not out yet are known)
+  if (Array.isArray(cached)&&cached.length>0&&cached.every(e=>e&&Number.isInteger(e.episode)&&typeof e.name==="string"&&"airDate" in e&&"guests" in e)
+    // TMDB adds stills to aired episodes later: a list saved without them is asked again after half a day (":at2": lists saved before stills came from the English list are asked once more)
+    &&!(cached.some(e=>!e.still&&!!e.airDate&&e.airDate<=new Date().toISOString().slice(0,10))&&Date.now()-Number(store.get(k+":at2")??0)>12*3600e3)) return cached;
   if (!store.get("tmdbKey")) return [];
   try {
     const d = await tmdb(`/tv/${tvId}/season/${season}`, { language: locale() });
-    const eps: Episode[] = (d.episodes ?? []).map((e: any) => ({
+    const crew = (e: any, jobs: string[]) => [...new Set(((e.crew ?? []) as any[]).filter((c) => jobs.includes(c.job)).map((c) => String(c.name)))].slice(0, 4);
+    let eps: Episode[] = (d.episodes ?? []).map((e: any) => ({
       episode: e.episode_number, name: e.name, overview: e.overview,
-      still: e.still_path, runtime: e.runtime,
+      still: e.still_path, runtime: e.runtime, airDate: e.air_date || null,
+      directors: crew(e, ["Director"]), writers: crew(e, ["Writer", "Screenplay", "Teleplay", "Story"]),
+      guests: ((e.guest_stars ?? []) as any[]).slice(0, 12).map((g) => ({ name: String(g.name), character: String(g.character ?? ""), profile: g.profile_path ?? null })),
+      vote: typeof e.vote_average === "number" && e.vote_count > 0 ? e.vote_average : undefined,
     }));
-    if (eps.length) store.set(k, JSON.stringify(eps));
+    // names and summaries not translated yet come from the English list, and the stills: TMDB picks a still by
+    // language, so one tagged English (Black Doves season 2) came back empty in Turkish
+    if (!locale().startsWith("en") && eps.some((e) => genericEpisodeName(e.name) || !e.overview || !e.still)) {
+      const en = await tmdb(`/tv/${tvId}/season/${season}`, { language: "en-US" }).catch(() => null);
+      const byNo = new Map<number, any>(((en?.episodes ?? []) as any[]).map((x) => [x.episode_number, x]));
+      eps = eps.map((e) => {
+        const x = byNo.get(e.episode);
+        if (!x) return e;
+        return { ...e, name: genericEpisodeName(e.name) && x.name && !genericEpisodeName(x.name) ? x.name : e.name, overview: e.overview || x.overview || "", still: e.still || x.still_path || null };
+      });
+    }
+    if (eps.length) { store.set(k, JSON.stringify(eps)); store.set(k + ":at2", String(Date.now())); }
     return eps;
   } catch {
     return [];
@@ -355,6 +448,9 @@ export async function seasonEpisodes(tvId: number, season: number): Promise<Epis
 /** Videos added to the library outside the library folders (opened from Windows, torrents). They stay
  *  in the library even after they drop off the play history. */
 export const loadPinned = () => store.json<string[]>("pinned", []);
+/** Settings › Oynatma: a file opened from outside the library folders joins the library by itself (off by default;
+ *  otherwise the player offers "Kütüphaneye ekle"). */
+export const autoAddOpened = () => store.get("autoAddOpened") === "1";
 export function pinFile(path: string) {
   if (!path || isUrl(path)) return;
   const l = loadPinned();
@@ -367,6 +463,8 @@ export function pinFile(path: string) {
 let finishedCache: Record<string, number> | null = null;
 export const loadFinished = () => {if(finishedCache)return finishedCache;const raw=store.json<unknown>("finished",{});return finishedCache=raw&&typeof raw==="object"&&!Array.isArray(raw)?Object.fromEntries(Object.entries(raw).filter(([,v])=>typeof v==="number"&&Number.isFinite(v)&&v>0)) as Record<string,number>:{};};
 export const isFinished = (path: string) => !!loadFinished()[path];
+/** Still finished after this place was saved: a rewatch left halfway counts as unfinished again. */
+export const finishedSince = (r: Recent) => { const at = loadFinished()[r.path]; return !!at && !(r.at && r.at > at); };
 export function setFinished(paths: string[], on: boolean) {
   const raw=store.get("finished");if(raw!==null){const saved=JSON.parse(raw);if(!saved||typeof saved!=="object"||Array.isArray(saved)||Object.values(saved).some(v=>typeof v!=="number"||!Number.isFinite(v)))throw Error("Watched records are damaged; export a backup before editing.");}
   const f = {...loadFinished()};
@@ -374,6 +472,7 @@ export function setFinished(paths: string[], on: boolean) {
   if(!store.set("finished",JSON.stringify(f)))throw Error("Watched status could not be saved.");
   finishedCache=f;
   window.dispatchEvent(new Event("luna-library"));
+  if (on) window.dispatchEvent(new CustomEvent("luna-watched", { detail: paths }));
 }
 // the credits: the last 8% (at least a minute, at most five); a short clip only its last quarter
 export const nearEnd = (time: number, duration: number) =>
@@ -634,6 +733,8 @@ export function useLibrary(opened: string[] = []) {
     });
 
   return {
+    /** the files found in the library folders and the ones kept by hand ("Kütüphaneye ekle", torrents) */
+    files, pinned,
     folders, setFolders, items, scanning, scanSummary, kinds, setFolderKind,
     /** Adds a library folder from the Films or the Series side. */
     addFolder: (dir: string, k: FolderKind) => {

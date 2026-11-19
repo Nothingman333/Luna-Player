@@ -123,6 +123,7 @@ function bookHook() {
     useState: (...a) => current.useState(...a), useEffect: (...a) => current.useEffect(...a), useMemo: (...a) => current.useMemo(...a),
     loadBookFolders: () => store.json('bookFolders', []), store, withBookInfo: (b) => b, window: { addEventListener() {}, removeEventListener() {} },
     invoke: async (cmd, args) => env.scan(args), scan: async () => [],
+    mergeBookSources: load('bookLibraryModel').mergeBookSources, autoIdentifyBooks: async () => {},
   };
   const inst = instantiate('Books.tsx', 'useBookLibrary', env, 'let libCache=null;const setSplit_libCache=v=>libCache=v;const libSubs=new Set();const libChanged=()=>{libCache=null;libSubs.forEach((f)=>f());};', ['libCache']);
   const rt = hookRuntime((api) => { current = api; return inst.fn(); });

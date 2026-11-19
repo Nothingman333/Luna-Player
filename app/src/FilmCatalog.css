@@ -69,3 +69,8 @@
 .poster-img:has(.library-rating-badge) .poster-badges {top:36px;left:8px;right:8px;max-width:calc(100% - 16px);flex-wrap:wrap;}
 
 .poster-img > .library-corner {left:8px;right:auto;top:auto;bottom:12px;} .poster-img:has(.library-rating-badge) .poster-badges {top:8px;max-width:calc(100% - 16px);}
+.library-rating-badge .done-tick{display:inline-grid;place-items:center;width:14px;height:14px;margin-right:5px;border-radius:50%;background:#2f9e57;color:#fff;font-style:normal;font-size:9px;font-weight:700;vertical-align:-2px}
+.friends-watched{width:max-content;max-width:100%}
+.poster-img > .library-corner{flex-direction:row;align-items:center;flex-wrap:wrap;gap:5px} .poster-img > .library-corner .library-rating-badge{order:2;margin-top:0} .poster-img > .library-corner .my-score{order:1;font-size:11px;padding:3px 7px}
+.poster-img > .library-state-chip{display:none}
+.poster .poster-img.remote::after{content:none;display:none}

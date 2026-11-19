@@ -173,7 +173,8 @@ export async function executeToolCalls(o: ExecuteOptions): Promise<ExecuteResult
     if (stopped || o.isStopped?.()) { stopped = true; push("skipped", "Kullanıcı isteği durdurdu; bu işlem çalıştırılmadı."); continue; }
     o.onStart?.(p);
     let status: OutcomeStatus; let text: string;
-    try { text = String(await o.run(p.name, p.args, p.index)); status = classifyToolResult(text); }
+    // a library search that finds nothing has still done its job: that is an answer, not a failed action
+    try { text = String(await o.run(p.name, p.args, p.index)); status = classifyToolResult(text); if (status === "failed" && /^search_(film_library|music|books)$/.test(p.name) && !/^HATA/.test(text)) status = "ok"; }
     catch (e) { text = "HATA: " + String(e instanceof Error ? e.message : e).replace(/^Error: /, "").slice(0, 300); status = "failed"; }
     if ((status === "ok" || status === "noop") && o.sticky(p.name)) o.seen.set(p.key, text);
     push(status, text);

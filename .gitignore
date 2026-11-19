@@ -25,3 +25,9 @@ Thumbs.db
 HATA-RAPORU.md
 deepseek tarafından bulunan hatalar/
 plugins/
+
+# lunaplayer.org site copy and signing keys (private)
+/lunaplayer-site/
+
+# launch video (brag) output
+brag-output*/

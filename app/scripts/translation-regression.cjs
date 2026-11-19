@@ -10,11 +10,11 @@ function pure(name) {
 const intent = pure('translationIntent'), batches = pure('translationBatches'), validate = pure('validateTranslationResult');
 function dom(texts) {
   const window = {}, location = { href: 'https://example.org/film' };
-  const rows = texts.map(text => ({ textContent: text, isConnected: true, parentElement: { closest: () => null, getClientRects: () => [1] } }));
+  const rows = texts.map((text, i) => ({ textContent: text, isConnected: true, parentElement: { closest: () => null, getClientRects: () => [1], getBoundingClientRect: () => ({ top: i * 20, bottom: i * 20 + 18 }) } }));
   const document = { body: {}, createTreeWalker: () => { let i = 0; return { nextNode: () => rows[i++] || null }; } };
   const script = fs.readFileSync(path.join(base, 'src/browserTranslatePage.js'), 'utf8').replace('export function', 'function');
   const run = new Function('window', 'document', 'location', 'NodeFilter', 'getComputedStyle', 'crypto', script + ';return browserTranslatePage;')(window, document, location, { SHOW_TEXT: 4 }, () => ({ visibility: 'visible', display: 'block' }), require('node:crypto').webcrypto);
-  return { run, rows, location };
+  return { run, rows, location, window };
 }
 const tests = [], test = (name, run) => tests.push({ name, run });
 test('Assistant recognizes Turkish, English and explicit target languages', () => {
@@ -62,9 +62,39 @@ test('Invalid later rows cannot leave the beginning half translated', () => {
   assert.throws(() => d.run('apply', { token: snap.token, translations: [{ id: 0, text: 'Merhaba' }, { id: 77, text: 'Bad id' }] }));
   assert.equal(d.rows[0].textContent, 'Hello');
 });
-test('Long documents report the truncation and remain bounded', () => {
-  const d = dom(Array.from({ length: 300 }, () => 'Some text'));
-  const snap = d.run('snapshot'); assert.equal(snap.rows.length, 180); assert.equal(snap.truncated, true);
+test('Long documents are handed out in bounded chunks until every text is translated', () => {
+  const d = dom(Array.from({ length: 300 }, (_, i) => 'Some text ' + i));
+  let snap = d.run('snapshot'), seen = 0, chunks = 0;
+  while (snap.rows.length) {
+    assert(snap.rows.length <= 60); chunks++;
+    assert.equal(snap.rows[0].id, seen); seen += snap.rows.length;
+    d.run('apply', { token: snap.token, translations: snap.rows.map(r => ({ id: r.id, text: 'Metin ' + r.id })) });
+    snap = d.run('snapshot', { next: true, token: snap.token });
+  }
+  assert.equal(seen, 300); assert.equal(chunks, 5);
+  assert(d.rows.every((r, i) => r.textContent === 'Metin ' + i));
+});
+test('On-screen text comes first; scrolled-past text last', () => {
+  const d = dom(['Above', 'Visible', 'Below']);
+  d.rows[0].parentElement.getBoundingClientRect = () => ({ top: -400, bottom: -380 });
+  d.rows[1].parentElement.getBoundingClientRect = () => ({ top: 100, bottom: 120 });
+  d.rows[2].parentElement.getBoundingClientRect = () => ({ top: 2000, bottom: 2020 });
+  d.window.innerHeight = 800;
+  assert.deepEqual(d.run('snapshot').rows.map(r => r.text), ['Visible', 'Below', 'Above']);
+});
+test('A stopped chunk is handed out again; translated text is never re-sent', () => {
+  const d = dom(['One', 'Two']);
+  const snap = d.run('snapshot');
+  d.run('apply', { token: snap.token, translations: [{ id: 0, text: 'Bir' }] });
+  const again = d.run('snapshot', { next: true, token: snap.token });
+  assert.deepEqual(again.rows.map(r => r.text), ['Two']);
+  assert.equal(again.rows[0].id, 2);
+  assert.deepEqual(d.run('snapshot', { next: true, token: snap.token, onlyIfDirty: true }).rows, []);
+});
+test('A continuation with a stale token cannot reach a new page session', () => {
+  const d = dom(['Hello']); const first = d.run('snapshot');
+  d.run('restore');
+  assert.throws(() => d.run('snapshot', { next: true, token: first.token }));
 });
 test('Questions, refusals and mixed requests never change the page', () => {
   for (const q of ['Bu sayfadaki orijinal fiyat ne?', 'What is the original source of this page?', 'Bu sayfada çeviri hatası var mı?', 'Sayfadaki çeviri doğru mu?',

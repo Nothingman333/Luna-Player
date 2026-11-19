@@ -1,6 +1,10 @@
+import { BrowserIcon } from "./BrowserIcons";
+import { VoiceSettings } from "./VoiceMode";
+import { MyScore } from "./FilmCardExtras";
+import { localList, validScene, validWord } from "./extrasModel";
 import {buildGroups} from "./filmCatalogModel";
 import {cleanWebPlayback,isYouTubeVideo,mediaQualityLabel} from "./browserMediaModel";
-import { CardActions, CardFriendLine, CardFriends } from "./FilmCardExtras";
+import { CardActions, CardFriendLine, CardFriends, openRate } from "./FilmCardExtras";
 import { FriendsWatched } from "./FriendsWatched";
 import { remainingMinutes } from "./friendsWatchedModel";
 import {MediaGallery} from "./MediaGallery";
@@ -15,6 +19,7 @@ import { editionLabels } from "./everydayModel";
 import { DiagnosticsCard, StudioSettings } from "./StudioExtras";
 import { ShellSettings, SoundWebSettings } from "./LunaPlusSettings";
 import { UpcomingStrip } from "./CalendarView";
+import { NotifyButton } from "./Follow";
 import { TitleLogo, WhereToWatch } from "./TitleExtras";
 import { openPanel } from "./paletteExtras";
 import { TonightPicker } from "./TonightPicker";
@@ -34,7 +39,8 @@ import { FilmDecisionPanel } from "./FilmDecision";
 import { Switch } from "./FilmReviewAi";
 import { askAssistant, TasteButtons, TrText, youtubeTrailer } from "./Taste";
 import { PluginSettings } from "./Web";
-import { AddonSettings } from "./Addons";
+import { TmdbQualityPicks, addSource } from "./QualityPicks";
+import { AddonSettings, streamAddons, autoSource, episodeOut, episodeToday, episodeSource, showEpisodeSources } from "./Addons";
 import { SourceSettings } from "./Opds";
 import { UpscalerSettings } from "./Upscaler";
 import { openUrl } from "./linkOpen";
@@ -47,10 +53,11 @@ import type { MenuLike } from "./filmCatalogModel";
 import { itemFacts } from "./libraryTools";
 import { BackupSettings } from "./Backup";
 import { AI_PROVIDERS, AiProvider, AiProfile, aiModels, aiProfiles, commitAiProfiles, profileKeyName, PROFILE_SLOTS } from "./ai";
+import { Lens } from "./LiquidGlass";
 import {
-  besideCopies, Episode, FolderKind, fmtSize, IMG, Item, qualityBadges, Recent, renameVideo, SearchHit, searchTmdb, seasonEpisodes, sidecarSubs, store, flushSecrets,
+  besideCopies, Episode, genericEpisodeName, FolderKind, fmtSize, IMG, Item, qualityBadges, Recent, renameVideo, SearchHit, searchTmdb, seasonEpisodes, sidecarSubs, store, flushSecrets,
   useMediaInfo, useThumb,
-  isRemote, isFinished, setFinished,
+  isRemote, isFinished, finishedSince, setFinished,
 } from "./library";
 
 export const Icon = ({ d, fill, size = 22 }: { d: string; fill?: boolean; size?: number }) => (
@@ -59,13 +66,15 @@ export const Icon = ({ d, fill, size = 22 }: { d: string; fill?: boolean; size?:
     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>
 );
 /** The Luna mark: a play triangle with a moon bite. */
-export const LunaMark = ({ size = 28 }: { size?: number }) => (
+/** `uid` keeps the gradient and mask ids unique: a second mark must not point at the ids of a hidden one (a gradient
+ *  inside a display:none header does not paint, which left only the dot). */
+export const LunaMark = ({ size = 28, uid = "lm" }: { size?: number; uid?: string }) => (
   <svg width={size} height={size} viewBox="0 0 240 240" aria-hidden="true">
     <defs>
-      <linearGradient id="lm-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style={{ stopColor: "var(--accent-soft, #FFB070)" }} /><stop offset="0.6" style={{ stopColor: "var(--accent, #E8701A)" }} /><stop offset="1" style={{ stopColor: "var(--accent-deep, #B4470C)" }} /></linearGradient>
-      <mask id="lm-k"><rect width="240" height="240" fill="#fff" /><circle cx="38" cy="120" r="58" fill="#000" /></mask>
+      <linearGradient id={uid + "-g"} x1="0" y1="0" x2="1" y2="1"><stop offset="0" style={{ stopColor: "var(--accent-soft, #FFB070)" }} /><stop offset="0.6" style={{ stopColor: "var(--accent, #E8701A)" }} /><stop offset="1" style={{ stopColor: "var(--accent-deep, #B4470C)" }} /></linearGradient>
+      <mask id={uid + "-k"}><rect width="240" height="240" fill="#fff" /><circle cx="38" cy="120" r="58" fill="#000" /></mask>
     </defs>
-    <path d="M64 36 Q50 28 50 44 L50 196 Q50 212 64 204 L204 130 Q218 120 204 110 Z" fill="url(#lm-g)" mask="url(#lm-k)" />
+    <path d="M64 36 Q50 28 50 44 L50 196 Q50 212 64 204 L204 130 Q218 120 204 110 Z" fill={`url(#${uid}-g)`} mask={`url(#${uid}-k)`} />
     <circle cx="44" cy="120" r="18" style={{ fill: "var(--accent-soft, #FFB070)" }} />
   </svg>
 );
@@ -163,20 +172,76 @@ const LINK = "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-
 const MODE_ICON: Record<Mode, string> = {
   film: "M4 4h16v16H4zM8 4v16M16 4v16",
   music: "M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
-  books: "M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5",
+  books: "M12 6C8 3 4 4 2 5v15c3-2 6-2 10 0 4-2 7-2 10 0V5c-2-1-6-2-10 1Zm0 0v14",
 };
+/** The highlighted choice of a row of buttons is one pill that slides to the new choice instead of jumping. */
+type PillBox = { x: number; y: number; w: number; h: number };
+/** Where each pill last stood, kept across re-mounts: coming back from Luna Web the pill slides home instead of popping there. */
+const pillLast = new Map<string, PillBox>();
+/** Which item each pill stood on: back from Luna Web (its row was hidden there) the pill starts on Web and slides home. */
+const pillKey = new Map<string, unknown>();
+/**
+ * The lit tab's pill glides to the new tab (FLIP with the Web Animations API: it starts from where the pill is seen
+ * right now, so a quick second click carries on from mid-way, and it runs even when the row was just shown again).
+ */
+function useSlidingPill(ref: React.RefObject<HTMLElement | null>, key: unknown, name: string) {
+  useLayoutEffect(() => {
+    const box = ref.current;
+    const pill = box?.querySelector<HTMLElement>(":scope > .slide-pill");
+    if (!box || !pill) return;
+    const measure = (): PillBox | null => {
+      const on = box.querySelector<HTMLElement>(":scope > .on");
+      return on && on.offsetWidth ? { x: on.offsetLeft, y: on.offsetTop, w: on.offsetWidth, h: on.offsetHeight } : null;
+    };
+    const set = (p: PillBox) => {
+      pill.style.width = p.w + "px"; pill.style.height = p.h + "px"; pill.style.translate = `${p.x}px ${p.y}px`;
+    };
+    const place = () => {
+      const p = measure();
+      pill.style.opacity = p ? "1" : "0";
+      if (p) { set(p); pillLast.set(name, p); }
+    };
+    // the pill as it is on screen now (mid-slide included), else where it last stood
+    let from: PillBox | null = pillLast.get(name) ?? null;
+    const prevKey = pillKey.get(name);
+    pillKey.set(name, key);
+    const was = prevKey !== undefined && prevKey !== key ? box.querySelector<HTMLElement>(`:scope > [data-k="${String(prevKey)}"]`) : null;
+    if (was?.offsetWidth) from = { x: was.offsetLeft, y: was.offsetTop, w: was.offsetWidth, h: was.offsetHeight };
+    if (pill.getAnimations().length) {
+      const cs = getComputedStyle(pill), [x, y] = cs.translate.split(" ").map((v) => parseFloat(v) || 0);
+      from = { x, y: y ?? 0, w: parseFloat(cs.width), h: parseFloat(cs.height) };
+    }
+    place();
+    const to = pillLast.get(name);
+    for (const a of pill.getAnimations()) a.cancel();
+    if (from && to && (Math.abs(from.x - to.x) > 1 || Math.abs(from.w - to.w) > 1) && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      pill.animate([
+        { translate: `${from.x}px ${from.y}px`, width: from.w + "px", height: from.h + "px" },
+        { translate: `${to.x}px ${to.y}px`, width: to.w + "px", height: to.h + "px" },
+      ], { duration: 480, easing: "cubic-bezier(0.32, 0.72, 0, 1)" });
+    }
+    const ready = requestAnimationFrame(() => box.setAttribute("data-pill-ready", ""));
+    const ro = new ResizeObserver(place);
+    ro.observe(box);
+    box.querySelectorAll(":scope > button").forEach((b) => ro.observe(b));
+    return () => { cancelAnimationFrame(ready); ro.disconnect(); };
+  }, [ref, key, name]);
+}
 /** Film · Müzik · Kitap: each part of Luna has its own colour. */
 export function ModeSwitch({ mode, setMode, browserOpen, onBrowser }: { mode: Mode; setMode: (m: Mode) => void; browserOpen?: boolean; onBrowser?: () => void }) {
   const modes: [Mode, string, boolean][] = [["film", tt("Film"), true], ["music", tt("Müzik"), true], ["books", tt("Kitap"), true]];
+  const box = useRef<HTMLElement>(null);
+  useSlidingPill(box, browserOpen ? "web" : mode, "mode");
   return (
-    <nav className="mode-switch" aria-label={tt("Mod")}>
+    <nav className="mode-switch" aria-label={tt("Mod")} ref={box}>
+      <span className="slide-pill" aria-hidden />
       {modes.map(([m, label, ready]) => (
-        <button key={m} className={"mode-btn" + (m === mode && !browserOpen ? " on" : "")} disabled={!ready} title={ready ? label : tt("Yakında")}
+        <button key={m} data-k={m} className={"mode-btn" + (m === mode && !browserOpen ? " on" : "")} disabled={!ready} title={ready ? label : tt("Yakında")}
           onClick={() => setMode(m)} aria-pressed={m === mode && !browserOpen}>
           <Icon d={MODE_ICON[m]} size={15} /><span className="lbl">{label}</span>
         </button>
       ))}
-      {onBrowser && <button className={"mode-btn" + (browserOpen ? " on" : "")} aria-pressed={browserOpen} onClick={onBrowser} title="Luna Web"><Icon d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM3 12h18M12 3a18 18 0 0 1 0 18 18 18 0 0 1 0-18Z" size={16} /><span className="lbl">Web</span></button>}
+      {onBrowser && <button data-k="web" className={"mode-btn" + (browserOpen ? " on" : "")} aria-pressed={browserOpen} onClick={onBrowser} title="Luna Web"><Icon d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM3 12h18M12 3a18 18 0 0 1 0 18 18 18 0 0 1 0-18Z" size={16} /><span className="lbl">Web</span></button>}
     </nav>
   );
 }
@@ -195,6 +260,7 @@ export function Header({ browserOpen, onBrowser, mode, setMode, tabs: modeTabs, 
   // On a narrow window the tabs scroll sideways: the wheel scrolls them, the edges fade where more tabs wait,
   // and the open tab is brought into view
   const nav = useRef<HTMLElement>(null);
+  useSlidingPill(nav, view + "|" + mode + "|" + tabs.length, "tabs");
   const [edges, setEdges] = useState("");
   useEffect(() => {
     const n = nav.current;
@@ -237,6 +303,7 @@ export function Header({ browserOpen, onBrowser, mode, setMode, tabs: modeTabs, 
       <div className="brand"><LunaMark /></div>
       <ModeSwitch mode={mode} setMode={setMode} browserOpen={browserOpen} onBrowser={onBrowser} />
       <nav className={"tabs" + edges} ref={nav}>
+        <span className="slide-pill" aria-hidden />
         {tabs.map(([v, l]) => (
           <button key={v} className={"tab" + (v === view ? " on" : "")} onClick={() => setView(v)}>
             {l}{v === "downloads" && downloading > 0 && <span className="tab-badge">{downloading}</span>}
@@ -259,6 +326,7 @@ export function Header({ browserOpen, onBrowser, mode, setMode, tabs: modeTabs, 
       <button className="ghost sm hdr-btn" onClick={onMine} title={tt("Koleksiyonlar ve geçmiş: film, müzik, kitap bir arada")} aria-label={tt("Koleksiyonlar")}>
         <Icon d={STACK} size={18} /><span className="lbl">{tt("Koleksiyonlar")}</span>
       </button>
+      <NotifyButton />
       <button className="round gear" aria-label={tt("Ayarlar")} title={tt("Ayarlar")} onClick={onSettings}><Icon d={I.gear} /></button>
       {!browserOpen && <button className="primary hdr-open" onClick={onOpen} title={film ? tt("Dosya aç (Ctrl+O)") : mode === "music" ? tt("Müzik dosyası aç") : tt("Kitap dosyası aç (EPUB, PDF, CBZ)")}><Icon d={I.folder} size={18} /><span className="lbl">{tt("Dosya aç")}</span></button>}
     </header>
@@ -297,8 +365,9 @@ function PosterBase({ it, a, copyCount, episodes, resume, reason, watched, stamp
       <div className={"poster-img" + (status ? " remote" : "")}
         title={status === "remote" ? tt("İndirilmeli · detaylardan indirebilirsin") : status === "missing" ? tt("Dosya bulunamadı · detaylardan yeniden bağlayabilirsin") : undefined}>
         {(done || facts.rating > 0) && <div className="library-corner">
-          {facts.rating > 0 && <span className="library-rating-badge" title={extraText("TMDB topluluk puanı (senin puanın değil)", "TMDB community rating (not your own)")} aria-label={extraText(`TMDB puanı ${facts.rating.toFixed(1)}`, `TMDB rating ${facts.rating.toFixed(1)}`)}>TMDB {facts.rating.toFixed(1)}</span>}
-          {done && <span className="done-badge" title={tt("Bitirdin")}>✓</span>}
+          {facts.rating > 0 && <span className="library-rating-badge" title={extraText("TMDB topluluk puanı (senin puanın değil)", "TMDB community rating (not your own)")} aria-label={extraText(`TMDB puanı ${facts.rating.toFixed(1)}`, `TMDB rating ${facts.rating.toFixed(1)}`)}>{done && <i className="done-tick" title={tt("Bitirdin")}>✓</i>}TMDB {facts.rating.toFixed(1)}</span>}
+          {!!title && <MyScore t={{ title, year: year ? String(year) : undefined, id: m?.id, kind: tv ? "tv" : "movie" }} />}
+          {done && !(facts.rating > 0) && <span className="done-badge" title={tt("Bitirdin")}>✓</span>}
         </div>}
         {poster ? <img src={poster} alt="" loading="lazy" onLoad={(e) => e.currentTarget.classList.add("loaded")} onError={() => { posterFailures.fail(poster); again((x) => x + 1); }} />
           : thumb && thumb !== badThumb ? <img src={thumb} alt="" onLoad={(e) => e.currentTarget.classList.add("loaded")} onError={() => { setBadThumb(thumb); if (first) store.remove("thumb:" + first.path); }} />
@@ -307,7 +376,7 @@ function PosterBase({ it, a, copyCount, episodes, resume, reason, watched, stamp
         {status && <span className="library-state-chip">{status === "remote" ? extraText("İndirilmedi", "Not downloaded") : extraText("Dosya yok", "File missing")}</span>}
         {!tv && n > 1 && <span className="library-copy-badge" title={tt("Bu filmden {0} kopya var; detaylarda hangisini izleyeceğini seçersin",n)}><Icon d="M8 3h12v14M4 7h12v14H4z" size={15}/>{tt("{0} kopya",n)}</span>}
         {!!title && <CardFriends t={{ title, year: year ? String(year) : undefined, id: m?.id, kind: tv ? "tv" : "movie" }} />}
-        <CardActions t={{ title, year: year ? String(year) : undefined, id: m?.id, kind: tv ? "tv" : "movie" }} onDetail={() => a.details(it.key)} onPlay={target ? () => a.play(target) : undefined} />
+        <CardActions t={{ title, year: year ? String(year) : undefined, id: m?.id, kind: tv ? "tv" : "movie", paths: it.files.map((f) => f.path) }} onDetail={() => a.details(it.key)} onPlay={target ? () => a.play(target) : undefined} />
         {fraction > 0 && <div className="progress library-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(fraction * 100)} aria-label={extraText("Kaldığın yer", "Where you stopped")}><div style={{ width: fraction * 100 + "%" }} /></div>}
       </div>
       <div className="card-title" title={title}>{title}</div>
@@ -356,22 +425,204 @@ function InfoBtn({ onClick }: { onClick: () => void }) {
   );
 }
 
-function WideCard({ path, item, title, sub, progress, a, still }: {
-  path: string; item?: Item; title: string; sub?: string; progress?: number; a: Actions; still?: string | null;
+function WideCard({ path, item, title, sub, progress, a, still, done, onInfo, copyCount, showSource, onPick }: {
+  path: string; item?: Item; title: string; sub?: string; progress?: number; a: Actions; still?: string | null; done?: boolean;
+  /** what "i" opens instead of the title's page (an episode's own details) */
+  onInfo?: () => void;
+  /** in a stack of an episode's copies (like a film's): the count on the front card, where each one plays from, and remembering the pick */
+  copyCount?: number; showSource?: boolean; onPick?: () => void;
 }) {
+  const where = a.missing.has(path) ? tt("Dosya yok") : isRemote(path) || path.includes("://") ? tt("Web") : tt("Yerel");
   const thumb = useThumb(path, !still);
   const bg = still ?? thumb;
   return (
-    <button className="card" onClick={() => a.play(path)} onContextMenu={(e) => a.menu(e, { path, item })}>
+    <button className="card" onClick={() => { onPick?.(); a.play(path); }} onContextMenu={(e) => a.menu(e, { path, item })}>
       <div className={"thumb" + (isRemote(path) || a.missing.has(path) ? " remote" : "")} style={bg ? { backgroundImage: `url("${bg}")` } : undefined}
         title={isRemote(path) ? tt("İndirilmeli · oynatınca torrent'ten akar") : undefined}>
         <div className="thumb-play"><Icon d={I.play} fill size={28} /></div>
-        {item && <InfoBtn onClick={() => a.details(item.key)} />}
+        {(onInfo || item) && <InfoBtn onClick={onInfo ?? (() => a.details(item!.key))} />}
+        {done && <span className="thumb-done"><Icon d={I.check} size={13} />{tt("İzlendi")}</span>}
+        {(showSource || isRemote(path) || path.includes("://")) && <span className="thumb-src">{where}</span>}
+        {copyCount && copyCount > 1 ? <span className="library-copy-badge ep-copy-badge" title={tt("Bu bölümün {0} kopyası var · üzerine gelince hepsi açılır", copyCount)}><Icon d="M8 3h12v14M4 7h12v14H4z" size={15} />{tt("{0} kopya", copyCount)}</span> : null}
         {progress != null && <div className="progress"><div style={{ width: progress + "%" }} /></div>}
       </div>
       <div className="card-title" title={title}>{title}</div>
       {sub && <div className="muted small">{sub}</div>}
     </button>
+  );
+}
+
+/** An episode TMDB lists but that isn't on this computer: a click finds the best addon source (1080p, most shared) and plays it. */
+function MissingEpisodeCard({ e, show, playSrc }: { e: Episode; show: { tmdbId: number; title: string; season: number }; playSrc: (src: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const out = episodeOut(e);
+  // on its air day it may or may not be out yet: the sources list can be opened to look
+  const today = !out && episodeToday(e);
+  // watched by hand: the episode has no file, so its key is the TMDB episode
+  const key = `tmdb-ep:${show.tmdbId}:${show.season}:${e.episode}`;
+  const [seen, setSeen] = useState(() => isFinished(key));
+  const [info, setInfo] = useState(false);
+  const sources = () => showEpisodeSources({ ...show, episode: e.episode });
+  const play = (auto = autoSource()) => {
+    if (busy || !(out || today)) return;
+    setBusy(true);
+    if (!auto || today) { setBusy(false); sources(); return; }
+    episodeSource({ ...show, episode: e.episode })
+      .then(({ src, name }) => { if (!/^magnet:/i.test(src)) store.set("srcName:" + src, name); playSrc(src); })
+      .catch((err) => window.dispatchEvent(new CustomEvent("luna-extra-error", { detail: String(err).replace(/^Error: /, "") })))
+      .finally(() => setBusy(false));
+  };
+  const sub = today ? tt("Bugün çıkıyor · kaynak henüz olmayabilir") : !out ? e.airDate ? tt("Çıkış: {0}", new Date(e.airDate + "T12:00:00").toLocaleDateString(lang() === "tr" ? "tr-TR" : "en-GB", { day: "numeric", month: "long" })) : tt("Henüz çıkmadı")
+    : busy ? tt("Kaynak aranıyor…") : seen ? tt("İzlendi") : tt("Bilgisayarında yok · eklentiden oynatılır");
+  const menu = (ev: React.MouseEvent) => openMenu(ev, [
+    ...(out || today ? [
+      { label: tt("Kaynakları göster…"), act: sources },
+      { label: tt("En iyi kaynakla oynat"), act: () => play(true) },
+      "sep" as const,
+    ] : []),
+    { label: seen ? tt("İzlenmedi olarak işaretle") : tt("İzlendi olarak işaretle"), act: () => { setFinished([key], !seen); setSeen(!seen); } },
+    "sep",
+    { label: tt("Bölüm adını kopyala"), act: () => void navigator.clipboard?.writeText(`${show.title} S${String(show.season).padStart(2, "0")}E${String(e.episode).padStart(2, "0")}${e.name ? " " + e.name : ""}`) },
+    { label: tt("TMDB'de aç"), act: () => openUrl(`https://www.themoviedb.org/tv/${show.tmdbId}/season/${show.season}/episode/${e.episode}`) },
+  ]);
+  return (
+    // a disabled button gets no right-click, so a future episode is only marked unclickable
+    <>
+    <button className={"card ep-missing" + (out || today ? "" : " not-out") + (seen ? " seen" : "")} onClick={() => play()} aria-disabled={!(out || today)} aria-busy={busy} onContextMenu={menu}>
+      <div className="thumb remote" style={e.still ? { backgroundImage: `url("${IMG}w300${e.still}")` } : undefined}>
+        {(out || today) && <div className="thumb-play"><Icon d={I.play} fill size={28} /></div>}
+        {seen && <span className="thumb-done"><Icon d={I.check} size={13} />{tt("İzlendi")}</span>}
+        <InfoBtn onClick={() => setInfo(true)} />
+      </div>
+      <div className="card-title" title={e.name}>{epTitle(e.episode, e.name)}</div>
+      <div className={"muted small" + (busy ? " pulse" : "")}>{[e.runtime ? e.runtime + tt(" dk") : "", sub].filter(Boolean).join(" · ")}</div>
+    </button>
+    {info && <EpisodeInfo e={e} show={show} seen={seen} onClose={() => setInfo(false)}
+        onSeen={(on) => { setFinished([key], on); setSeen(on); }}
+        onPlay={out || today ? () => { setInfo(false); play(); } : undefined} playSrc={out || today ? playSrc : undefined} />}
+    </>
+  );
+}
+
+/** A show's seasons and episodes from TMDB for a series that isn't in the library (Keşfet, Öneriler…): the same cards as
+ *  the library's missing episodes, with release dates, the quality picks in each episode's "i" and the sources on a click. */
+export function ShowEpisodes({ tmdbId, title, seasons, playSrc, files = [], playFile }: { tmdbId: number; title: string; seasons: number; playSrc: (src: string) => void;
+  /** the show's episodes in the library: these play from the computer */
+  files?: { path: string; season?: number | null; episode?: number | null }[]; playFile?: (path: string) => void }) {
+  const [season, setSeason] = useState(1);
+  const [eps, setEps] = useState<Episode[] | null>(null);
+  useEffect(() => {
+    setEps(null);
+    let alive = true;
+    seasonEpisodes(tmdbId, season).then((l) => alive && setEps(l)).catch(() => alive && setEps([]));
+    return () => { alive = false; };
+  }, [tmdbId, season]);
+  return (
+    <section className="row td-episodes">
+      <div className="row-head">
+        <h2>{tt("Bölümler")}</h2>
+        {seasons > 1 && Array.from({ length: seasons }, (_, i) => i + 1).map((n) => (
+          <button key={n} className={"seg" + (n === season ? " on" : "")} onClick={() => setSeason(n)}>{tt("Sezon")} {n}</button>
+        ))}
+      </div>
+      {eps === null ? <div className="muted small pulse">{tt("Hazırlanıyor…")}</div>
+        : <div className="grid wide">{eps.map((e) => {
+          const f = playFile && files.find((x) => (x.season ?? 1) === season && x.episode === e.episode);
+          if (f) return (
+            <button key={season + ":" + e.episode} className={"card" + (isFinished(f.path) ? " seen" : "")} onClick={() => playFile!(f.path)}>
+              <div className="thumb" style={e.still ? { backgroundImage: `url("${IMG}w300${e.still}")` } : undefined}>
+                <div className="thumb-play"><Icon d={I.play} fill size={28} /></div>
+                {isFinished(f.path) && <span className="thumb-done"><Icon d={I.check} size={13} />{tt("İzlendi")}</span>}
+              </div>
+              <div className="card-title" title={e.name}>{epTitle(e.episode, e.name)}</div>
+              <div className="muted small">{e.runtime ? e.runtime + tt(" dk") : ""}</div>
+            </button>
+          );
+          return <MissingEpisodeCard key={season + ":" + e.episode} e={e} show={{ tmdbId, title, season }} playSrc={playSrc} />;
+        })}</div>}
+    </section>
+  );
+}
+
+/** "4. The Name", or "4. Bölüm" when TMDB has no real name for it yet. */
+const epTitle = (n: number, name?: string | null) => !name || genericEpisodeName(name) ? tt("{0}. Bölüm", n) : `${n}. ${name}`;
+
+/** An episode's own details from TMDB: its still, summary, crew and guest cast. */
+const clock = (t: number) => { const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, sec = Math.floor(t % 60); return (h ? h + ":" + String(m).padStart(2, "0") : String(m)) + ":" + String(sec).padStart(2, "0"); };
+function EpisodeInfo({ e, show, seen, onSeen, onPlay, onClose, onDisk, playSrc, path }: {
+  e: Episode; show: { tmdbId: number; title: string; season: number }; seen: boolean;
+  onSeen: (on: boolean) => void; onPlay?: () => void; onClose: () => void;
+  /** the episode's file is on this computer; otherwise the quality cards show (when addons exist) */
+  onDisk?: boolean; playSrc?: (src: string) => void;
+  /** the episode's file: its scene and word notes show here */
+  path?: string;
+}) {
+  const notes = path ? [
+    ...localList(localStorage, "lunaSceneNotes", validScene).filter((n) => n.path === path).map((n) => ({ id: n.id, at: n.at, text: n.text, word: "" })),
+    ...localList(localStorage, "lunaWordNotes", validWord).filter((n) => n.path === path).map((n) => ({ id: n.id, at: n.at, text: n.meaning || n.text, word: n.word })),
+  ].sort((x, y) => x.at - y.at) : [];
+  const srcEp = { tmdbId: show.tmdbId, title: show.title, season: show.season, episode: e.episode };
+  const date = e.airDate ? new Date(e.airDate + "T12:00:00").toLocaleDateString(lang() === "tr" ? "tr-TR" : "en-GB", { day: "numeric", month: "long", year: "numeric" }) : "";
+  const code = `S${show.season} · ${lang() === "tr" ? "B" : "E"}${e.episode}`;
+  return (
+    <ExtraModal className="ep-info" title={`${show.title} · ${code}`} close={onClose}>
+      <div className={"ep-info-still" + (e.still ? "" : " empty")} style={e.still ? { backgroundImage: `url("${IMG}w780${e.still}")` } : undefined}>
+        <div className="ep-info-shade" />
+        {e.vote ? <span className="tmdb-badge ep-info-vote">★ {e.vote.toFixed(1).replace(".", lang() === "tr" ? "," : ".")}</span> : null}
+        <div className="ep-info-head">
+          <span className="eyebrow">{show.title} · {code}</span>
+          <h2>{epTitle(e.episode, e.name).replace(/^\d+\.\s/, "")}</h2>
+          <div className="ep-info-meta">
+            {date && <span>{date}</span>}
+            {e.runtime ? <span>{e.runtime}{tt(" dk")}</span> : null}
+            {seen && <span className="ep-info-seen"><Icon d={I.check} size={13} />{tt("İzlendi")}</span>}
+          </div>
+        </div>
+      </div>
+      <div className="ep-info-body">
+        <div className="ep-info-actions">
+          {onPlay && <button className="primary" onClick={onPlay}><Icon d={I.play} fill size={16} />  {tt("Oynat")}</button>}
+          <button className={"act" + (seen ? " on good" : "")} data-tip={seen ? tt("İzlenmedi olarak işaretle") : tt("İzlendi olarak işaretle")} aria-label={tt("İzlendi olarak işaretle")} onClick={() => onSeen(!seen)}><Icon d={I.check} size={18} /></button>
+          <button className="chip" onClick={() => openUrl(`https://www.themoviedb.org/tv/${show.tmdbId}/season/${show.season}/episode/${e.episode}`)}>{tt("TMDB'de aç")}</button>
+          {streamAddons().length > 0 && <button className="chip" onClick={() => { onClose(); addSource({ ep: srcEp, more: !!onDisk }); }}>{onDisk ? tt("Başka kaynak ekle…") : tt("Kaynak ekle…")}</button>}
+        </div>
+        {!onDisk && playSrc && <TmdbQualityPicks ep={srcEp} onAll={() => { onClose(); addSource({ ep: srcEp, more: false }); }}
+          onPlay={(src, name) => { if (!src.startsWith("magnet:")) store.set("srcName:" + src, name); onClose(); playSrc(src); }}
+          onDownload={(src) => { onClose(); window.dispatchEvent(new CustomEvent("luna-start-download", { detail: { src } })); }} />}
+        {e.overview ? <p className="ep-info-ov">{e.overview}</p> : <p className="muted">{tt("TMDB'de bu bölümün özeti yok.")}</p>}
+        {notes.length > 0 && (
+          <div className="ep-info-notes">
+            <h4>{tt("Notların")} <span className="muted">· {notes.length}</span></h4>
+            {notes.map((n) => (
+              <button key={n.id} className="ep-info-note" title={tt("Bu ana git")}
+                onClick={() => { onClose(); window.dispatchEvent(new CustomEvent("luna-open-note", { detail: { path, time: n.at } })); }}>
+                <span className="ep-info-note-at">{clock(n.at)}</span>
+                <span>{n.word && <b>{n.word} · </b>}{n.text}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {(e.directors?.length || e.writers?.length) ? (
+          <dl className="ep-info-crew">
+            {e.directors?.length ? <><dt>{tt("Yönetmen")}</dt><dd>{e.directors.join(", ")}</dd></> : null}
+            {e.writers?.length ? <><dt>{tt("Senarist")}</dt><dd>{e.writers.join(", ")}</dd></> : null}
+          </dl>
+        ) : null}
+        {e.guests?.length ? (
+          <>
+            <h3>{tt("Konuk oyuncular")}</h3>
+            <div className="ep-info-cast">
+              {e.guests.map((g) => (
+                <div key={g.name + g.character} className="ep-info-person">
+                  {g.profile ? <img src={`${IMG}w185${g.profile}`} alt="" loading="lazy" /> : <span className="ep-info-nop">{g.name.slice(0, 1)}</span>}
+                  <b>{g.name}</b>{g.character && <small>{g.character}</small>}
+                </div>
+              ))}
+            </div>
+          </>
+        ) : null}
+      </div>
+    </ExtraModal>
   );
 }
 
@@ -391,11 +642,14 @@ function HeroSlider({ slides, a, paused=false,onChoose }: { slides: Slide[]; a: 
   const [hover, setHover] = useState(false);
   const n = slides.length;
   const go = (d: number) => setI((x) => (x + d + n) % n);
+  // One clock: the next slide comes when the dot's fill animation ends, so the fill can never fall behind the slides
+  // (a hidden page or a hover pauses both together). Without motion the fill does not run; a timer turns the slides.
+  const still = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
   useEffect(() => {
-    if (paused || hover || n < 2) return;
+    if (!still || paused || hover || n < 2) return;
     const id = setTimeout(() => go(1), 7000);
     return () => clearTimeout(id);
-  }, [i, hover, n, paused]);
+  }, [i, hover, n, paused, still]);
   // (one index for the text and the picture, also after the list got shorter)
   const cur = Math.min(i, n - 1);
   const s = slides[cur];
@@ -413,7 +667,13 @@ function HeroSlider({ slides, a, paused=false,onChoose }: { slides: Slide[]; a: 
         <div className="eyebrow">{s.kind === "continue" ? tt("KALDIĞIN YERDEN DEVAM ET") : tt("HENÜZ İZLEMEDİN")}</div>
         <h1>{title}</h1>
         <Badges path={s.path} />
-        {s.rec ? (
+        <div className="muted hero-meta">
+          {it?.meta?.rating ? `★ ${String(it.meta.rating).replace(".", DEC)} · ` : ""}{it?.meta?.year}
+          {it?.meta?.genres?.length ? " · " + it.meta.genres.slice(0, 3).join(", ") : ""}
+          {!!title && <MyScore long t={{ title, year: it?.meta?.year ? String(it.meta.year) : undefined, id: it?.meta?.id, kind: it?.parsed.kind === "tv" ? "tv" : "movie" }} />}
+          {it?.meta?.overview && <p className="hero-ov">{it.meta.overview}</p>}
+        </div>
+        {s.rec && (
           <>
             <div className="muted">
               {f?.season != null && epLabel(f.season, f.episode) + " — "}
@@ -421,30 +681,26 @@ function HeroSlider({ slides, a, paused=false,onChoose }: { slides: Slide[]; a: 
             </div>
             <div className="progress"><div style={{ width: pct(s.rec) + "%" }} /></div>
           </>
-        ) : (
-          <div className="muted hero-meta">
-            {it?.meta?.rating ? `★ ${String(it.meta.rating).replace(".", DEC)} · ` : ""}{it?.meta?.year}
-            {it?.meta?.genres?.length ? " · " + it.meta.genres.slice(0, 3).join(", ") : ""}
-            {it?.meta?.overview && <p className="hero-ov">{it.meta.overview}</p>}
-          </div>
         )}
         <div className="hero-actions" onClick={(e) => e.stopPropagation()}>
           <button className="primary light" onClick={() => a.play(s.path)}>
             <Icon d={I.play} fill size={18} /> {s.kind === "continue" ? tt("Devam et") : tt("Oynat")}
           </button>
-          {it && <button className="ghost" onClick={() => a.details(it.key)}>{tt("Detaylar")}</button>}
+          {it && <button className="ghost" onClick={() => a.details(it.key)}><Lens />{tt("Detaylar")}</button>}
+          {/* a film you're already watching needs no trailer */}
+          {!!title && s.kind !== "continue" && <button className="ghost" onClick={() => openUrl(youtubeTrailer(it?.meta?.year ? `${title} (${it.meta.year})` : title))}><Lens /><Icon d={I.play} fill size={14} /> {tt("Fragman")}</button>}
         </div>
       </div>
       {n > 1 && (
         <>
-          <button className="hero-arrow l" aria-label={tt("Önceki")} onClick={(e) => { e.stopPropagation(); go(-1); }}><Icon d={I.left} size={28} /></button>
-          <button className="hero-arrow r" aria-label={tt("Sonraki")} onClick={(e) => { e.stopPropagation(); go(1); }}><Icon d={I.right} size={28} /></button>
+          <button className="hero-arrow l" aria-label={tt("Önceki")} onClick={(e) => { e.stopPropagation(); go(-1); }}><Lens /><Icon d={I.left} size={28} /></button>
+          <button className="hero-arrow r" aria-label={tt("Sonraki")} onClick={(e) => { e.stopPropagation(); go(1); }}><Lens /><Icon d={I.right} size={28} /></button>
         </>
       )}
-      <div className="hero-navigation">{onChoose&&<button className="ghost hero-choose" onClick={e=>{e.stopPropagation();onChoose();}}><Icon d={I.search} size={18}/>{tt("Bu akşam ne izlesem?")}</button>}{n>1&&<div className="hero-dots" onClick={(e) => e.stopPropagation()}>
+      <div className="hero-navigation">{onChoose&&<button className="ghost hero-choose" onClick={e=>{e.stopPropagation();onChoose();}}><Lens /><Icon d={I.search} size={18}/>{tt("Bu akşam ne izlesem?")}</button>}{n>1&&<div className="hero-dots" onClick={(e) => e.stopPropagation()}>
             {slides.map((sl, k) => (
               <button key={k} aria-label={tt("{0}. öğe", k + 1)} className={"hero-dot" + (k === cur ? " on" : "") + (sl.kind === "new" ? " new" : "")}
-                onClick={() => setI(k)}>{k === cur && <span className="hero-dot-fill" style={{animationPlayState:hover?"paused":"running"}} />}</button>
+                onClick={() => setI(k)}>{k === cur && <span className="hero-dot-fill" style={{animationPlayState:hover||paused?"paused":"running"}} onAnimationEnd={() => go(1)} />}</button>
             ))}
           </div>}</div>
     </section>
@@ -480,7 +736,9 @@ export function Home({ items, recent, hasFolders, a, onAddFolder, downloads,acti
   const [tonight,setTonight]=useState(false);
   useEffect(()=>{if(!active)setTonight(false);},[active]);
   const itemOf = (p: string) => items.find((i) => i.files.some((f) => f.path === p));
-  const continuing = recent.filter((r) => pct(r) < 95 && !isFinished(r.path)).slice(0, 12);
+  // A series shows once, at the episode watched last; its other episodes are in its details.
+  const seenShow = new Set<string>();
+  const continuing = recent.filter((r) => { if (pct(r) >= 95 || finishedSince(r)) return false; const it = itemOf(r.path); if (it?.parsed.kind !== "tv") return true; if (seenShow.has(it.key)) return false; seenShow.add(it.key); return true; }).slice(0, 12);
   const finishedItems = items.filter((i) => i.files.length && i.files.every((f) => isFinished(f.path)));
   // Slider: what you are in the middle of, then things you haven't started yet.
   const watched = new Set(recent.map((r) => r.path));
@@ -497,7 +755,7 @@ export function Home({ items, recent, hasFolders, a, onAddFolder, downloads,acti
 
   return (
     <div className="page">
-      <div className={"home-feature"+(tonight?" choosing":"")}>{(tonight||!slides.length)&&<button type="button" className="home-feature-toggle" aria-expanded={tonight} aria-controls="home-tonight" onClick={()=>setTonight(v=>!v)}><Icon d={tonight?I.left:I.search} size={16}/>{tonight?extraText("Devam kartına dön","Back to continue"):tt("Bu akşam ne izlesem?")}</button>}<div className={"home-feature-panel"+(!tonight?" active":"")} aria-hidden={tonight} inert={tonight}>
+      <div className={"home-feature"+(tonight?" choosing":"")}>{(tonight||!slides.length)&&<button type="button" className="home-feature-toggle" aria-expanded={tonight} aria-controls="home-tonight" onClick={()=>setTonight(v=>!v)}><Lens /><Icon d={tonight?I.left:I.search} size={16}/>{tonight?extraText("Devam kartına dön","Back to continue"):tt("Bu akşam ne izlesem?")}</button>}<div className={"home-feature-panel"+(!tonight?" active":"")} aria-hidden={tonight} inert={tonight}>
       {slides.length ? <HeroSlider slides={slides} a={a} paused={tonight} onChoose={()=>setTonight(true)} /> : !hasFolders ? <FolderAsk onAdd={onAddFolder} big /> : (
         <section className="hero empty">
           <h1>{tt("Bir video sürükle bırak")}</h1>
@@ -724,17 +982,20 @@ function CopyChip({ path, on, gone, onPick, onMenu }: { path: string; on: boolea
   );
 }
 
-export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, missingPanel }: {
-  it: Item; recent: Recent[]; a: Actions; onBack: () => void; onAddSub: (path: string) => void; download?: React.ReactNode;
+export function Details({ it, recent, a, onBack, onAddSub, download, downloading, onAsk, missingPanel }: {
+  it: Item; recent: Recent[]; a: Actions; onBack: () => void; onAddSub: (path: string) => void; download?: React.ReactNode; downloading?: boolean;
   onAsk?: () => void; missingPanel?: React.ReactNode;
 }) {
   const [, rerender] = useState(0);
   const m = safeMeta(it.meta, it.parsed.kind);
   const tint = useTint(m?.poster ? IMG + "w92" + m.poster : null);
   const isTv = it.parsed.kind === "tv";
-  const seasons = [...new Set(it.files.map((f) => f.season ?? 1))].sort((x, y) => x - y);
+  // the seasons on disk and every season TMDB lists (episodes that aren't here can be played from the addons)
+  const seasons = [...new Set([...it.files.map((f) => f.season ?? 1), ...Array.from({ length: isTv ? m?.seasons ?? 0 : 0 }, (_, i) => i + 1)])].sort((x, y) => x - y);
   // a film found more than once: the user picks which copy to watch (last watched one first)
   const copies = isTv ? [] : a.copies?.(it) ?? it.files.map((f) => f.path);
+  // only copies that are on this computer are offered; the rest is downloaded with İndir
+  const diskCopies = copies.filter((p) => !a.missing.has(p) && !isRemote(p));
   // "finished" is a fact about the film: one finished copy makes it watched (the catalog filters agree), and marking toggles every copy
   const filmPaths = isTv ? it.files.map((f) => f.path) : copies.length ? copies : it.files.map((f) => f.path);
   const allDone = isTv ? it.files.every((f) => isFinished(f.path)) : filmPaths.some((p) => isFinished(p));
@@ -742,7 +1003,15 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
   const chosen = copies.length > 1 ? pick ?? (copies.includes(store.get("lunaPreferredCopy:"+(m?.id?m.kind+":"+m.id:it.key))||"") ? store.get("lunaPreferredCopy:"+(m?.id?m.kind+":"+m.id:it.key)) : null) ?? recent.find((r) => copies.includes(r.path))?.path ?? copies[0] : null;
   const { file, rec } = chosen ? { file: { path: chosen }, rec: recent.find((r) => r.path === chosen) } as { file: { path: string; season?: number; episode?: number }; rec?: Recent } : resumeTarget(it, recent);
   const [season, setSeason] = useState(file.season ?? seasons[0] ?? 1);
+  // "Kaynak ekle" / quality cards: on this computer or not (a torrent/web link or a missing file is not)
+  const onDisk = !isRemote(file.path) && !file.path.includes("://") && !a.missing.has(file.path);
+  const srcTitle = m?.title || it.parsed.title, srcYear = m?.year ? String(m.year) : it.parsed.year ? String(it.parsed.year) : undefined;
+  const srcArg = streamAddons().length && m?.id && m.id > 0
+    ? isTv ? (file.season != null && file.episode != null ? { ep: { tmdbId: m.id, title: srcTitle, season: file.season, episode: file.episode } } : null)
+      : { film: { tmdbId: m.id, title: srcTitle, year: srcYear } }
+    : null;
   const [eps, setEps] = useState<Episode[]>([]);
+  const [epInfo, setEpInfo] = useState<{ e: Episode; path: string } | null>(null);
   const [more, setMore] = useState(false);
   const [gallery,setGallery]=useState(false);
   const [extraPanel,setExtraPanel]=useState<"preferences"|"series"|"file"|null>(null);
@@ -784,6 +1053,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
                 <span className="rating-src">TMDB</span>★ {m.rating.toFixed(1).replace(".", DEC)}
               </button>
             )}
+            {m && <MyScore long t={{ title: m.title, year: m.year ? String(m.year) : undefined, id: m.id > 0 ? m.id : undefined, kind: m.kind === "tv" ? "tv" : "movie" }} />}
             {m && m.year ? <span>{m.year}</span> : null}
             {m && m.seasons > 0 ? <span>{m.seasons}  {tt("sezon")}</span> : null}
             {m && m.runtime > 0 ? <span>{formatRuntime(m.runtime, tt("sa"), tt("dk"))}</span> : null}
@@ -793,11 +1063,11 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
           <FilmMetadataPanel item={it} menuOnly/>
           <Badges path={file.path} big />
           {m && m.id > 0 && <WhereToWatch kind={m.kind} id={m.id} />}
-          {copies.length > 1 && (
+          {diskCopies.length > 1 && (
             <div className="copies">
-              <div className="muted small">{tt("Bu filmden {0} kopya var; izlemek istediğini seç:", copies.length)}</div>
+              <div className="muted small">{tt("Bu filmden {0} kopya var; izlemek istediğini seç:", diskCopies.length)}</div>
               <div className="copy-list" role="radiogroup" aria-label={tt("Kopyalar")}>
-                {copies.map((p) => <CopyChip key={p} path={p} on={p === file.path} gone={a.missing.has(p)} onPick={() => {setPick(p);store.set("lunaPreferredCopy:"+(m?.id?m.kind+":"+m.id:it.key),p);}} onMenu={(e) => a.menu(e, { path: p, item: it })} />)}
+                {diskCopies.map((p) => <CopyChip key={p} path={p} on={p === file.path} gone={a.missing.has(p)} onPick={() => {setPick(p);store.set("lunaPreferredCopy:"+(m?.id?m.kind+":"+m.id:it.key),p);}} onMenu={(e) => a.menu(e, { path: p, item: it })} />)}
               </div>
               <div className="copy-help">{extraText("Hangi kopyayı izleyeceğini sen seçersin. Ses ve altyazı dili oynatırken seçilir; dosyanın içindeki parçalar burada okunmaz. Kesik çerçeveli etiketler dosya adından tahmindir, dosya okununca gerçek değerle değişir.", "You choose which copy to watch. Audio and subtitle language are chosen while playing; the tracks inside a file are not read here. Dashed labels are guessed from the file name and are replaced by the real values once the file is read.")}</div>
             </div>
@@ -814,13 +1084,19 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
             </div>
           ) : <p className="overview muted">{tt("Özet ve oyuncular için ayarlardan TMDB anahtarını gir.")}</p>}
           <div className="hero-actions">
-            <button className="primary light" onClick={() => {if(sharedRec&&sharedRec.path!==file.path)window.dispatchEvent(new CustomEvent("luna-open-note",{detail:{path:file.path,time:sharedRec.time}}));else a.play(file.path);}}><Icon d={I.play} fill size={18} /> {playLabel}</button>
-            {rec && <button className="ghost" onClick={() => a.play(file.path, true)}>{tt("Baştan başla")}</button>}
+            {!isTv && isRemote(file.path) && !downloading ? <button className="primary light" onClick={() => window.dispatchEvent(new Event("luna-details-download"))}><Icon d={I.down} size={18} /> {tt("İndir")}</button> : <button className="primary light" onClick={() => {if(sharedRec&&sharedRec.path!==file.path)window.dispatchEvent(new CustomEvent("luna-open-note",{detail:{path:file.path,time:sharedRec.time}}));else a.play(file.path);}}><Icon d={I.play} fill size={18} /> {playLabel}</button>}
+            {rec && !(!isTv && isRemote(file.path) && !downloading) && <button className="ghost" onClick={() => a.play(file.path, true)}>{tt("Baştan başla")}</button>}
             <span className="act-sep" aria-hidden="true" />
             <button className={"act" + (allDone || (isTv && isFinished(file.path)) ? " on good" : "")}
               data-tip={isTv ? (isFinished(file.path) ? tt("Bölümü izlemedim") : tt("Bölümü bitirdim")) : allDone ? tt("Bitirmedim") : tt("Bitirdim")}
               aria-label={isTv ? tt("Bölümü bitirdim") : tt("Bitirdim")}
-              onClick={() => { setFinished(isTv ? [file.path] : filmPaths, !allDone && !(isTv && isFinished(file.path))); rerender((n) => n + 1); }}>
+              onClick={(e) => {
+                const on = !allDone && !(isTv && isFinished(file.path));
+                setFinished(isTv ? [file.path] : filmPaths, on); rerender((n) => n + 1);
+                // the whole film (or every episode) is now watched: ask for a score
+                if (on && (!isTv || it.files.every((f) => isFinished(f.path))))
+                  openRate(e.currentTarget.getBoundingClientRect(), { title: m?.title || it.parsed.title, year: m?.year ? String(m.year) : it.parsed.year ? String(it.parsed.year) : undefined, id: m?.id && m.id > 0 ? m.id : undefined, kind: isTv ? "tv" : "movie" });
+              }}>
               <Icon d={I.check} size={20} />
             </button>
             <TasteButtons it={it} />
@@ -835,10 +1111,13 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
                 <Icon d={I.chat} size={20} />
               </button>
             )}
-            <button className="act" data-tip={tt("Diğer seçenekler")} aria-label={tt("Diğer seçenekler")} onClick={(e) => openMenu(e,[...(copies.length>1?[{label:extraText("Hatırlanan sürüm seçimini sıfırla","Reset preferred version"),act:()=>{store.remove("lunaPreferredCopy:"+(m?.id?m.kind+":"+m.id:it.key));setPick(null);rerender(n=>n+1);}}]:[]),...(cleanWebPlayback(store.json("web-playback:"+file.path,null))&&!isYouTubeVideo(file.path)&&a.rematch?[{label:extraText("Web filmi eşleşmesini değiştir","Change web movie match"),act:()=>a.rematch!({path:file.path,item:it})},{label:store.get("webNoticeOff:"+it.key)==="1"?extraText("Web’de “Bunu izliyorsun” kontrolünü aç","Turn on the web “You are watching” check"):extraText("Web’de “Bunu izliyorsun” kontrolünü kapat","Turn off the web “You are watching” check"),act:()=>{if(store.get("webNoticeOff:"+it.key)==="1")store.remove("webNoticeOff:"+it.key);else store.set("webNoticeOff:"+it.key,"1");rerender(n=>n+1);}}]:[]),{label:tt("Altyazı ekle"),act:()=>onAddSub(file.path)},{label:extraText("Dosya ve altyazı bilgisi","File and subtitle information"),act:()=>setExtraPanel("file")},{label:extraText("Bilgileri düzenle","Edit metadata"),act:()=>window.dispatchEvent(new CustomEvent("luna-edit-metadata",{detail:it.key}))},{label:extraText("Bu dosyanın hatırlanan tercihleri","Remembered preferences for this file"),act:()=>setExtraPanel("preferences")},...(!isTv&&m&&m.id>0?[{label:extraText("Film serilerini takip et","Follow film collections"),act:()=>setExtraPanel("series")}]:[]),"sep",{label:tt("Dosya seçenekleri"),act:()=>a.menu(e,{path:file.path,item:it})}])}>
+            <button className="act" data-tip={tt("Diğer seçenekler")} aria-label={tt("Diğer seçenekler")} onClick={(e) => openMenu(e,[...(copies.length>1?[{label:extraText("Hatırlanan sürüm seçimini sıfırla","Reset preferred version"),act:()=>{store.remove("lunaPreferredCopy:"+(m?.id?m.kind+":"+m.id:it.key));setPick(null);rerender(n=>n+1);}}]:[]),...(cleanWebPlayback(store.json("web-playback:"+file.path,null))&&!isYouTubeVideo(file.path)&&a.rematch?[{label:extraText("Web filmi eşleşmesini değiştir","Change web movie match"),act:()=>a.rematch!({path:file.path,item:it})},{label:store.get("webNoticeOff:"+it.key)==="1"?extraText("Web’de “Bunu izliyorsun” kontrolünü aç","Turn on the web “You are watching” check"):extraText("Web’de “Bunu izliyorsun” kontrolünü kapat","Turn off the web “You are watching” check"),act:()=>{if(store.get("webNoticeOff:"+it.key)==="1")store.remove("webNoticeOff:"+it.key);else store.set("webNoticeOff:"+it.key,"1");rerender(n=>n+1);}}]:[]),...(srcArg?[{label:onDisk?tt("Başka kaynak ekle…"):tt("Kaynak ekle…"),act:()=>addSource({...srcArg,more:onDisk})}]:[]),{label:tt("Altyazı ekle"),act:()=>onAddSub(file.path)},{label:extraText("Dosya ve altyazı bilgisi","File and subtitle information"),act:()=>setExtraPanel("file")},{label:extraText("Bilgileri düzenle","Edit metadata"),act:()=>window.dispatchEvent(new CustomEvent("luna-edit-metadata",{detail:it.key}))},{label:extraText("Bu dosyanın hatırlanan tercihleri","Remembered preferences for this file"),act:()=>setExtraPanel("preferences")},...(!isTv&&m&&m.id>0?[{label:extraText("Film serilerini takip et","Follow film collections"),act:()=>setExtraPanel("series")}]:[]),"sep",{label:tt("Dosya seçenekleri"),act:()=>a.menu(e,{path:file.path,item:it})}])}>
               <Icon d={I.more} size={22} />
             </button>
           </div>
+          {srcArg && !onDisk && <TmdbQualityPicks {...srcArg} onAll={() => addSource({ ...srcArg, more: false })}
+            onPlay={(src, name) => { if (!src.startsWith("magnet:")) store.set("srcName:" + src, name); a.play(src); }}
+            onDownload={(src) => window.dispatchEvent(new CustomEvent("luna-start-download", { detail: { src } }))} />}
           <MatchBadge kind={m?.kind??it.parsed.kind} id={m?.id}/>
 
           {missingPanel}
@@ -858,7 +1137,7 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
               <button key={c.name + c.character} className="person" title={tt("{0} · TMDB'de aç", c.name)}
                 onClick={() => openUrl(c.id ? `https://www.themoviedb.org/person/${c.id}?language=${lang()}`
                   : `https://www.themoviedb.org/search/person?query=${encodeURIComponent(c.name)}`)}>
-                <div className="face">{c.profile ? <img src={IMG + "w185" + c.profile} alt="" loading="lazy" /> : c.name[0]}</div>
+                <div className="face">{c.profile ? <img src={IMG + "w185" + c.profile} alt="" loading="lazy" onLoad={(e) => e.currentTarget.classList.add("loaded")} /> : c.name[0]}</div>
                 <div className="p-name">{c.name}</div>
                 <div className="muted small">{c.character}</div>
               </button>
@@ -878,32 +1157,67 @@ export function Details({ it, recent, a, onBack, onAddSub, download, onAsk, miss
             ))}
           </div>
           <div className="grid wide">
-            {it.files.filter((f) => (f.season ?? 1) === season).map((f) => {
-              const e = eps.find((x) => x.episode === f.episode);
-              const r = recent.find((x) => x.path === f.path);
-              const p = pct(r);
-              return (
-                <WideCard key={f.path} path={f.path} item={it} a={a} progress={r ? p : undefined}
+            {[...epGroups(it.files.filter((f) => (f.season ?? 1) === season)).map((f) => ({ n: f.episode ?? 0, f, e: eps.find((x) => x.episode === f.episode) })),
+              ...eps.filter((e) => !it.files.some((f) => (f.season ?? 1) === season && f.episode === e.episode)).map((e) => ({ n: e.episode, f: null, e }))]
+              .sort((x, y) => x.n - y.n).map(({ f, e }) => {
+              if (!f) return m && <MissingEpisodeCard key={"m" + e!.episode} e={e!} show={{ tmdbId: m.id, title: m.title || it.parsed.title, season }} playSrc={a.play} />;
+              // the same episode more than once (a downloaded file and a web source, two qualities): one card, like a film's copies
+              const group = f.copies, cKey = "lunaPreferredCopy:ep:" + (m?.id ? m.kind + ":" + m.id : it.key) + ":" + season + ":" + f.episode;
+              const path = group.length > 1 ? (group.includes(store.get(cKey) ?? "") ? store.get(cKey)! : recent.filter((x) => group.includes(x.path)).sort((x, y) => (y.at ?? 0) - (x.at ?? 0))[0]?.path
+                ?? group.find((x) => !isRemote(x) && !x.includes("://") && !a.missing.has(x)) ?? group[0]) : f.path;
+              const seen = group.some((x) => isFinished(x));
+              const card = (c: string, i: number) => {
+                const r = recent.find((x) => x.path === c);
+                const p = pct(r), done = p >= 95 || seen;
+                return <WideCard key={c} path={c} item={it} a={a} progress={r ? p : undefined} done={done}
+                  copyCount={i === 0 ? group.length : undefined} showSource={group.length > 1}
+                  onPick={group.length > 1 ? () => store.set(cKey, c) : undefined}
                   still={e?.still ? `${IMG}w300${e.still}` : null}
-                  title={`${f.episode}. ${e?.name ?? fileName(f.path)}`}
-                  sub={[e?.runtime ? e.runtime + tt(" dk") : "", p >= 95 || isFinished(f.path) ? tt("İzlendi") : r ? tt("{0} kaldı", fmtTime(r.duration - r.time)) : ""].filter(Boolean).join(" · ")} />
+                  onInfo={e && m ? () => setEpInfo({ e, path: c }) : undefined}
+                  title={e ? epTitle(f.episode ?? e.episode, e.name) : `${f.episode}. ${fileName(f.path)}`}
+                  sub={[e?.runtime ? e.runtime + tt(" dk") : "", done ? "" : r ? tt("{0} kaldı", fmtTime(r.duration - r.time)) : ""].filter(Boolean).join(" · ")} />;
+              };
+              if (group.length < 2) return card(path, 0);
+              // the same episode more than once: stacked like a film's copies, the one that plays first in front; hover spreads them
+              const order = [path, ...group.filter((x) => x !== path)];
+              return (
+                <div key={f.path} className="library-copy-stack has-copies ep-copy-stack" style={{ "--copy-count": order.length } as React.CSSProperties}>
+                  {order.map((c, i) => <div key={c} className="library-comparable" style={{ "--copy-index": i } as React.CSSProperties}>{card(c, i)}</div>)}
+                </div>
               );
             })}
           </div>
+          {epInfo && m && <EpisodeInfo e={epInfo.e} show={{ tmdbId: m.id, title: m.title || it.parsed.title, season }} seen={isFinished(epInfo.path)}
+            onClose={() => setEpInfo(null)} onSeen={(on) => { setFinished([epInfo.path], on); rerender((n) => n + 1); }}
+            onPlay={() => { const path = epInfo.path; setEpInfo(null); a.play(path); }} onDisk={!isRemote(epInfo.path) && !epInfo.path.includes("://") && !a.missing.has(epInfo.path)} playSrc={a.play} path={epInfo.path} />}
         </section>
       )}
     </div>
   );
 }
 
+/** One entry per episode: copies of the same season/episode go together (the first one stands for the group). */
+function epGroups<F extends { path: string; season?: number; episode?: number }>(files: F[]): (F & { copies: string[] })[] {
+  const by = new Map<string, F & { copies: string[] }>();
+  for (const f of files) {
+    if (f.episode == null) { by.set("p:" + f.path, { ...f, copies: [f.path] }); continue; }
+    const k = (f.season ?? 1) + ":" + f.episode, g = by.get(k);
+    if (g) g.copies.push(f.path); else by.set(k, { ...f, copies: [f.path] });
+  }
+  return [...by.values()];
+}
+
 // ---------- menus & dialogs ----------
-export type MenuEntry = { label: string; act: () => void; danger?: boolean } | "sep";
+export type MenuEntry = { label: string; act: () => void; danger?: boolean; icon?: "globe" } | "sep";
 let menuState: { x: number; y: number; entries: MenuEntry[] } | null = null;
 const menuSubs = new Set<() => void>();
 /** Opens a right-click menu at the mouse (music, books: covers and rows). */
 export function openMenu(e: React.MouseEvent, entries: MenuEntry[]) {
   e.preventDefault(); e.stopPropagation();
-  menuState = { x: e.clientX, y: e.clientY, entries };
+  // opened from a button (⋯): the menu takes the button's place and the button turns into it (glisse); a right-click
+  // opens at the pointer as before
+  const t = e.currentTarget as HTMLElement | null, r = e.type === "click" && t?.getBoundingClientRect ? t.getBoundingClientRect() : null;
+  menuState = { x: r && r.width ? r.left : e.clientX, y: r && r.height ? r.top : e.clientY, entries };
   lastMenuAt = { x: e.clientX, y: e.clientY };
   menuSubs.forEach((f) => f());
 }
@@ -929,7 +1243,7 @@ function arrangeFilmMenu(entries: MenuEntry[]): MenuEntry[] {
   const ask: MenuEntry = { label: "✦  " + extraText("Asistana sor…", "Ask the assistant…"), act: () => menuAgain(asks) };
   const rest = entries.filter((e) => e === "sep" || !e.label.startsWith("✦"));
   return arrangeMenu<MenuEntry & MenuLike>([...rest, ask], [
-    [tt("Devam et"), tt("Oynat"), tt("Baştan oynat"), tt("Detaylar")],
+    [tt("Devam et"), tt("Oynat"), tt("Baştan oynat"), extraText("Siteye git", "Go to the site"), tt("Detaylar")],
     [tt("Koleksiyona ekle…"), (ask as { label: string }).label],
     [tt("İzlendi olarak işaretle"), tt("İzlenmedi olarak işaretle"), tt("İzlemeye devam et listesinden kaldır"), tt("Altyazı ekle…")],
     [tt("Adını değiştir / eşleştir…"), tt("Dosya adını değiştir…")],
@@ -968,7 +1282,7 @@ export function CardMenu({ x, y, entries, onClose }: { x: number; y: number; ent
       <div className="cm" role="menu" ref={box} onKeyDown={onKey} style={{ left, top, width: W }} onMouseDown={(e) => e.stopPropagation()}>
         {arranged.map((e, i) => e === "sep" ? <div key={i} className="cm-sep" role="separator" /> : (
           <button key={i} role="menuitem" className={"cm-item" + (e.danger ? " danger" : "")} onClick={() => { onClose(); e.act(); }}>
-            <span className="cm-check" /><span className="grow">{e.label}</span>
+            <span className="cm-check" /><span className="grow">{e.label}</span>{e.icon && <span className="cm-icon"><BrowserIcon name={e.icon} size={16} /></span>}
           </button>
         ))}
       </div>
@@ -1116,6 +1430,7 @@ function KeyField({ label, hint, value, onChange, placeholder, url }: {
 export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; onTour?: () => void; onSetup?: () => void }) {
   const [osKey, setOsKey] = useState(store.get("osKey") ?? "");
   const [tmdbKey, setTmdbKey] = useState(store.get("tmdbKey") ?? "");
+  const [braveKey, setBraveKey] = useState(store.get("braveKey") ?? "");
   const [langs, setLangs] = useState(store.get("langs") ?? defaultSubLangs());
   const [autoFull, setAutoFull] = useState(store.get("autoFull") !== "0");
   const [dlDir, setDlDir] = useState(store.get("dlDir") ?? "");
@@ -1198,6 +1513,7 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
     }
     store.set("osKey", osKey.trim());
     store.set("tmdbKey", tmdbKey.trim());
+    store.set("braveKey", braveKey.trim());
     store.set("langs", langs.trim());
     store.set("autoFull", autoFull ? "1" : "0");
     if (dlDir) store.set("dlDir", dlDir);
@@ -1270,6 +1586,16 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
             <div className="set-body" key={sec}>
               {sec === "general" && (
                 <>
+                  <div className="set-card set-version-card">
+                    <div className="field">
+                      <span>{tt("Sürüm")}</span>
+                      <b className="set-version">{VERSION_LABEL}</b>
+                      <div className="set-hint">{tt("Son değişikliği yapan model: {0}", BUILD_AGENT_NAMES[BUILD_AGENT] ?? BUILD_AGENT)}</div>
+                      {/* the notice TMDB's API terms ask for */}
+                      <div className="set-hint">{tt("Bu ürün TMDB API'sini kullanır ama TMDB tarafından onaylanmış ya da sertifikalandırılmış değildir. Film afişleri ve bilgileri TMDB'den gelir.")}</div>
+                    </div>
+                    <UpdateSettings bare onBackup={() => setSec("backup")} />
+                  </div>
                   <div className="set-card set-locale-grid">
                     <div className="field">
                       <span>{tt("Dil")}</span>
@@ -1281,22 +1607,14 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                     </div>
                     <CountrySelect/>
                   </div>
-                  <div className="set-card">
-                    <div className="field">
-                      <span>{tt("Sürüm")}</span>
-                      <b className="set-version">{VERSION_LABEL}</b>
-                      <div className="set-hint">{tt("Son değişikliği yapan model: {0}", BUILD_AGENT_NAMES[BUILD_AGENT] ?? BUILD_AGENT)}</div>
-                      {/* the notice TMDB's API terms ask for */}
-                      <div className="set-hint">{tt("Bu ürün TMDB API'sini kullanır ama TMDB tarafından onaylanmış ya da sertifikalandırılmış değildir. Film afişleri ve bilgileri TMDB'den gelir.")}</div>
-                    </div>
-                  </div>
+
                   <SoundWebSettings section="web"/>                  <div className="set-card">
                     <label className="look-check">
                       <input type="checkbox" defaultChecked={store.get("clipOffer") !== "0"} onChange={(e) => { store.set("clipOffer", e.target.checked ? "1" : "0"); invoke("clipboard_offer", { on: e.target.checked }).catch(() => {}); }} />
                       {tt("Bağlantı kopyalayınca “İçe aktar” öner")}
                     </label>
                     <div className="set-hint">{tt("Başka bir yerde Spotify, YouTube, torrent, podcast ya da kitap bağlantısı kopyaladığında üstte 30 saniyeliğine küçük bir öneri çıkar. Panodaki başka hiçbir şey okunmaz ya da saklanmaz.")}</div>
-                  </div><UpdateSettings onBackup={() => setSec("backup")} />
+                  </div>
 
 
 
@@ -1319,6 +1637,11 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                       placeholder="opensubtitles.com › Profil › API consumers" url="https://www.opensubtitles.com/consumers" />
                   </div>
                   <div className="set-card">
+                    <KeyField label="Brave Search" hint={extraText("İsteğe bağlı: yerel model (LM Studio, Ollama), OpenAI ve Claude profillerinde asistan internette arayabilir. Gemini kendi Google aramasını kullanır. Her arama Brave hesabından düşer.", "Optional: lets the assistant search the web with local models (LM Studio, Ollama), OpenAI and Claude profiles. Gemini uses its own Google search. Each search counts against your Brave account.")} value={braveKey} onChange={setBraveKey}
+                      placeholder="api-dashboard.search.brave.com › API Keys" url="https://api-dashboard.search.brave.com/" />
+                  </div>
+                  <VoiceSettings />
+                  <div className="set-card">
                     <div className="field">
                       <span>{tt("API profilleri")}</span>
                       <div className="set-hint">{tt("Birden fazla anahtar ve model kaydet (ör. iş OpenAI'si, ev Gemini'si, yerel Ollama). Asistan ve yorum analizi ayrı ayrı bir profil kullanabilir.")}</div>
@@ -1332,8 +1655,10 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                         <div key={x.slot} className="set-prof">
                           <div className="set-prof-top">
                             <input className="set-prof-name" value={x.name} maxLength={60} onChange={(e) => edit({ name: e.target.value })} placeholder={tt("Profil {0}", x.slot)} aria-label={tt("Profil adı")} />
-                            <select value={x.provider} onChange={(e) => edit({ provider: e.target.value as AiProvider, model: "" })} aria-label={tt("Servis")}>
+                            {/* DeepSeek: a ready base URL profile (OpenAI-compatible), nothing to type but the key */}
+                            <select value={x.provider === "custom" && /api\.deepseek\.com/i.test(x.base) ? "deepseek" : x.provider} onChange={(e) => e.target.value === "deepseek" ? edit({ provider: "custom", base: "https://api.deepseek.com/v1", model: "deepseek-flash", ...(x.name.trim() ? {} : { name: "DeepSeek" }) }) : edit({ provider: e.target.value as AiProvider, model: "" })} aria-label={tt("Servis")}>
                               {AI_PROVIDERS.map((a) => <option key={a.id} value={a.id}>{a.id === "custom" ? tt("Başka (base URL)") : a.name}</option>)}
+                              <option value="deepseek">DeepSeek</option>
                             </select>
                             <label className="look-check set-radio"><input type="radio" name="actProf" checked={actProf === String(x.slot)} onChange={() => setActProf(String(x.slot))} />{tt("Asistan kullansın")}</label>
                             <button className="chip" onClick={() => { setProfs((l) => l.filter((y) => y.slot !== x.slot)); if (actProf === String(x.slot)) setActProf(""); if (rvProv === "profile:" + x.slot) setRvProv(""); }}>{tt("Sil")}</button>
@@ -1465,6 +1790,18 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                       <input type="checkbox" checked={autoFull} onChange={(e) => setAutoFull(e.target.checked)} />
                       {tt("Oynatınca tam ekran başlat")}
                     </label>
+                  </div>                  <div className="set-card">
+                    <label className="look-check">
+                      <input type="checkbox" defaultChecked={store.get("autoAddOpened") === "1"} onChange={(e) => { store.set("autoAddOpened", e.target.checked ? "1" : "0"); window.dispatchEvent(new Event("luna-library")); }} />
+                      {extraText("Açılan medyayı kütüphaneye otomatik ekle", "Add opened media to the library automatically")}
+                    </label>
+                    <div className="set-hint">{extraText("Kapalıyken kütüphane klasörlerinin dışından açtığın film ve kitaplar kütüphaneye kendiliğinden girmez; oynatıcının ve okuyucunun sağ üstündeki “Kütüphaneye ekle” düğmesiyle eklersin.", "When off, films and books you open from outside your library folders don't join the library by themselves; add them with “Add to library” at the top right of the player or reader.")}</div>
+                  </div>                  <div className="set-card">
+                    <label className="look-check">
+                      <input type="checkbox" defaultChecked={autoSource()} onChange={(e) => store.set("autoSource", e.target.checked ? "1" : "0")} />
+                      {extraText("Otomatik kaynak eşleştirme", "Automatic source matching")}
+                    </label>
+                    <div className="set-hint">{extraText("Bilgisayarında olmayan bir bölümü ya da sıradaki bölümü açınca Luna eklentilerinden kaynağı kendisi seçer: en çok paylaşılan 1080p, yoksa en yakın kalite. Kapalıyken kaynak listesi açılır, hangisini oynatacağını sen seçersin.", "When you open an episode that isn't on this computer, or the next episode, Luna picks the source from your addons by itself: the most shared 1080p, or the nearest quality. When off, the sources list opens and you choose.")}</div>
                   </div><StudioSettings/><SoundWebSettings section="sound"/><ExtrasSettings /></>}
               {sec === "backup" && <><BackupSettings /><BulkRelink /></>}
               {sec === "downloads" && (
@@ -1474,6 +1811,16 @@ export function Settings({ onClose, onTour, onSetup }: { onClose: () => void; on
                     <div className="dir"><Icon d={I.folder} size={18} /><span className="grow ellipsis">{dlDir || "…"}</span>
                       <button className="chip" onClick={pickDl}>{tt("Değiştir…")}</button></div>
                   </div>
+                  <label className="look-check">
+                    <input type="checkbox" defaultChecked={store.get("pauseWhileWatching") !== "0"} onChange={(e) => store.set("pauseWhileWatching", e.target.checked ? "1" : "0")} />
+                    {extraText("İzlerken indirmeleri duraklat", "Pause downloads while watching")}
+                  </label>
+                  <div className="set-hint">{extraText("Bir film ya da bölüm oynarken (web ya da torrent) diğer indirmeler bekler; oynatıcıdan çıkınca kaldığı yerden devam eder.", "While a film or episode plays (web or torrent), other downloads wait and resume when you leave the player.")}</div>
+                  <label className="look-check">
+                    <input type="checkbox" defaultChecked={store.get("deleteWatched") === "1"} onChange={(e) => store.set("deleteWatched", e.target.checked ? "1" : "0")} />
+                    {extraText("İzledikten sonra sil", "Delete after watching")}
+                  </label>
+                  <div className="set-hint">{extraText("İndirme klasöründeki bir film ya da bölüm izlendi olarak işaretlenince Geri Dönüşüm Kutusu'na taşınır. Başka klasörlerdeki dosyalara dokunulmaz.", "A film or episode in the download folder goes to the Recycle Bin once it's marked watched. Files in other folders are left alone.")}</div>
                 </div>
               )}
             </div>

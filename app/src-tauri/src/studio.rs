@@ -195,8 +195,14 @@ fn extract_audio(j: &Job, mpv: &Path, input: &str, out: &Path, rate: u32, durati
         if j.cancelled() {
             return Err(cancelled_msg());
         }
+        // a web episode page (podcast sites, YouTube…) opens only through mpv's yt-dlp hook, as in playback
+        let web: Vec<String> = if input.starts_with("http://") || input.starts_with("https://") {
+            vec!["--load-scripts=yes".into(), "--ytdl=yes".into(), "--ytdl-format=bestaudio/best".into(),
+                 format!("--script-opts=ytdl_hook-ytdl_path={}", crate::mpv::ytdlp_exe(mpv).display())]
+        } else { Vec::new() };
         let mut child = Command::new(&exe)
             .args(common)
+            .args(&web)
             .args(&extra)
             .arg("--")
             .arg(input)
@@ -333,7 +339,8 @@ pub struct WhisperStatus {
 fn engine_candidates(app: &AppHandle) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(dir) = local_dir(app, "whisper") {
-        for v in ["cuda", "cpu"] {
+        // "vulkan": the Vulkan build (any GPU: Intel Arc, AMD, NVIDIA), placed beside the others
+        for v in ["vulkan", "cuda", "cpu"] {
             out.push(dir.join("bin").join(v).join("whisper-cli.exe"));
         }
     }
@@ -592,6 +599,11 @@ pub async fn whisper_run(
     } else {
         None
     };
+    // a Podbee episode page is not a stream: its own Mux address is read from the page, as playback does
+    let input = if crate::site_media::is_podbee(&input) && input.contains("/v/") {
+        let html = crate::get_text(input.clone(), None).await?.1;
+        crate::site_media::podbee_episode(&html).map(|e| e.0).ok_or(tr!("Bölüm okunamadı", "Couldn't read the episode"))?
+    } else { input };
     let j = Job::start(&app, job)?;
     let mpv = crate::mpv_exe(&app);
     let cache = cache_dir(&app)?;
@@ -599,94 +611,344 @@ pub async fn whisper_run(
         let cache = work_dir(&cache)?;
         let base = cache.join(format!("whisper-{job}"));
         let wav = base.with_extension("wav");
-        let srt = base.with_extension("srt");
+        // every temporary file of this job: the audio, the downloaded source, the chunk audio and the Whisper output
         let cleanup = || {
-            let _ = std::fs::remove_file(&wav);
-            let _ = std::fs::remove_file(&srt);
+            let (a, b) = (format!("whisper-{job}."), format!("whisper-{job}-"));
+            if let Ok(rd) = std::fs::read_dir(&cache) {
+                for e in rd.flatten() {
+                    let n = e.file_name().to_string_lossy().into_owned();
+                    if n.starts_with(&a) || n.starts_with(&b) {
+                        let _ = std::fs::remove_file(e.path());
+                    }
+                }
+            }
         };
-        if let Err(e) = extract_audio(&j, &mpv, &input, &wav, 16_000, duration) {
+        // a web episode is first downloaded with yt-dlp using parallel fragments (much faster than mpv reading the stream in real
+        // time); when that fails the audio is taken from the link directly, as before
+        let mut source = input.clone();
+        if input.starts_with("http://") || input.starts_with("https://") {
+            match download_audio(&j, &mpv, &input, &cache, job) {
+                Ok(p) => source = p.to_string_lossy().into_owned(),
+                Err(e) if j.cancelled() => {
+                    cleanup();
+                    return Err(e);
+                }
+                Err(_) => {}
+            }
+        }
+        if let Err(e) = extract_audio(&j, &mpv, &source, &wav, 16_000, duration) {
             cleanup();
             return Err(e);
         }
-        j.emit("transcribe", Some(0.0), "");
-        let threads = std::thread::available_parallelism().map(|n| n.get().clamp(1, 8)).unwrap_or(4);
-        let mut cmd = Command::new(&engine);
-        if let Some(dir) = engine.parent() {
-            cmd.current_dir(dir);
+        // the downloaded source is not needed any more
+        if source != input {
+            let _ = std::fs::remove_file(&source);
         }
+        j.emit("transcribe", Some(0.0), "");
         // names of the film and its characters help Whisper spell them; only plain ASCII survives
         // whisper-cli's code-page command line, so anything else is left out (the UI builds it so)
         let prompt_ok = prompt.as_deref().map(str::trim).filter(|p| !p.is_empty() && p.is_ascii() && p.len() <= 600);
-        let (wav_s, base_s) = (wav.to_string_lossy().into_owned(), base.to_string_lossy().into_owned());
-        cmd.args(shell::whisper_args(&shell::WhisperOpts {
-            model: &model,
-            wav: &wav_s,
-            base: &base_s,
-            lang: &lang,
-            translate,
-            threads,
-            prompt: prompt_ok,
-            vad_model: vad_model.as_deref(),
-            preset: preset.as_deref().unwrap_or("balanced"),
-        }));
-        let mut child = cmd
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .creation_flags(NO_WINDOW)
-            .spawn()
-            .map_err(|e| {
-                cleanup();
-                tr!("Whisper başlatılamadı: {}", "Couldn't start Whisper: {}", e)
-            })?;
-        let (tx, rx) = std::sync::mpsc::channel::<String>();
-        let err = child.stderr.take();
-        let reader = std::thread::spawn(move || {
-            if let Some(e) = err {
-                for line in BufReader::new(e).lines().map_while(Result::ok) {
-                    if tx.send(line).is_err() {
-                        break;
-                    }
-                }
-            }
-        });
-        let mut tail: Vec<String> = Vec::new();
-        let status = loop {
-            while let Ok(line) = rx.try_recv() {
-                if let Some(p) = core::whisper_progress(&line) {
-                    j.emit("transcribe", Some(p as f64), "");
-                } else if !line.trim().is_empty() {
-                    tail.push(line);
-                    if tail.len() > 12 {
-                        tail.remove(0);
-                    }
-                }
-            }
-            match child.try_wait() {
-                Ok(Some(s)) => break Ok(s),
-                Ok(None) => {}
-                Err(e) => break Err(e.to_string()),
-            }
-            if j.cancelled() {
-                let _ = child.kill();
-                let _ = child.wait();
-                break Err(cancelled_msg());
-            }
-            std::thread::sleep(Duration::from_millis(200));
-        };
-        let _ = reader.join();
-        let result = match status {
-            Ok(s) if s.success() => std::fs::read(&srt)
-                .map(|b| String::from_utf8_lossy(&b).into_owned())
-                .map_err(|_| tr!("Whisper çıktı üretmedi", "Whisper produced no output")),
-            Ok(s) => Err(tr!("Whisper hata verdi ({}): {}", "Whisper failed ({}): {}", s, tail.join(" | ").chars().take(600).collect::<String>())),
-            Err(e) => Err(e),
+        let preset = preset.as_deref().unwrap_or("balanced");
+        let opts = WhisperOnce { engine: &engine, model: &model, lang: &lang, translate, prompt: prompt_ok, vad_model: vad_model.as_deref(), preset };
+        // a long recording goes in ~10 minute chunks; each finished chunk is kept so a cancelled or crashed job resumes from the next one
+        let total = wav_seconds(&wav).unwrap_or(0.0);
+        let result = if total > CHUNK_AFTER {
+            let tag = core::sha256_hex(format!("{input}\n{model}\n{lang}\n{translate}\n{}\n{preset}", vad_model.is_some()).as_bytes())[..16].to_string();
+            transcribe_chunks(&j, &opts, &wav, &cache, job, &tag, total)
+        } else {
+            whisper_once(&j, &opts, &wav, &base, 0.0, 100.0)
         };
         cleanup();
         result
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Recordings longer than this many seconds are transcribed in chunks.
+const CHUNK_AFTER: f64 = 1200.0;
+/// Length of one chunk in seconds.
+const CHUNK_SECS: f64 = 600.0;
+
+struct WhisperOnce<'a> {
+    engine: &'a Path,
+    model: &'a str,
+    lang: &'a str,
+    translate: bool,
+    prompt: Option<&'a str>,
+    vad_model: Option<&'a str>,
+    preset: &'a str,
+}
+
+/// Where the sample data of a 16-bit mono 16 kHz WAV starts (after its header) and how many bytes it holds.
+fn wav_data(path: &Path) -> Option<(u64, u64)> {
+    let mut f = std::fs::File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    let mut head = vec![0u8; 1024.min(len as usize)];
+    f.read_exact(&mut head).ok()?;
+    let at = head.windows(4).position(|w| w == b"data")? as u64 + 8;
+    (len > at).then_some((at, len - at))
+}
+fn wav_seconds(path: &Path) -> Option<f64> {
+    wav_data(path).map(|(_, n)| n as f64 / 32_000.0)
+}
+
+/// Writes seconds `[from, from + secs)` of the WAV `src` as a new 16 kHz mono WAV.
+fn wav_slice(src: &Path, dest: &Path, from: f64, secs: f64) -> Result<(), String> {
+    use std::io::{Seek, SeekFrom};
+    let (at, len) = wav_data(src).ok_or("bad wav")?;
+    let start = ((from * 32_000.0) as u64 & !1).min(len);
+    let n = ((secs * 32_000.0) as u64 & !1).min(len - start);
+    let mut i = std::fs::File::open(src).map_err(|e| e.to_string())?;
+    i.seek(SeekFrom::Start(at + start)).map_err(|e| e.to_string())?;
+    let mut o = std::io::BufWriter::new(std::fs::File::create(dest).map_err(|e| e.to_string())?);
+    let mut h = Vec::with_capacity(44);
+    h.extend_from_slice(b"RIFF");
+    h.extend_from_slice(&(36 + n as u32).to_le_bytes());
+    h.extend_from_slice(b"WAVEfmt ");
+    h.extend_from_slice(&16u32.to_le_bytes());
+    h.extend_from_slice(&[1, 0, 1, 0]);
+    h.extend_from_slice(&16_000u32.to_le_bytes());
+    h.extend_from_slice(&32_000u32.to_le_bytes());
+    h.extend_from_slice(&[2, 0, 16, 0]);
+    h.extend_from_slice(b"data");
+    h.extend_from_slice(&(n as u32).to_le_bytes());
+    o.write_all(&h).map_err(|e| e.to_string())?;
+    std::io::copy(&mut i.take(n), &mut o).map_err(|e| e.to_string())?;
+    o.flush().map_err(|e| e.to_string())
+}
+
+fn srt_time(s: &str) -> Option<f64> {
+    let mut p = s.trim().replace(',', ".");
+    p.retain(|c| !c.is_whitespace());
+    let mut it = p.split(':');
+    let (h, m, sec): (f64, f64, f64) = (it.next()?.parse().ok()?, it.next()?.parse().ok()?, it.next()?.parse().ok()?);
+    it.next().is_none().then_some(h * 3600.0 + m * 60.0 + sec)
+}
+fn srt_stamp(t: f64) -> String {
+    let ms = (t.max(0.0) * 1000.0).round() as u64;
+    format!("{:02}:{:02}:{:02},{:03}", ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000)
+}
+/// Appends the cues of `srt` to `out` with every time moved by `offset` seconds and the numbers continuing from `n`.
+fn append_srt(out: &mut String, srt: &str, offset: f64, n: &mut usize) {
+    for block in srt.replace("\r\n", "\n").split("\n\n") {
+        let lines: Vec<&str> = block.lines().filter(|l| !l.trim().is_empty()).collect();
+        let Some(t) = lines.iter().position(|l| l.contains("-->")) else { continue };
+        let Some((a, b)) = lines[t].split_once("-->") else { continue };
+        let (Some(a), Some(b)) = (srt_time(a), srt_time(b)) else { continue };
+        if lines[t + 1..].is_empty() { continue; }
+        out.push_str(&format!("{}\n{} --> {}\n{}\n\n", *n, srt_stamp(a + offset), srt_stamp(b + offset), lines[t + 1..].join("\n")));
+        *n += 1;
+    }
+}
+
+/// Transcribes a long WAV chunk by chunk and joins the results into one SRT. A finished chunk is stored as
+/// `chunk-<tag>-<n>.srt` (the tag is a hash of input, model, language and options), so a repeated run skips it.
+fn transcribe_chunks(j: &Job, o: &WhisperOnce, wav: &Path, dir: &Path, job: u64, tag: &str, total: f64) -> Result<String, String> {
+    let count = (total / CHUNK_SECS).ceil().max(1.0) as usize;
+    let mut merged = String::new();
+    let mut next = 1usize;
+    for k in 0..count {
+        if j.cancelled() {
+            return Err(cancelled_msg());
+        }
+        let (lo, hi) = (k as f64 / count as f64 * 100.0, (k + 1) as f64 / count as f64 * 100.0);
+        let saved = dir.join(format!("chunk-{tag}-{k}.srt"));
+        let text = match std::fs::read(&saved) {
+            Ok(b) => {
+                j.emit("transcribe", Some(hi), "");
+                String::from_utf8_lossy(&b).into_owned()
+            }
+            Err(_) => {
+                let part = dir.join(format!("whisper-{job}-c{k}.wav"));
+                wav_slice(wav, &part, k as f64 * CHUNK_SECS, CHUNK_SECS)?;
+                let t = whisper_once(j, o, &part, &dir.join(format!("whisper-{job}-c{k}")), lo, hi);
+                let _ = std::fs::remove_file(&part);
+                let t = t?;
+                write_atomic(&saved, t.as_bytes())?;
+                t
+            }
+        };
+        append_srt(&mut merged, &text, k as f64 * CHUNK_SECS, &mut next);
+    }
+    // finished: the kept chunks are not needed any more
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            if e.file_name().to_string_lossy().starts_with(&format!("chunk-{tag}-")) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    Ok(merged)
+}
+
+/// One whisper-cli run over `wav`; the output `<base>.srt` is read and removed. Progress is reported between `lo` and `hi` percent.
+fn whisper_once(j: &Job, o: &WhisperOnce, wav: &Path, base: &Path, lo: f64, hi: f64) -> Result<String, String> {
+    let srt = base.with_extension("srt");
+    let threads = std::thread::available_parallelism().map(|n| n.get().clamp(1, 8)).unwrap_or(4);
+    let mut cmd = Command::new(o.engine);
+    if let Some(dir) = o.engine.parent() {
+        cmd.current_dir(dir);
+    }
+    let (wav_s, base_s) = (wav.to_string_lossy().into_owned(), base.to_string_lossy().into_owned());
+    cmd.args(shell::whisper_args(&shell::WhisperOpts {
+        model: o.model,
+        wav: &wav_s,
+        base: &base_s,
+        lang: o.lang,
+        translate: o.translate,
+        threads,
+        prompt: o.prompt,
+        vad_model: o.vad_model,
+        preset: o.preset,
+    }));
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .creation_flags(NO_WINDOW)
+        .spawn()
+        .map_err(|e| tr!("Whisper başlatılamadı: {}", "Couldn't start Whisper: {}", e))?;
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let err = child.stderr.take();
+    let reader = std::thread::spawn(move || {
+        if let Some(e) = err {
+            for line in BufReader::new(e).lines().map_while(Result::ok) {
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+    let mut tail: Vec<String> = Vec::new();
+    let status = loop {
+        while let Ok(line) = rx.try_recv() {
+            if let Some(p) = core::whisper_progress(&line) {
+                j.emit("transcribe", Some(lo + p as f64 * (hi - lo) / 100.0), "");
+            } else if !line.trim().is_empty() {
+                tail.push(line);
+                if tail.len() > 12 {
+                    tail.remove(0);
+                }
+            }
+        }
+        match child.try_wait() {
+            Ok(Some(s)) => break Ok(s),
+            Ok(None) => {}
+            Err(e) => break Err(e.to_string()),
+        }
+        if j.cancelled() {
+            let _ = child.kill();
+            let _ = child.wait();
+            break Err(cancelled_msg());
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    let _ = reader.join();
+    let result = match status {
+        Ok(s) if s.success() => std::fs::read(&srt)
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+            .map_err(|_| tr!("Whisper çıktı üretmedi", "Whisper produced no output")),
+        Ok(s) => Err(tr!("Whisper hata verdi ({}): {}", "Whisper failed ({}): {}", s, tail.join(" | ").chars().take(600).collect::<String>())),
+        Err(e) => Err(e),
+    };
+    let _ = std::fs::remove_file(&srt);
+    result
+}
+
+/// Downloads the audio of a web episode with yt-dlp (8 fragments at a time) into `dir` as `whisper-<job>-dl.<ext>`;
+/// progress comes from yt-dlp's own `[download]  42.0%` lines. Returns the file.
+fn download_audio(j: &Job, mpv: &Path, input: &str, dir: &Path, job: u64) -> Result<PathBuf, String> {
+    let ytdlp = crate::mpv::ytdlp_exe(mpv);
+    if !ytdlp.is_file() {
+        return Err("yt-dlp not found".into());
+    }
+    let prefix = format!("whisper-{job}-dl");
+    let mut child = Command::new(&ytdlp)
+        .args(["--no-playlist", "--no-warnings", "--newline", "-N", "8", "-f", "bestaudio/best", "-o"])
+        .arg(dir.join(format!("{prefix}.%(ext)s")))
+        .arg("--")
+        .arg(input)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .creation_flags(NO_WINDOW)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let out = child.stdout.take();
+    let reader = std::thread::spawn(move || {
+        if let Some(o) = out {
+            for line in BufReader::new(o).lines().map_while(Result::ok) {
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+    let started = Instant::now();
+    j.emit("fetch", None, "");
+    let status = loop {
+        while let Ok(line) = rx.try_recv() {
+            if let Some(rest) = line.strip_prefix("[download]") {
+                let rest = rest.trim_start();
+                let num: String = rest.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+                if rest[num.len()..].starts_with('%') {
+                    if let Ok(p) = num.parse::<f64>() {
+                        j.emit("fetch", Some(p.min(99.0)), "");
+                    }
+                }
+            }
+        }
+        match child.try_wait() {
+            Ok(Some(s)) => break Ok(s),
+            Ok(None) => {}
+            Err(e) => break Err(e.to_string()),
+        }
+        if j.cancelled() || started.elapsed() > Duration::from_secs(3 * 3600) {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = reader.join();
+            return Err(if j.cancelled() { cancelled_msg() } else { tr!("Zaman aşımı", "Timed out") });
+        }
+        std::thread::sleep(Duration::from_millis(150));
+    };
+    let _ = reader.join();
+    if !status?.success() {
+        return Err("yt-dlp failed".into());
+    }
+    let best = std::fs::read_dir(dir)
+        .map_err(|e| e.to_string())?
+        .flatten()
+        .filter(|e| {
+            let n = e.file_name().to_string_lossy().to_lowercase();
+            n.starts_with(&format!("{prefix}.")) && !(n.ends_with(".part") || n.ends_with(".ytdl") || n.ends_with(".temp"))
+        })
+        .max_by_key(|e| e.metadata().map(|m| m.len()).unwrap_or(0))
+        .map(|e| e.path());
+    best.filter(|p| std::fs::metadata(p).map(|m| m.len() > 4096).unwrap_or(false)).ok_or_else(|| "yt-dlp produced no file".into())
+}
+
+/// At startup: Whisper temporary files (`whisper-*.wav/.srt`, downloaded sources `whisper-*-dl.*`) older than 10 minutes in Luna's
+/// studio cache folder are leftovers of a closed or crashed run. Kept chunk results (`chunk-*.srt`, for resuming) go after 3 days.
+pub fn startup_cleanup(app: &AppHandle) {
+    let mut dirs: Vec<PathBuf> = cache_dir(app).into_iter().collect();
+    if let Some(p) = std::env::var_os("PUBLIC") {
+        dirs.push(PathBuf::from(p).join("Luna-Studio"));
+    }
+    for d in dirs {
+        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        for e in rd.flatten() {
+            let n = e.file_name().to_string_lossy().to_lowercase();
+            let leftover = n.starts_with("whisper-") && (n.ends_with(".wav") || n.ends_with(".srt") || n.contains("-dl."));
+            let chunk = n.starts_with("chunk-") && n.ends_with(".srt");
+            let age = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok());
+            let limit = if chunk { Duration::from_secs(3 * 86_400) } else if leftover { Duration::from_secs(600) } else { continue };
+            if age.is_some_and(|a| a > limit) && e.path().is_file() {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
 }
 
 // ---------- shaders ----------

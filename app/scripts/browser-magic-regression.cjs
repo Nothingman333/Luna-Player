@@ -157,7 +157,7 @@ test('Browser.tsx wires the start page, quick searches, pinned/dragged tabs, pal
   for (const needle of ['pinTab(', 'dropTab(', 'stepTab(', 'startTabDrag', 'onPointerDown=', 'CommandPalette', 'HistoryPanel', 'webCommands', 'role="search"', 'resolveWebInput']) assert(src.includes(needle), needle);
   assert(start.includes('moonPhase(') && start.includes('moonPath('));
   assert(!/draggable|onDragStart|onDrop=|dataTransfer/.test(src), 'tab dragging must use pointer events on Windows');
-  assert(src.includes('const interval = active ? window.setInterval(place, 160) : 0'), 'no inactive geometry polling');
+  assert(src.includes('const interval = active || miniTab !== null ? window.setInterval(place, 160) : 0'), 'no inactive geometry polling (except the web mini player)');
   assert(src.includes('!pinnedRef.current.has(t.id)'), 'bulk close preserves pinned tabs');
   assert(src.includes('!raw.trim()'), 'empty navigation is ignored');
 });

@@ -305,6 +305,11 @@ async fn film_page(client: &reqwest::Client, tmdb: Option<u64>, tv: bool, title:
                 return Ok(u.trim_end_matches('/').to_string());
             }
         }
+        if let Ok((u, _)) = crate::webfetch::get(&format!("https://letterboxd.com/tmdb/{id}/"), &["letterboxd.com"]).await {
+            if u.contains("letterboxd.com/film/") {
+                return Ok(u.trim_end_matches('/').to_string());
+            }
+        }
     }
     let year = year.filter(|y| !y.is_empty());
     let q = match year { Some(y) => format!("{title} {y}"), None => title.to_string() };
@@ -357,6 +362,12 @@ pub(crate) async fn get_page(client: &reqwest::Client, url: &str) -> Result<Stri
                     }
                 }
             }
+        }
+    }
+    // Letterboxd's bot wall turns plain downloads away (403): the page is read in a hidden browser window instead
+    if url.starts_with("https://letterboxd.com/") {
+        if let Ok((_, html)) = crate::webfetch::get(url, &["letterboxd.com"]).await {
+            return Ok(html);
         }
     }
     let res = client.get(url).send().await.map_err(|e| e.to_string())?;

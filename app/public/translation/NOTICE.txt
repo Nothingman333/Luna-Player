@@ -1,0 +1,9 @@
+Local translation engine: @browsermt/bergamot-translator 0.4.9 (unmodified).
+Source: https://github.com/browsermt/bergamot-translator
+Published source/package: https://registry.npmjs.org/@browsermt/bergamot-translator/-/bergamot-translator-0.4.9.tgz
+Engine and Firefox translation models: Mozilla Public License 2.0 (LICENSE).
+Models: https://github.com/mozilla/translations and https://github.com/mozilla/firefox-translations-models
+English/Turkish v1.0 records: Mozilla Remote Settings translations-models.
+Other language files: Bergamot model registry, SHA-256 pinned in registry.json.
+Model files download on demand; no page text is uploaded. Engine JS, WASM and workers are bundled locally.
+Mozilla's included license and all upstream notices in the files are retained.

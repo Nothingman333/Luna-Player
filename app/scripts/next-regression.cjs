@@ -17,7 +17,7 @@ function music(){
  const reg=node('src/Music.tsx',n=>ts.isCallExpression(n)&&n.expression.getText()==='listen'&&n.arguments[0]?.getText()==='"mpv"').getText();
  const prelude='let suspended=null;let directFor=null,failedInRow=0,loadGeneration=0,wantsPlayback=true;const musicPaths=new Set();';
  const api=compile('(()=>{'+prelude+names.map(n=>fn('src/Music.tsx',n)).join('\n')+';'+reg+';return {loadCurrent,stopMusic,playQueue,pause:'+(baseline?'p=>{P.paused=p;setProp("pause",p);}':'pauseMusic')+',directFor:()=>directFor};})()',{
-  P,direct,resolving,findFailed,selectionResume:null,invalidateGapless:noop,prepareGapless:async()=>{},localSong:()=>false,gaplessAddress:q=>q.src,gaplessPlan:null,recordCurrent:noop,changed:noop,setProp:(...a)=>properties.push(a),mpv:(...a)=>commands.push(a),store:{get:()=>null,set:()=>true,json:(_,f)=>f},Date,URL,TextEncoder,
+  P,direct,resolving,findFailed,selectionResume:null,invalidateGapless:noop,prepareGapless:async()=>{},localSong:()=>false,gaplessAddress:q=>q.src,gaplessPlan:null,recordCurrent:noop,changed:noop,spokenSpeed:()=>1,markMusicPath:typeof noop==="function"?noop:()=>{},setProp:(...a)=>properties.push(a),mpv:(...a)=>commands.push(a),store:{get:()=>null,set:()=>true,json:(_,f)=>f},Date,URL,TextEncoder,
   audioResume:load("src/musicWorkspaceModel.ts",{},n=>({})).audioResume,addHistory:noop,countPlay:noop,nextUp:noop,listen:(_,f)=>listener=f,setTimeout:(f,ms)=>{if(ms!==4000)timers.push(f);},invoke:()=>new Promise(r=>finish=r)
  });
  return{P,api,direct,commands,properties,timers,event:p=>listener({payload:p}),finish:()=>finish({url:'https://audio.test/?expire=9999999999'})};

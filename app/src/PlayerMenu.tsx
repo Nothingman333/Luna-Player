@@ -1,7 +1,7 @@
 import {colorSignal} from "./hdrInfo";
 import {store} from "./library";
 import {extraText} from "./Extras";
-import {LunaSelect} from "./LunaSelect";import {mediaQualityLabel,cleanWebPlayback} from "./browserMediaModel";
+import {LunaSelect} from "./LunaSelect";import {mediaQualityLabel,cleanWebPlayback,type WebMediaTrack} from "./browserMediaModel";
 import {createPortal} from "react-dom";
 import {gpuCapabilities,systemProfile} from "./hardwareProfile";
 import { appStorage as localStorage } from "./appStorage";
@@ -22,6 +22,9 @@ const LANGS: Record<string, string> = {
   nl: tt("Hollandaca"), dut: tt("Hollandaca"), pl: tt("Lehçe"), pol: tt("Lehçe"), gr: tt("Yunanca"), gre: tt("Yunanca"), ell: tt("Yunanca"),
   hi: tt("Hintçe"), hin: tt("Hintçe"), az: tt("Azerice"), aze: tt("Azerice"), fa: tt("Farsça"), per: tt("Farsça"),
 };
+
+/** A dub picked by the user: switched and announced, so the app remembers it as a choice (not a guess from track changes). */
+const pickAudio = (t: Track) => { void setProp("aid", t.id); window.dispatchEvent(new CustomEvent("luna-audio-pick", { detail: t })); };
 
 export function trackLabel(t: Track & Record<string, any>) {
   const lang = t.lang ? LANGS[t.lang.toLowerCase()] ?? t.lang.toUpperCase() : "";
@@ -177,23 +180,24 @@ export function VideoPanel({ path, onClose, onScenes, onClip, enhancements = fal
         <h3>{enhancements ? tt("Luna iyileştirmeleri") : tt("Görüntü")}</h3><span className="grow" />
         <button className="chip" onClick={() => set(enhancements ? {hq:false,a4k:"off",vsr:"off",smooth:false} : {...VIDEO_DEFAULTS,hq:v.hq,a4k:v.a4k,vsr:v.vsr,smooth:v.smooth})}>{tt("Sıfırla")}</button>
       </div>
-      {!enhancements&&web&&<div className="web-source-quality"><span>{tt("Kalite")}</span>{(web.variants?.length||0)>1?<LunaSelect label={tt("Kalite")} value={web.streamUrl||""} options={web.variants!.filter(v=>v.mediaKind!=="audio").map((v,i)=>({value:v.url,label:mediaQualityLabel(v)||(v.url===web.streamUrl&&currentHeight?`${currentHeight}p`:extraText(`Kalite bilinmiyor · Akış ${i+1}`,`Quality unknown · Stream ${i+1}`))}))} onChange={url=>{const variant=web.variants?.find(v=>v.url===url);const next={...web,streamUrl:url,audio:variant?.audioUrl?[{url:variant.audioUrl}]:[]};store.set("web-playback:"+path,JSON.stringify(next));setWeb(next);window.dispatchEvent(new CustomEvent("luna-web-quality",{detail:path}));}}/>:<small>{currentHeight?`${currentHeight}p`:mediaQualityLabel(web.variants?.[0]||{url:web.streamUrl||""})||extraText("Kalite bilinmiyor","Quality unknown")}</small>}{currentHeight&&(web.variants?.length||0)>1&&<small className="web-current-quality">{extraText(`Şu an: ${currentHeight}p`,`Now playing: ${currentHeight}p`)}</small>}{outputHdr&&<small className="web-current-quality" title={extraText("Bu, oynatıcının renk çıkışıdır. Ekranda HDR için Windows HDR ve HDR destekli ekran gerekir.","This is the player’s color output. Displaying HDR requires Windows HDR and an HDR-capable screen.")}>{extraText("Oynatıcı çıkışı:","Player output:")} {outputHdr}</small>}{hdr&&<small className="web-current-quality">{extraText("Kaynak:","Source:")} {hdr}</small>}</div>}
-      {!enhancements && <>{SLIDERS.map(([k, label, min, max]) => (
-        <label key={k} className="vslider">
-          <span>{label}</span>
-          <input type="range" min={min} max={max} value={v[k] as number}
+      {!enhancements&&web&&<div className="web-source-quality"><span>{tt("Kalite")}</span>{qualityChoices(web.variants||[],web.streamUrl).length>1?<LunaSelect label={tt("Kalite")} value={web.streamUrl||""} options={qualityChoices(web.variants!,web.streamUrl).map((v,i)=>({value:v.url,label:mediaQualityLabel(v)||(v.url===web.streamUrl&&currentHeight?`${currentHeight}p`:extraText(`Kalite bilinmiyor · Akış ${i+1}`,`Quality unknown · Stream ${i+1}`))}))} onChange={url=>{const variant=web.variants?.find(v=>v.url===url);const next={...web,streamUrl:url,audio:variant?.audioUrl?[{url:variant.audioUrl}]:[]};store.set("web-playback:"+path,JSON.stringify(next));setWeb(next);window.dispatchEvent(new CustomEvent("luna-web-quality",{detail:path}));}}/>:<small>{currentHeight?`${currentHeight}p`:mediaQualityLabel(web.variants?.[0]||{url:web.streamUrl||""})||extraText("Kalite bilinmiyor","Quality unknown")}</small>}{currentHeight&&(web.variants?.length||0)>1&&<small className="web-current-quality">{extraText(`Şu an: ${currentHeight}p`,`Now playing: ${currentHeight}p`)}</small>}{outputHdr&&<small className="web-current-quality" title={extraText("Bu, oynatıcının renk çıkışıdır. Ekranda HDR için Windows HDR ve HDR destekli ekran gerekir.","This is the player’s color output. Displaying HDR requires Windows HDR and an HDR-capable screen.")}>{extraText("Oynatıcı çıkışı:","Player output:")} {outputHdr}</small>}{hdr&&<small className="web-current-quality">{extraText("Kaynak:","Source:")} {hdr}</small>}</div>}
+      {!enhancements && <div className="vs-card">{SLIDERS.map(([k, label, min, max]) => {
+        const val = v[k] as number, pct = ((val - min) / (max - min)) * 100, zero = ((0 - min) / (max - min)) * 100;
+        return (
+        <label key={k} className={"vslider" + (val !== 0 ? " moved" : "")} style={{ "--p": pct + "%", "--z": zero + "%" } as React.CSSProperties}>
+          <span className="vs-top"><span>{label}</span><span className="vval">{val > 0 && min < 0 ? "+" + val : val}</span></span>
+          <input type="range" min={min} max={max} value={val}
             onChange={(e) => live(k, Number(e.target.value))}
             onPointerUp={commit} onKeyUp={commit}
             onDoubleClick={() => set({ [k]: 0 } as Partial<VideoSet>)} />
-          <span className="vval">{v[k] as number}</span>
         </label>
-      ))}
-      <label className="look-check">
-        <input type="checkbox" checked={v.deband} onChange={(e) => set({ deband: e.target.checked })} />
-        
+        );
+      })}
+      <label className="look-check vs-switch">
+        <input type="checkbox" role="switch" checked={v.deband} onChange={(e) => set({ deband: e.target.checked })} />
         {tt("Bant giderme (renk geçişlerindeki basamaklanma)")}
       </label>
-      </>}
+      </div>}
       {enhancements && <QualityBlock v={v} set={set} />}
       {!enhancements && <>
       {(onScenes || onClip) && (
@@ -327,14 +331,23 @@ export function SubAppearance() {
           </optgroup>
         </select>
       </label>
-      <button className="chip" onClick={addFonts}>{tt("+ Font ekle (.ttf, .otf, .zip)")}</button>
+      <button className="tlink look-addfont" onClick={addFonts}>{tt("+ Font ekle (.ttf, .otf, .zip)")}</button>
       {fontMsg && <div className="muted small">{fontMsg}</div>}
+<div className="look-pair">
       <div className="look-field">{tt("Boyut")}
         <div className="stepper">
           <button className="chip" aria-label={tt("Küçült")} onClick={() => set({ size: Math.max(24, o.size - 4) })}>A−</button>
           <span>{o.size}</span>
           <button className="chip" aria-label={tt("Büyüt")} onClick={() => set({ size: Math.min(96, o.size + 4) })}>A+</button>
         </div>
+      </div>
+      <div className="look-field">{tt("Konum")}
+        <div className="stepper">
+          <button className="chip" aria-label={tt("Aşağı")} onClick={() => set({ margin: Math.max(0, o.margin - 12) })}>↓</button>
+          <span>{o.margin}</span>
+          <button className="chip" aria-label={tt("Yukarı")} onClick={() => set({ margin: Math.min(300, o.margin + 12) })}>↑</button>
+        </div>
+      </div>
       </div>
       <div className="look-field">{tt("Renk")}
         <div className="swatches">
@@ -346,16 +359,9 @@ export function SubAppearance() {
       </div>
       <div className="look-field">{tt("Arka plan")}
         <div className="look-row">
-          {([["none", tt("Yok")], ["shadow", tt("Gölge")], ["box", tt("Siyah kutu")]] as const).map(([v, l]) => (
+          {([["none", tt("Yok")], ["shadow", tt("Gölge")], ["box", tt("Kutu")]] as const).map(([v, l]) => (
             <button key={v} className={"seg sm" + (o.bg === v ? " on" : "")} onClick={() => set({ bg: v })}>{l}</button>
           ))}
-        </div>
-      </div>
-      <div className="look-field">{tt("Konum")}
-        <div className="stepper">
-          <button className="chip" aria-label={tt("Aşağı")} onClick={() => set({ margin: Math.max(0, o.margin - 12) })}>↓</button>
-          <span>{o.margin}</span>
-          <button className="chip" aria-label={tt("Yukarı")} onClick={() => set({ margin: Math.min(300, o.margin + 12) })}>↑</button>
         </div>
       </div>
       <label className="look-check">
@@ -363,6 +369,28 @@ export function SubAppearance() {
       </label>
     </div>
   );
+}
+
+/** the quality list: picture streams that carry sound (a silent one only when nothing else is there), one per label, the playing one kept */
+function qualityChoices(rows:WebMediaTrack[],current?:string){const video=rows.filter(v=>v.mediaKind!=="audio");const heard=video.filter(v=>!v.silent||v.url===current);const list=heard.some(v=>!v.silent)?heard:video;const seen=new Map<string,WebMediaTrack>();for(const v of list){const k=mediaQualityLabel(v)||v.url;const had=seen.get(k);if(!had||v.url===current)seen.set(k,v);}return[...seen.values()];}
+/** A track's short name for the panel: its language, plus one small tag (forced, file, original, channels); the full label is the tooltip. */
+const LANG_IN_NAME: [RegExp, string][] = [[/(?:^|[-_. \[(])(tr|tur)(?=[-_. \])]|$)|türkçe|turkish/i, "tr"], [/(?:^|[-_. \[(])(en|eng)(?=[-_. \])]|$)|ingilizce|english/i, "en"], [/(?:^|[-_. \[(])(pt|por|pob)(?=[-_. \])]|$)|portugu/i, "pt"], [/(?:^|[-_. \[(])(fr|fre|fra)(?=[-_. \])]|$)|french|fransızca/i, "fr"], [/(?:^|[-_. \[(])(de|ger|deu)(?=[-_. \])]|$)|german|almanca/i, "de"], [/(?:^|[-_. \[(])(es|spa)(?=[-_. \])]|$)|spanish|ispanyolca/i, "es"], [/(?:^|[-_. \[(])(it|ita)(?=[-_. \])]|$)|italian/i, "it"], [/(?:^|[-_. \[(])(ru|rus)(?=[-_. \])]|$)|russian/i, "ru"], [/(?:^|[-_. \[(])(ar|ara)(?=[-_. \])]|$)|arabic/i, "ar"]];
+export function trackShort(t: Track & Record<string, any>): { name: string; tag?: string } {
+  const text = (t.title ?? "") + " " + String(t["external-filename"] ?? "").split(/[\/]/).pop();
+  const code = t.lang?.toLowerCase() || LANG_IN_NAME.find(([re]) => re.test(text))?.[1];
+  const name = (code && LANGS[code]) || (t.title && t.title.length <= 28 ? t.title : "") || tt("Parça {0}", t.id);
+  const ch = t["demux-channel-count"];
+  const tag = t.forced || /forced|zorunlu/i.test(text) ? tt("Zorunlu")
+    : t.type === "audio" && /original|orijinal/i.test(text) ? tt("Orijinal")
+    : t.external ? tt("Dosya")
+    : t.type === "audio" && ch ? (ch >= 6 ? `${ch - 1}.1` : ch === 2 ? "Stereo" : undefined) : undefined;
+  return { name, tag };
+}
+function TrackRow({ t, on, onPick }: { t: Track & Record<string, any>; on: boolean; onPick: () => void }) {
+  const { name, tag } = trackShort(t);
+  return <button className={"titem" + (on ? " on" : "")} title={trackLabel(t)} onClick={onPick}>
+    <span className={"tck" + (on ? " on" : "")} aria-hidden /><span className="track-title">{name}</span>{tag && <span className="ttag">{tag}</span>}
+  </button>;
 }
 
 /** Netflix-style "Audio & Subtitles" panel. */
@@ -386,40 +414,30 @@ export function TracksPanel({ s, onSearch, onSync, onClose, onTranscript }: {
     return () => window.removeEventListener("mousedown", down);
   }, []);
   return (
-    <div className="tracks audio-sub-panel" ref={box}>
+    <div className="tracks audio-sub-panel compact" ref={box}>
       <div className="tcol">
         <h3>{tt("Ses")}</h3>
         {audio.length === 0 && <div className="muted small">{tt("Ses parçası yok")}</div>}
-        {audio.map((t) => (
-          <button key={t.id} className={"titem" + (t.selected ? " on" : "")} onClick={() => setProp("aid", t.id)}>
-            <span className="track-title" title={trackLabel(t)}>{trackLabel(t)}</span>
-          </button>
-        ))}
+        {audio.map((t) => <TrackRow key={t.id} t={t} on={!!t.selected} onPick={() => pickAudio(t)} />)}
       </div>
       <div className="tcol">
-        <h3>{tt("Altyazılar")}</h3>
-        <button className={"titem" + (subOff ? " on" : "")} onClick={() => setProp("sid", "no")}>{tt("Kapalı")}</button>
-        {subs.map((t) => (
-          <button key={t.id} className={"titem" + (t.id === mainId ? " on" : "")} onClick={() => { if (t.id === second) setProp("secondary-sid", "no"); setProp("sid", t.id); }}>
-            <span className="track-title" title={trackLabel(t)}>{trackLabel(t)}</span>
-          </button>
-        ))}
-        {subs.length > 1 && (
-          <>
-            <div className="tsub">{tt("İkinci altyazı")}</div>
-            <button className={"titem sec" + (second == null ? " on" : "")} onClick={() => setProp("secondary-sid", "no")}>{tt("Kapalı")}</button>
-            {subs.filter((t) => t.id !== mainId).map((t) => (
-              <button key={"2-" + t.id} className={"titem sec" + (t.id === second ? " on" : "")} onClick={() => setProp("secondary-sid", t.id)}><span className="track-title" title={trackLabel(t)}>{trackLabel(t)}</span></button>
-            ))}
-          </>
-        )}
-        <button className="titem link" onClick={onSearch}>{tt("Altyazı ara / yükle…")}</button>
-        <button className="titem link" onClick={onSync}>{tt("Senkronu ayarla…")}</button>
-
-        {onTranscript && <button className="titem link" onClick={onTranscript}>{tt("Replikler paneli (R)")}</button>}
+        <h3>{tt("Altyazı")}</h3>
+        <button className={"titem" + (subOff ? " on" : "")} onClick={() => setProp("sid", "no")}><span className={"tck" + (subOff ? " on" : "")} aria-hidden />{tt("Kapalı")}</button>
+        {subs.map((t) => <TrackRow key={t.id} t={t} on={t.id === mainId} onPick={() => { if (t.id === second) setProp("secondary-sid", "no"); setProp("sid", t.id); }} />)}
+        <div className="tfoot">
+          {subs.length > 1 && <label className="tsecond"><span>{tt("İkinci altyazı")}</span>
+            <LunaSelect compact label={tt("İkinci altyazı")} value={second == null ? "" : String(second)}
+              options={[{ value: "", label: tt("Kapalı") }, ...subs.filter((t) => t.id !== mainId).map((t) => { const x = trackShort(t); return { value: String(t.id), label: x.name + (x.tag ? " · " + x.tag : "") }; })]}
+              onChange={(v) => setProp("secondary-sid", v ? Number(v) : "no")} /></label>}
+          <div className="tlinks">
+            <button className="tlink" onClick={onSearch}>{tt("Ara / yükle")}</button>
+            <button className="tlink" onClick={onSync}>{tt("Senkron")}</button>
+            {onTranscript && <button className="tlink" onClick={onTranscript}>{tt("Replikler (R)")}</button>}
+          </div>
+        </div>
       </div>
       <div className="tcol look">
-        <h3>{tt("Altyazı ayarları")}</h3>
+        <h3>{tt("Görünüm")}</h3>
         <SubAppearance />
       </div>
     </div>
@@ -448,7 +466,7 @@ export function ContextMenu({ s, x, y, extra, onClose }: {
     { label: s.paused ? tt("Oynat") : tt("Duraklat"), hint: tt("Boşluk"), act: () => mpv("cycle", "pause") },
     { label: tt("Durdur"), act: () => mpv("stop") },
     "sep",
-    { label: tt("Ses parçası"), sub: audio.length ? audio.map((t) => ({ label: trackLabel(t), on: t.selected, act: () => setProp("aid", t.id) })) : [{ label: tt("Yok"), act: () => {} }] },
+    { label: tt("Ses parçası"), sub: audio.length ? audio.map((t) => ({ label: trackLabel(t), on: t.selected, act: () => pickAudio(t) })) : [{ label: tt("Yok"), act: () => {} }] },
     { label: tt("Altyazı parçası"), sub: [
       { label: tt("Kapalı"), on: !mainSubTrack(s.tracks, s.secondarySid), act: () => setProp("sid", "no") },
       ...subs.map((t) => ({ label: trackLabel(t), on: t.id === mainSubTrack(s.tracks, s.secondarySid)?.id, act: () => setProp("sid", t.id) })),

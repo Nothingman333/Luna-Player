@@ -32,7 +32,7 @@ pub async fn media_controls_enable(app: tauri::AppHandle, on: bool) -> Result<()
                 return Ok(());
             }
             if slot.is_some() { return Ok(()); }
-            let win = handle.get_webview_window("main").ok_or("Main window unavailable")?;
+            let win = crate::main_window(&handle).ok_or("Main window unavailable")?;
             let hwnd = win.hwnd().map_err(|e| e.to_string())?.0 as *mut std::ffi::c_void;
             let mut c = MediaControls::new(PlatformConfig { dbus_name: "luna", display_name: "Luna Player", hwnd: Some(hwnd) }).map_err(|e| e.to_string())?;
             let events = handle.clone();
@@ -45,7 +45,7 @@ pub async fn media_controls_enable(app: tauri::AppHandle, on: bool) -> Result<()
                     Event::SeekBy(d, t) => ("seek-relative", Some(direction(d) * t.as_secs_f64())),
                     Event::SetPosition(p) => ("seek", Some(p.0.as_secs_f64())),
                     Event::SetVolume(v) => ("volume", Some(v.clamp(0.0, 1.0) * 100.0)),
-                    Event::Raise => { if let Some(w) = events.get_webview_window("main") { let _ = w.show(); let _ = w.set_focus(); } return; },
+                    Event::Raise => { if let Some(w) = crate::main_window(&events) { let _ = w.show(); let _ = w.set_focus(); } return; },
                     _ => return,
                 };
                 let _ = events.emit("media-action", serde_json::json!({ "action": action, "value": value }));

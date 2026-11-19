@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<style>
+  body{margin:0;width:270px;background:#121316;color:#ececef;font:13px system-ui,sans-serif}
+  .wrap{padding:14px}
+  h1{display:flex;align-items:center;gap:8px;margin:0 0 2px;font-size:15px;font-weight:600}
+  h1 i{width:12px;height:12px;border-radius:50%;background:#ff7a2a}
+  p{margin:0 0 12px;color:#8b8c93;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  button{display:flex;align-items:center;gap:11px;width:100%;margin-top:7px;padding:9px 11px;border-radius:11px;border:1px solid color-mix(in srgb,var(--c) 35%,transparent);background:transparent;color:#ececef;font:inherit;text-align:left;cursor:pointer;transition:background .15s,transform .1s}
+  button:hover{background:color-mix(in srgb,var(--c) 12%,transparent)}
+  button:active{transform:scale(.98)}
+  button:focus-visible{outline:2px solid var(--c);outline-offset:1px}
+  button svg{flex:none;width:20px;height:20px;color:var(--c)}
+  button b{display:block;font-weight:500}
+  button small{display:block;color:#8b8c93;font-size:11.5px;margin-top:1px}
+  .music{--c:#1fc69a}.play{--c:#ff7a2a}.web{--c:#a98bfa}
+  .note{margin-top:11px;color:#8b8c93;font-size:11px;line-height:1.4}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><i></i>Luna'ya gönder</h1>
+  <p id="page">…</p>
+  <button class="music" id="import"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg><span><b>Müziğe ekle</b><small>Şarkı ya da liste müziğe gelir</small></span></button>
+  <button class="play" id="play"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16l13-8z"/></svg><span><b>Luna'da oynat</b><small>Video, ses ya da podcast</small></span></button>
+  <button class="web" id="open"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><span><b>Luna tarayıcısı</b><small>Sayfayı Luna'da aç</small></span></button>
+  <div class="note" id="note">Luna kapalıysa açılır.</div>
+</div>
+<script src="popup.js" type="module"></script>
+</body>
+</html>

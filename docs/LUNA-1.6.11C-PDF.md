@@ -40,7 +40,7 @@ Gerçek Windows Luna penceresi kullanıcı tarafından test edilecek. Bu tur GPU
 - Yeni davranış kontrolü: API token biçimleri, cache çift saymama, yanıt vermeyen servis, sıfırlama/anahtar gizliliği, çağrı köprüsü kapsamı, sezon sayımı ve donanım önerileri.
 - Headless Edge + sahte Tauri ve sentetik kayıtlar, 1280 ve 640 px: alt menü sınırları/25 ses parçası; Intel/NVIDIA ayrımı; UP görünümü ve parlaklık değiştirirken HQ koruma; isimle arama; stüdyo genişliği; puan etiketleri; token/donanım ekranı; sürüm notunun bir kez görünmesi ve güncelleme pop-up'ı; müzik satırı tıklama; afiş puanı konumu; 30 yorumun çakışmaması. JS hatası yok. Dar stüdyo/UP/altyazı/afiş/yorum görselleri incelendi. Bunlar gerçek Luna penceresi değildir.
 
-Kanıtlar/yedek: C:/Users/fatme/Documents/Luna-1.6.11C-PDF altında build.log, regression.log, cargo-check.log, ui-result.json, ekran görüntüleri, promotion-manifest.json, promotion-receipt.json ve main-before-promotion. Test sayfaları, node_modules, hedef ve derleme dosyaları ana kaynağa aktarılmaz.
+Kanıtlar/yedek: ~/Documents/Luna-1.6.11C-PDF altında build.log, regression.log, cargo-check.log, ui-result.json, ekran görüntüleri, promotion-manifest.json, promotion-receipt.json ve main-before-promotion. Test sayfaları, node_modules, hedef ve derleme dosyaları ana kaynağa aktarılmaz.
 
 Teknik kaynaklar (2026-10-23): https://github.com/ggml-org/whisper.cpp/blob/master/README.md?plain=1 (CPU/CUDA ve ayrı backend'ler); https://mpv.io/manual/master/ (d3d11vpp donanım/sürücü şartları). Genel backend desteği, Luna'nın CPU/CUDA indirme seçeneklerine ek backend kurulduğu anlamına gelmez.
 

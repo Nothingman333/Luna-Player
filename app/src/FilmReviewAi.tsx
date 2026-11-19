@@ -7,16 +7,19 @@ import { invoke } from "./nativeCore";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "./linkOpen";
 import { store } from "./library";
+import { beginTask, dropTask, taskOf, updateTask, useAnalysisTask } from "./AnalysisTasks";
 import { tt, locale } from "./i18n";
 import { goPlace } from "./Mine";
 import { reviewAi, reviewAiJson, reviewAiName } from "./ai";
 import { filmKey } from "./filmReviewModel";
 import type { Aspect, FilmTarget, Mood, Profile } from "./filmReviewModel";
-import { BATCH, batchPrompt, cleanBatch, cleanRun, cleanVerdict, communityScore, keepReview, summaryPrompt, tally } from "./reviewAnalysis";
+import { BATCH, batchPrompt, cleanBatch, cleanRun, cleanVerdict, communityScore, keepReview, lengthBatches, reviewKey, summaryPrompt, tally, trivialReview } from "./reviewAnalysis";
+import type { ReadItem } from "./reviewAnalysis";
 import type { AiRun, ItemTone, LbReview, Medium, RunReview, Tone, Topic } from "./reviewAnalysis";
 import { askAssistant } from "./Taste";
 import { normalizeText } from "./filmReviewModel";
 import { learnedTaste, personalScore, rememberAspects, tasteLine } from "./reviewTaste";
+import { developerSessionActive } from "./devSession";
 
 export type { AiRun, AiVerdict } from "./reviewAnalysis";
 
@@ -46,9 +49,11 @@ const LONG = 420;
 type Phase = "" | "fetch" | "read" | "sum";
 
 /** Retries once: a model sometimes answers with broken JSON. */
-async function ask<T>(system: string, user: string, clean: (x: any) => T | null, cfg = reviewAi()): Promise<T | null> {
+/** 83 s → "1:23". */
+const clock = (ms: number) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+async function ask<T>(system: string, user: string, clean: (x: any) => T | null, cfg = reviewAi(), think = true): Promise<T | null> {
   for (let i = 0; i < 2; i++) {
-    try { const v = clean(await reviewAiJson(system, user, cfg)); if (v) return v; }
+    try { const v = clean(await reviewAiJson(system, user, cfg, think)); if (v) return v; }
     catch (e) { if (String((e as Error)?.message ?? e) === "nokey" || i === 1) throw e; }
     await sleep(800);
   }
@@ -118,18 +123,25 @@ export function ReviewAiCard({ film, profile, mood, setMood, label, onReviews, o
   medium?: Medium; author?: string;
 }) {
   const book = medium === "book";
-  const site = book ? "1000Kitap" : "Letterboxd";
+  const site = book ? "1000Kitap / Goodreads" : "Letterboxd";
   const key = book ? "bookAnalysis:" + encodeURIComponent(normalizeText(film.title + "|" + (author ?? "")).trim()) : "filmDecision:ai:" + filmKey(film);
   const [run, setRun] = useState<AiRun | null>(() => book?cleanRun(store.json(key, null)):savedFilmAnalysis(film));
   const [phase, setPhase] = useState<Phase>("");
   const [status, setStatus] = useState(""), [error, setError] = useState("");
+  // developer mode: how long each part took (Letterboxd, reading, summing up); the last run's times stay on screen
+  const [times, setTimes] = useState<{ start: number; read?: number; sum?: number; end?: number; stopped?: boolean } | null>(null);
+  const [, setTick] = useState(0);
+  const dev = developerSessionActive();
+  useEffect(() => { if (!dev || !times || times.end) return; const id = setInterval(() => setTick((n) => n + 1), 1000); return () => clearInterval(id); }, [dev, times]);
   const [feed, setFeed] = useState<RunReview[]>([]);
   const [reading, setReading] = useState<[number, number] | null>(null);
   const [step, setStep] = useState<[number, number]>([0, 0]);
   const [showAll, setShowAll] = useState(false);
   const [filter, setFilter] = useState<ItemTone | "all">("all");
   const [preferences,setPreferences]=useState(false);
-  const [collapsed,setCollapsed]=useState(false);
+  // closed until opened; the choice is remembered
+  const [collapsed,setCollapsedState]=useState(()=>store.get("lunaAnalysisOpen")!=="1");
+  const setCollapsed=(f:(x:boolean)=>boolean)=>setCollapsedState(x=>{const v=f(x);store.set("lunaAnalysisOpen",v?"0":"1");return v;});
   const [opts, setOpts] = useState(false);
   const [optsPage,setOptsPage]=useState<"menu"|"settings">("menu");
   const [, redraw] = useState(0);
@@ -152,7 +164,7 @@ export function ReviewAiCard({ film, profile, mood, setMood, label, onReviews, o
     const panel = optsRef.current?.querySelector<HTMLElement>(".la-opts");
     if (!anchor || !panel) return;
     const fit = () => {
-      const box = anchor.getBoundingClientRect(), edge = 12, gap = 8;
+      const box = anchor.getBoundingClientRect(), edge = 12;
       const origin = optsRef.current!.getBoundingClientRect();
       let left = 0, right = innerWidth, top = 0, bottom = innerHeight;
       for (let parent = optsRef.current!.parentElement; parent; parent = parent.parentElement) {
@@ -160,8 +172,8 @@ export function ReviewAiCard({ film, profile, mood, setMood, label, onReviews, o
         if (/auto|scroll|hidden|clip/.test(style.overflowY)) { top = Math.max(top, rect.top); bottom = Math.min(bottom, rect.bottom); }
         if (/auto|scroll|hidden|clip/.test(style.overflowX)) { left = Math.max(left, rect.left); right = Math.min(right, rect.right); }
       }
-      const below = Math.max(0, bottom - box.bottom - gap - edge);
-      const above = Math.max(0, box.top - gap - top - edge);
+      const below = Math.max(0, bottom - box.top - edge);
+      const above = Math.max(0, box.bottom - top - edge);
       const upward = below < Math.min(panel.scrollHeight, 320) && above > below;
       const available = upward ? above : below;
       const maxHeight = Math.min(560, Math.max(80, available), Math.max(80, bottom - top - edge * 2));
@@ -169,7 +181,9 @@ export function ReviewAiCard({ film, profile, mood, setMood, label, onReviews, o
       panel.style.maxHeight = maxHeight + "px";
       const height = panel.offsetHeight;
       panel.style.left = Math.max(left + edge, Math.min(box.right - panel.offsetWidth, right - panel.offsetWidth - edge)) - origin.left + "px";
-      panel.style.top = Math.max(top + edge, Math.min(upward ? box.top - gap - height : box.bottom + gap, bottom - height - edge)) - origin.top + "px";
+      // glisse: the menu takes the ⋯ button's place (Morph.ts turns the button into it), growing down from the
+      // button's top, or up from its bottom when there is no room below
+      panel.style.top = Math.max(top + edge, Math.min(upward ? box.bottom - height : box.top, bottom - height - edge)) - origin.top + "px";
       panel.style.right = "auto";
     };
     fit();
@@ -179,7 +193,14 @@ export function ReviewAiCard({ film, profile, mood, setMood, label, onReviews, o
   }, [opts]);
   const queue = useRef<LbReview[]>([]);
   const ticket = useRef(0);
-  useEffect(() => () => { ticket.current++; }, []);
+  // leaving the page does not stop an analysis; a page opened meanwhile follows it and shows the result
+  const task = useAnalysisTask(key);
+  useEffect(() => {
+    if (!task || task.state === "running") return;
+    setRun(book ? cleanRun(store.json(key, null)) : savedFilmAnalysis(film));
+    if (task.state === "error") setError(task.status);
+    dropTask(task);
+  }, [task, task?.state]);
   const cfg = reviewAi();
   const inApp = "__TAURI_INTERNALS__" in window;
   // the taste learned from films is about films; a book is weighed by its own preferences only
@@ -196,22 +217,25 @@ export function ReviewAiCard({ film, profile, mood, setMood, label, onReviews, o
   }, [phase]);
 
   const start = async () => {
+    if (taskOf(key)?.state === "running") return;
     const t = ++ticket.current;
     const live = () => t === ticket.current;
-    if (!cfg.use.key) { setError(tt("Yorum analizi için seçilen yapay zekânın anahtarı yok. Ayarlar › Hesaplar ve anahtarlar.")); return; }
+    const job = beginTask(key, film.title, book ? null : { title: film.title, year: film.year ? String(film.year).slice(0, 4) : undefined, kind: film.kind === "tv" ? "tv" : "movie", tmdbId: film.id && film.id > 0 ? film.id : undefined }, () => { ticket.current++; });
+    const say = (m: string) => { setStatus(m); updateTask(job, { status: m }); };
+    if (!cfg.use.key) { dropTask(job); setError(tt("Yorum analizi için seçilen yapay zekânın anahtarı yok. Ayarlar › Hesaplar ve anahtarlar.")); return; }
     setError(""); setFeed([]); queue.current = []; setReading(null); setStep([0, 0]);
-    setPhase("fetch"); setStatus(tt("Letterboxd'da aranıyor…"));
+    setPhase("fetch"); say(tt("Letterboxd'da aranıyor…")); setTimes({ start: Date.now() });
     const stops = inApp ? await Promise.all([
-      listen<string>("lb-reviews-progress", (e) => { if (live()) setStatus(e.payload); }),
+      listen<string>("lb-reviews-progress", (e) => { if (live()) say(e.payload); }),
       listen<LbReview[]>("lb-reviews-found", (e) => { if (live()) queue.current.push(...e.payload); }),
     ]) : [];
     try {
       const year = film.year ? String(film.year).slice(0, 4) : undefined;
       const got = book
-        ? await invoke<{ url: string; reviews: LbReview[]; rating: number | null; readers: number | null }>("book_reviews", { title: film.title, author: author ?? null, count: cfg.count })
+        ? await invoke<{ url: string; reviews: LbReview[]; rating: number | null; readers: number | null; site?: string }>("book_reviews", { title: film.title, author: author ?? null, count: cfg.count })
         : await invoke<{ url: string; reviews: LbReview[]; rating?: number | null; readers?: number | null }>("letterboxd_reviews", { tmdb: film.id && film.id > 0 ? film.id : null, tv: film.kind === "tv", title: film.title, year, count: cfg.count, spoilers: cfg.spoilers });
       if (!live()) return;
-      if (!got.reviews.length) throw new Error(book ? tt("1000Kitap'ta bu kitap için inceleme bulunamadı.") : tt("Letterboxd'da bu eser için yorum bulunamadı."));
+      if (!got.reviews.length) throw new Error(book ? tt("1000Kitap ve Goodreads'te bu kitap için inceleme bulunamadı.") : tt("Letterboxd'da bu eser için yorum bulunamadı."));
       // let the feed finish scrolling in, then use the full list
       for (let i = 0; i < 100 && queue.current.length && live(); i++) await sleep(100);
       if (!live()) return;
@@ -221,30 +245,64 @@ export function ReviewAiCard({ film, profile, mood, setMood, label, onReviews, o
       onReviews(JSON.stringify({ reviews: got.reviews.map((r) => ({ text: r.text.slice(0, 4000), source: site + " · " + r.author + (r.stars ? " · " + r.stars + "★" : "") })) }));
 
       // 1) read in batches: each review gets its tone, depth, topic and gist
-      setPhase("read");
+      setPhase("read"); updateTask(job, { pct: 12 }); setTimes((x) => x && { ...x, read: Date.now() });
       const tr = locale().startsWith("tr");
-      const batches = Math.ceil(reviews.length / BATCH);
+      // a local model (LM Studio) reads lighter: one-liners and repeats are labelled from their stars without it,
+      // reviews it has read before for this title come from its memory, and the rest go in batches filled by length.
+      // A service over an API reads as before: every review, ten a batch.
+      const local = cfg.provider === "custom";
+      const memKey = "reviewReadMemory", filmId = filmKey(film);
+      const memory = local ? store.json<Record<string, Record<string, ReadItem>>>(memKey, {}) : {};
+      const known = memory[filmId] ?? {};
+      const toRead: number[] = [];
+      if (local) {
+        const seen = new Set<string>();
+        reviews.forEach((r, i) => {
+          const kept = known[reviewKey(r)];
+          const light = kept ? null : trivialReview(r, seen);
+          if (kept || light) reviews[i] = { ...r, read: kept ?? light };
+          else toRead.push(i + 1);
+        });
+        setFeed(reviews.slice());
+      }
+      const groups = local ? lengthBatches(toRead, (n) => reviews[n - 1].text) : Array.from({ length: Math.ceil(reviews.length / BATCH) }, (_, b) => Array.from({ length: Math.min(BATCH, reviews.length - b * BATCH) }, (_, i) => b * BATCH + i + 1));
+      const batches = groups.length;
+      // a local model thinks while it pays off: up to 30 reviews every batch is read carefully; with more, the batches
+      // (simple labelling) go quick and only the summing up thinks; past 60 the summing up's input is long enough
+      // that thinking would crowd a small context, so it goes quick too
+      const thinkRead = reviews.length <= 30, thinkSum = reviews.length <= 60;
       let failed = 0;
       for (let b = 0; b < batches; b++) {
-        const off = b * BATCH, part = reviews.slice(off, off + BATCH);
-        setReading([off, off + part.length]); setStep([b + 1, batches]);
-        setStatus(tt("{0}–{1}. yorumlar okunuyor", off + 1, off + part.length));
-        const { system, user } = batchPrompt(film, part, off, tr, medium);
-        const res = await ask(system, user, (x) => { const c = cleanBatch(x, off, part.length); return c.items.size ? c : null; }, cfg).catch((e) => { if (String((e as Error)?.message ?? e) === "nokey") throw e; return null; });
+        const nums = groups[b], off = nums[0] - 1, last = nums[nums.length - 1], part = nums.map((n) => reviews[n - 1]);
+        setReading([off, last]); setStep([b + 1, batches]); updateTask(job, { pct: 12 + (b / batches) * 73 });
+        say(tt("{0}–{1}. yorumlar okunuyor", off + 1, last));
+        // a small local model numbers its answer 1, 2, 3… whatever the reviews' own numbers are: it is shown 1…k and
+        // the answer is mapped back here
+        const { system, user } = batchPrompt(film, part, local ? 0 : off, tr, medium);
+        const raw = await ask(system, user, (x) => { const c = cleanBatch(x, local ? 0 : off, part.length); return c.items.size ? c : null; }, cfg, thinkRead).catch((e) => { if (String((e as Error)?.message ?? e) === "nokey") throw e; return null; });
         if (!live()) return;
-        if (!res) { failed++; continue; }
+        if (!raw) { failed++; continue; }
+        const back = (n: number) => (local ? nums[n - 1] : n);
+        const res = { items: new Map([...raw.items].map(([n, it]) => [back(n), it] as const)), best: raw.best.map(back), worst: raw.worst.map(back) };
         for (const [n, it] of res.items) reviews[n - 1] = { ...reviews[n - 1], read: it };
         for (const n of res.best) reviews[n - 1] = { ...reviews[n - 1], best: true };
         for (const n of res.worst) reviews[n - 1] = { ...reviews[n - 1], worst: true };
         setFeed(reviews.slice());
       }
-      if (failed === batches) throw new Error(tt("Yapay zekânın cevabı okunamadı. Tekrar dene ya da Ayarlar'dan başka bir model seç."));
+      if (local) {
+        // what the model read is kept for this title (the last 30 titles), so a later run reads only new reviews
+        const mine: Record<string, ReadItem> = { ...known };
+        for (const n of toRead) { const r = reviews[n - 1]; if (r.read) mine[reviewKey(r)] = r.read; }
+        const rest = Object.entries(memory).filter(([k]) => k !== filmId).slice(-29);
+        try { store.set(memKey, JSON.stringify(Object.fromEntries([...rest, [filmId, mine]]))); } catch { /* full: next run reads again */ }
+      }
+      if (batches && failed === batches) throw new Error(tt("Yapay zekânın cevabı okunamadı. Tekrar dene ya da Ayarlar'dan başka bir model seç."));
 
       // 2) sum it all up
-      setReading(null); setPhase("sum");
-      setStatus(tt("{0} yorum okundu · ortak düşünceler çıkarılıyor…", reviews.length));
+      setReading(null); setPhase("sum"); updateTask(job, { pct: 88 }); setTimes((x) => x && { ...x, sum: Date.now() });
+      say(tt("{0} yorum okundu · ortak düşünceler çıkarılıyor…", reviews.length));
       const { system, user } = summaryPrompt(film, reviews, profile, mood, cfg.note, tasteLine(profile, learned, book ? "book" : "film"), tr, medium);
-      const verdict = await ask(system, user, cleanVerdict, cfg);
+      const verdict = await ask(system, user, cleanVerdict, cfg, thinkSum);
       if (!live()) return;
       if (!verdict) throw new Error(tt("Yapay zekânın cevabı okunamadı. Tekrar dene ya da Ayarlar'dan başka bir model seç."));
       const rated = reviews.filter((r) => r.stars);
@@ -253,23 +311,25 @@ export function ReviewAiCard({ film, profile, mood, setMood, label, onReviews, o
         at: Date.now(), url: got.url, count: reviews.length, spoilers: reviews.filter((r) => r.spoiler).length,
         stars: rated.length ? Math.round((rated.reduce((s, r) => s + r.stars!, 0) / rated.length) * 10) / 10 : null,
         model: reviewAiName(cfg), community: communityScore(reviews), counts, topics, verdict, reviews: reviews.map(keepReview),
-        siteScore: got.rating ?? null, readers: got.readers ?? null, title: film.title, year: film.year ? String(film.year).slice(0, 4) : undefined,
+        siteScore: got.rating ?? null, readers: got.readers ?? null, site: (got as { site?: string }).site || undefined, title: film.title, year: film.year ? String(film.year).slice(0, 4) : undefined,
       };
       rememberAspects(film, verdict.aspects, book ? "book" : "film");
       if (!store.set(key, JSON.stringify(next))) setError(tt("Analiz yapıldı ama kaydedilemedi."));
       else window.dispatchEvent(new CustomEvent("film-decision-changed",{detail:{key}}));
-      setRun(next); onRun?.(next); setShowAll(false); setFilter("all");
+      updateTask(job, { state: "done" }); setRun(next); onRun?.(next); setShowAll(false); setFilter("all");
     } catch (e) {
       if (!live()) return;
       const m = String((e as Error)?.message ?? e);
-      setError(m === "nokey" ? tt("Yorum analizi için seçilen yapay zekânın anahtarı yok. Ayarlar › Hesaplar ve anahtarlar.") : m.replace(/^Error: /, ""));
+      const shown = m === "nokey" ? tt("Yorum analizi için seçilen yapay zekânın anahtarı yok. Ayarlar › Hesaplar ve anahtarlar.") : m.replace(/^Error: /, "");
+      setError(shown); updateTask(job, { state: "error", status: shown });
     } finally {
       for (const s of stops) s();
-      if (live()) { setPhase(""); setStatus(""); setReading(null); }
+      if (job.state === "running") dropTask(job);
+      if (live()) { setPhase(""); setStatus(""); setReading(null); setTimes((x) => x && !x.end ? { ...x, end: Date.now() } : x); }
     }
   };
 
-  const busy = phase !== "";
+  const busy = phase !== "" || task?.state === "running";
   const v = run?.verdict;
   const aspectScores = v ? Object.fromEntries(v.aspects.filter((a) => a.score != null).map((a) => [a.aspect, a.score!])) : {};
   const base = v ? v.score ?? run!.community : null;
@@ -306,22 +366,26 @@ export function ReviewAiCard({ film, profile, mood, setMood, label, onReviews, o
         </div>}
       </div>
       {/* settings, then Stop beside the running button and as big as it */}
-      {busy && <button className="la-stop" onClick={() => { ticket.current++; setPhase(""); setStatus(""); setReading(null); }}>{tt("Durdur")}</button>}
+      {busy && <button className="la-stop" onClick={() => { task?.cancel(); if (task) dropTask(task); ticket.current++; setPhase(""); setStatus(""); setReading(null); setTimes((x) => x && { ...x, end: Date.now(), stopped: true }); }}>{tt("Durdur")}</button>}
       <button className="la-go" disabled={busy || !inApp} onClick={()=>setPreferences(true)}>{busy ? <><span className="spinner" aria-hidden="true" /> {tt("Okunuyor…")}</> : run ? tt("Yeniden analiz et") : tt("{0} yorumu oku ve analiz et", cfg.count)}</button>
     </div>
     {preferences&&<ExtraModal title={extraText("Zevk tercihlerim","Taste preferences")} close={()=>setPreferences(false)} className="workspace-modal analysis-preferences"><section className="la">    {!book && <div className="la-moods" role="group" aria-label={tt("Analizde neye odaklanalım?")}>
       <span>{tt("Analizde neye odaklanalım?")}</span>
       {moods.map(([m, n]) => <button key={m} className={"seg" + (mood === m ? " on" : "")} aria-pressed={mood === m} onClick={() => setMood(m)}>{n}</button>)}
     </div>}
-<TastePanel kind={book?"book":"film"} open/><div className="modal-actions"><button className="primary" onClick={()=>{setPreferences(false);void start();}}>{extraText("Analize başla","Start analysis")}</button></div></section></ExtraModal>}
+<TastePanel kind={book?"book":"film"} open/><div className="modal-actions"><button className="primary" onClick={()=>{setPreferences(false);setCollapsed(()=>false);void start();}}>{extraText("Analize başla","Start analysis")}</button></div></section></ExtraModal>}
     <div hidden={collapsed}>
-    <p className="la-lead">{book ? tt("1000Kitap'taki en beğenilen {0} incelemeyi tek tek okur; okurların ortak düşüncelerini, tartıştıkları noktaları ve kitabın sana uygunluğunu çıkarır.", cfg.count) : tt("Letterboxd'daki en popüler {0} yorumu tek tek okur; ortak düşünceleri, tartışılan noktaları ve senin zevkine ne kadar uyduğunu çıkarır.", cfg.count)}</p>
+    <p className="la-lead">{book ? tt("1000Kitap ve Goodreads'teki en beğenilen {0} incelemeyi tek tek okur; okurların ortak düşüncelerini, tartıştıkları noktaları ve kitabın sana uygunluğunu çıkarır.", cfg.count) : tt("Letterboxd'daki en popüler {0} yorumu tek tek okur; ortak düşünceleri, tartışılan noktaları ve senin zevkine ne kadar uyduğunu çıkarır.", cfg.count)}</p>
 
     {busy && <div className="la-live">
-      <div className="la-live-top"><span className="la-pulse" /><span className="la-live-msg" role="status">{status}</span><span className="la-live-n">{phase === "fetch" ? `${feed.length} / ${cfg.count}` : phase === "read" ? `${step[0]} / ${step[1]}` : ""}</span></div>
+      <div className="la-live-top"><span className="la-pulse" /><span className="la-live-msg" role="status">{status}</span><span className="la-live-n">{phase === "fetch" ? `${feed.length} / ${cfg.count}` : phase === "read" ? `${step[0]} / ${step[1]}` : ""}</span>{dev && times && <span className="la-dev-time" title={extraText("Geçen süre (geliştirici)", "Elapsed (developer)")}>⏱ {clock(Date.now() - times.start)}</span>}</div>
       <div className="la-progress"><span style={{ width: pct + "%" }} /></div>
       <Feed list={feed} reading={reading} follow label={label} />
     </div>}
+    {dev && times?.end && !busy && <p className="la-dev-times">⏱ {extraText("Toplam", "Total")} <b>{clock(times.end - times.start)}</b>{times.stopped ? extraText(" (durduruldu)", " (stopped)") : ""}
+      {" · "}{extraText("Letterboxd", "Fetch")} {clock((times.read ?? times.end) - times.start)}
+      {times.read && <>{" · "}{extraText("okuma", "reading")} {clock((times.sum ?? times.end) - times.read)}</>}
+      {times.sum && <>{" · "}{extraText("özet", "summary")} {clock(times.end - times.sum)}</>}</p>}
     {error && <p className="la-error" role="alert">{error}</p>}
 
     {v && run && !busy && <div className="la-result">
@@ -331,7 +395,7 @@ export function ReviewAiCard({ film, profile, mood, setMood, label, onReviews, o
         {run.community != null && <div className="la-score"><span>{tt("Yorumların tonu")}</span><strong>{num(run.community)}</strong></div>}
         {tmdb != null && <div className="la-score"><span>TMDB</span><strong>{num(tmdb)}</strong></div>}
         {run.stars != null && <div className="la-score"><span>Letterboxd</span><strong>{num(run.stars)}<small>★</small></strong></div>}
-        {run.siteScore != null && <div className="la-score"><span>1000Kitap</span><strong>{num(run.siteScore)}</strong>{run.readers ? <em className="-plain">{tt("{0} okur", run.readers.toLocaleString(locale()))}</em> : null}</div>}
+        {run.siteScore != null && <div className="la-score"><span>{run.site || "1000Kitap"}</span><strong>{num(run.siteScore)}</strong>{run.readers ? <em className="-plain">{tt("{0} okur", run.readers.toLocaleString(locale()))}</em> : null}</div>}
       </div><span className={"la-verdict -" + v.lean}>{toneLabel(v.lean)}</span></div>
       <p className="la-muted la-basis">{tt("Bu özet, okunan {0} yorumdan yapay zekâyla çıkarıldı. Puanlar ve yüzdeler yaklaşık bir okumadır; doğruluk garantisi vermez ve gerçek bir topluluk anketi değildir.", run.count)}</p>
       {mine && (mine.notes.length > 0 || learned) && <p className="la-why">
@@ -386,7 +450,7 @@ export function ReviewAiCard({ film, profile, mood, setMood, label, onReviews, o
         </div>
         {showAll && (shown.length ? <Feed list={shown.map(([r]) => r)} reading={null} follow={false} label={label} done /> : <div className="la-feed-empty" role="status">{tt("Bu filtreye uyan yorum yok.")}</div>)}
       </div>}
-      <p className="la-foot">{new Date(run.at).toLocaleString(locale())} · {run.model} · <button className="la-link" onClick={() => openUrl(run.url).catch(() => {})}>{book ? tt("1000Kitap'ta aç") : tt("Letterboxd'da aç")} ↗</button> · {tt("Yapay zekâ yanılabilir; yorumların kendisi yukarıda.")}</p>
+      <p className="la-foot">{new Date(run.at).toLocaleString(locale())} · {run.model} · <button className="la-link" onClick={() => openUrl(run.url).catch(() => {})}>{book ? tt("{0} sayfasını aç", (run.site || "1000Kitap").split(" + ")[0]) : tt("Letterboxd'da aç")} ↗</button> · {tt("Yapay zekâ yanılabilir; yorumların kendisi yukarıda.")}</p>
     </div>}
     </div>
   </div>;

@@ -1,5 +1,7 @@
-export type BrowserIconName = "arrow" | "back" | "book" | "clock" | "close" | "command" | "copy" | "download" | "duplicate" | "external" | "film" | "find" | "forward" | "globe" | "grid" | "history" | "home" | "keyboard" | "lock" | "moon" | "more" | "music" | "muted" | "pin" | "play" | "plus" | "print" | "reader" | "reload" | "search" | "settings" | "spark" | "speaker" | "star" | "translate" | "trash" | "warning" | "zoom";
+export type BrowserIconName = "extension" | "collection" | "arrow" | "back" | "book" | "clock" | "close" | "command" | "copy" | "download" | "duplicate" | "external" | "film" | "find" | "forward" | "globe" | "grid" | "history" | "home" | "keyboard" | "lock" | "moon" | "more" | "music" | "muted" | "pin" | "play" | "plus" | "print" | "reader" | "reload" | "search" | "settings" | "spark" | "speaker" | "star" | "translate" | "trash" | "warning" | "zoom";
 const paths: Record<BrowserIconName, string> = {
+  extension: "M3.75 6.25h4.75a2.5 2.5 0 1 1 5 0h4.25v4.25a2.5 2.5 0 1 1 0 5v4.75H13.5a2.5 2.5 0 1 0-5 0H3.75V15.5a2.5 2.5 0 1 0 0-5Z",
+  collection: "M12 3l9 5-9 5-9-5zM3 13l9 5 9-5M3 17l9 5 9-5",
   back: "m14 6-6 6 6 6", forward: "m10 6 6 6-6 6", reload: "M20 8V3l-3 3a8 8 0 1 0 2.2 9M20 3h-5",
   search: "M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z", close: "m6 6 12 12M6 18 18 6", plus: "M12 5v14M5 12h14",
   star: "m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z", home: "m3 10 9-7 9 7v10H3ZM9 20v-7h6v7",

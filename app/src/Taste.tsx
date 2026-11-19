@@ -1,3 +1,4 @@
+import { uiBusy } from "./databaseStorage";
 import type { AiUse } from "./ai";
 import { appStorage as localStorage } from "./appStorage";
 import { answerNote,geminiBlockReason } from "./assistantProviderModel";
@@ -6,7 +7,7 @@ import { extraText } from "./Extras";
 import { listDelta,writeDelta } from "./extrasModel";
 import { lbUser,saveFriendRatings } from "./tasteEngine";
 // Taste data (likes, dislikes, watchlist), recommendations from friends and the Gemini chat.
-import { useEffect,useState } from "react";
+import { useEffect,useRef,useState } from "react";
 import { aiKey,aiModel,captureAiUse,otherAi } from "./ai";
 import { lang,tt } from "./i18n";
 import { details,Item,SearchHit,searchTmdb,store,tmdbGenresOf,tmdbKeywords } from "./library";
@@ -14,6 +15,7 @@ import { invoke } from "./nativeCore";
 import { I,Icon } from "./Screens";
 
 import { isLetterboxdUrl,sameTitleYear,validStars } from "./safety";
+import { logDebug } from "./debugTelemetry";
 
 // ---------- taste store ----------
 export type Vote = "like" | "dislike";
@@ -98,7 +100,18 @@ export type DiaryEntry = {
   lbRating?: number; lbLike?: boolean;
 };
 export const dKey = (title: string, year?: string) => seenKey(title.replace(/\s*\((\d{4})\)\s*$/, "")) + "|" + (year ?? (title.match(/\((\d{4})\)\s*$/)?.[1] ?? ""));
-export const loadDiary = () => store.json<Record<string, DiaryEntry>>("diary", {});
+// Every poster on Keşfet asks for its diary entry, its warning mark and the taste list on each render: parsing the whole
+// stored JSON for each card made rows stutter while new posters came in. The parsed value is kept until the stored text changes.
+const parsed = new Map<string, { raw: string | null; value: unknown }>();
+function readJson<T>(k: string, fallback: T): T {
+  const raw = localStorage.getItem(k);
+  const hit = parsed.get(k);
+  if (hit && hit.raw === raw) return hit.value as T;
+  const value = store.json<T>(k, fallback);
+  parsed.set(k, { raw, value });
+  return value;
+}
+export const loadDiary = () => readJson<Record<string, DiaryEntry>>("diary", {});
 export function diaryGet(title: string, year?: string): DiaryEntry | undefined {
   const d = loadDiary();
   const y = year ?? title.match(/\((\d{4})\)\s*$/)?.[1];
@@ -494,6 +507,19 @@ export function createPlaylist(name: string): Playlist {
   savePlaylists([...loadPlaylists(), pl]);
   return pl;
 }
+/** Is this film in that list (same name, and the same year when both know one)? */
+export function inPlaylist(p: Playlist, title: string, year?: string) {
+  const t = seenKey(title.replace(/\s*\((\d{4})\)\s*$/, "").trim());
+  return p.items.some((x) => seenKey(x.title) === t && (!year || !x.year || x.year === year));
+}
+/** Takes a film out of one of the user's lists (the way back from "+ Listeye"). */
+export function removeFromPlaylist(id: string, title: string, year?: string) {
+  const all = loadPlaylists(), p = all.find((x) => x.id === id);
+  if (!p) return;
+  const t = seenKey(title.replace(/\s*\((\d{4})\)\s*$/, "").trim());
+  p.items = p.items.filter((x) => !(seenKey(x.title) === t && (!year || !x.year || x.year === year)));
+  savePlaylists(all);
+}
 export async function addToPlaylist(name: string, items: { title: string; year?: string }[]): Promise<number> {
   const target = createPlaylist(name);
   let added = 0;
@@ -553,8 +579,8 @@ export function friendAffinity() {
 
 export const listeners = new Set<() => void>();
 export const changed = () => listeners.forEach((f) => f());
-export const loadTaste = () => store.json<Record<string, TasteEntry>>("taste", {});
-export const loadRecs = () => store.json<Rec[]>("recs", []);
+export const loadTaste = () => readJson<Record<string, TasteEntry>>("taste", {});
+export const loadRecs = () => readJson<Rec[]>("recs", []);
 const saveTaste = (t: Record<string, TasteEntry>) => { store.set("taste", JSON.stringify(t)); changed(); };
 export const saveRecs = (r: Rec[]) => { store.set("recs", JSON.stringify(r)); changed(); };
 
@@ -602,6 +628,8 @@ export function TasteButtons({ it, votesOnly=false }: { it: Item; votesOnly?:boo
     else markLater(label, true);
   };
   const vote = (v: Vote) => {
+    // already voted: the first press opens the score bubble to change it, a second press removes the vote
+    if (d?.vote === v && ask !== v) { setAsk(v); return; }
     const nv = d?.vote === v ? undefined : v;
     diarySet(title, year, { vote: nv, ...(nv && d?.vote && d.vote !== nv ? { rating: undefined } : {}), ...(it.meta?.genres?.length ? { genres: it.meta.genres } : {}) });
     setTaste(it, { vote: nv });
@@ -673,8 +701,21 @@ export const cwOf = (id?: number, kind?: string): string[] | undefined => (id ? 
 const cwQueue: { id: number; kind: "movie" | "tv" }[] = [];
 let cwActive = 0;
 let cwDirty = false;
-// the cache is written to storage in batches, not after every title
-setInterval(() => { if (cwDirty && cwMemo) { cwDirty = false; store.set("cwCache", JSON.stringify(cwMemo)); } }, 3000);
+export { uiBusy };
+let cwNotifyDue = false, cwNotifyTimer = 0;
+/** Tells the screens about new warnings at most every 2 s, never in the middle of a drag (each call re-renders every row). */
+function cwNotify() {
+  cwNotifyDue = true;
+  if (cwNotifyTimer) return;
+  cwNotifyTimer = window.setTimeout(function fire() {
+    if (uiBusy.drag) { cwNotifyTimer = window.setTimeout(fire, 400); return; }
+    cwNotifyTimer = 0;
+    if (cwNotifyDue) { cwNotifyDue = false; listeners.forEach((f) => f()); }
+  }, 2000);
+}
+// the cache is written to storage in batches, when the app is idle and nothing is being dragged
+const idle = (f: () => void) => ("requestIdleCallback" in window ? (window as any).requestIdleCallback(f, { timeout: 10000 }) : setTimeout(f, 200));
+setInterval(() => { if (cwDirty && cwMemo && !uiBusy.drag) idle(() => { if (!cwDirty || !cwMemo || uiBusy.drag) return; cwDirty = false; store.set("cwCache", JSON.stringify(cwMemo)); }); }, 15000);
 /** Moderation progress for the UI: checked / asked for in this session. */
 export const cwProgress = { done: 0, total: 0 };
 function cwPump() {
@@ -691,7 +732,7 @@ function cwPump() {
       .catch(() => {})
       .finally(() => {
         cwActive--; cwProgress.done++;
-        if (cwProgress.done % 10 === 0 || (!cwQueue.length && !cwActive)) listeners.forEach((f) => f());
+        if (cwProgress.done % 10 === 0 || (!cwQueue.length && !cwActive)) cwNotify();
         cwPump();
       });
   }
@@ -706,14 +747,14 @@ export function useContentWarnings(list: { tmdbId?: number; kind?: "movie" | "tv
     // what's on screen goes to the front of the queue
     cwQueue.unshift(...fresh.map((x) => ({ id: x.tmdbId!, kind: x.kind ?? "movie" })));
     cwProgress.total += fresh.length;
-    listeners.forEach((f) => f());
+    cwNotify();
     cwPump();
   }, [on, todo.map((x) => x.tmdbId).join(",")]);
 }
 /** The red star next to a flagged title. */
 /* Titles the user marked as fine for them despite a warning: what's sensitive for them and what isn't. */
 type SafeMark = { title: string; year?: string; cats: string[]; at: number };
-export const loadSafe = () => store.json<Record<string, SafeMark>>("cwSafe", {});
+export const loadSafe = () => readJson<Record<string, SafeMark>>("cwSafe", {});
 export const isSafe = (id?: number, kind?: string) => !!id && !!loadSafe()[cwKey(kind, id)];
 export function markSafe(id: number, kind: string | undefined, mark: SafeMark | null) {
   const all = loadSafe();
@@ -746,15 +787,20 @@ export function ModToggle() {
 export function RateAsk({ title, year, vote, onDone }: { title: string; year?: string; vote: Vote; onDone: () => void }) {
   const cur = diaryGet(title, year)?.rating;
   const nums = vote === "like" ? [6, 7, 8, 9, 10] : [1, 2, 3, 4, 5];
+  const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const t = setTimeout(onDone, 8000);
+    // what sits on top of the bubble's middle (a covering layer swallows the clicks)
+    requestAnimationFrame(() => { const r = box.current?.getBoundingClientRect(); if (!r) return; const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      logDebug("app", "rate_ask_open", { top: top ? top.tagName.toLowerCase() + "." + String(top.className || "").slice(0, 60) : "none", inside: !!top && !!box.current?.contains(top) }); });
     return () => clearTimeout(t);
   }, []);
+  const pick = (n: number) => { diarySet(title, year, { rating: n, watched: diaryGet(title, year)?.watched ?? Date.now() }); logDebug("app", "rate_ask_pick", { n }); onDone(); };
   return (
-    <div className={"rate-ask " + vote} onClick={(e) => e.stopPropagation()}>
+    <div ref={box} className={"rate-ask " + vote} onClick={(e) => e.stopPropagation()} onPointerDown={(e) => { e.stopPropagation(); logDebug("app", "rate_ask_pointer", { on: (e.target as HTMLElement).tagName.toLowerCase() }); }}>
       <span>{vote === "like" ? tt("Kaç puan?") : tt("Kaç puan?")}</span>
       {nums.map((n) => (
-        <button key={n} className={cur === n ? "on" : ""} onClick={() => { diarySet(title, year, { rating: n, watched: diaryGet(title, year)?.watched ?? Date.now() }); onDone(); }}>{n}</button>
+        <button key={n} className={cur === n ? "on" : ""} onPointerDown={(e) => { if (e.button === 0) { e.preventDefault(); pick(n); } }} onClick={(e) => { if (e.detail === 0) pick(n); }}>{n}</button>
       ))}
       <button className="skip" onClick={onDone}>{tt("Geç")}</button>
     </div>
@@ -765,6 +811,8 @@ export type DetailTarget = {
   title: string; year?: string; kind?: "movie" | "tv"; tmdbId?: number; from?: string; note?: string; stars?: number;
   /** from a Stremio catalog: the IMDb id, or the addon's own id when it isn't one */
   imdbId?: string; stremio?: { type: string; id: string };
+  /** release / first air date when the card knew it: the window can say "not out yet" before the details load */
+  date?: string;
 };
 export type SourceProps = { onSource?: (src: string, name?: string) => void; onDownload?: (src: string) => void };
 /* ---------- sharing a film list: a Luna file another Luna reads back, or plain text for anywhere ---------- */
@@ -907,16 +955,25 @@ export async function geminiWithFallback(key: string, body: any, use:AiUse=captu
   throw fail(lastErr);
 }
 
-export let pendingAsk: { text: string; show?: string } | null = null;
+export let pendingAsk: { text: string; show?: string; voice?: boolean } | null = null;
 /** Opens the assistant and asks it this (only on the user's click: nothing runs on its own). */
 /** Asks the assistant; `show` is the short line the chat shows when `text` is a long instruction for the model. */
-export function askAssistant(text: string, show?: string) { pendingAsk = { text, show }; window.dispatchEvent(new Event("luna-ask")); }
+/** `voice`: asked by the voice assistant (the chat stays hidden unless the answer needs it, and the answer is short). */
+export function askAssistant(text: string, show?: string, voice = false) { pendingAsk = { text, show, voice }; window.dispatchEvent(new Event("luna-ask")); }
 /** Opens the assistant without a question (the header/playlist buttons). */
 export function openAssistant() { pendingAsk = null; window.dispatchEvent(new Event("luna-ask")); }
 
 /** The title pages open on screen right now, newest last: the assistant reads the top one. */
 export const openTitles: { title: string; year?: string; kind?: string; overview?: string; extra?: string }[] = [];
 export const topOpenTitle = () => openTitles[openTitles.length - 1];
+/* the open title windows have their own listeners: they used to wake every taste listener, so opening a title
+   re-drew all of Keşfet's cards (~60 ms) just as its window started to rise */
+export const openTitleListeners = new Set<() => void>();
+export function useOpenTitle() {
+  const [, bump] = useState(0);
+  useEffect(() => { const f = () => bump((n) => n + 1); openTitleListeners.add(f); return () => { openTitleListeners.delete(f); }; }, []);
+  return topOpenTitle();
+}
 
 /** What the Öneriler page shows right now (a friend's recommendations or one of their lists). */
 export type RecsView = { who: string; list: string; films: { title: string; year?: string; rating?: number; stars?: number; tmdbId?: number; kind?: "movie" | "tv" }[] };

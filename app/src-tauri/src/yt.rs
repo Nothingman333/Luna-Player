@@ -46,6 +46,9 @@ pub struct Hit {
     pub channel: String,
     pub duration: Option<f64>,
     pub thumb: Option<String>,
+    /// on a playlist's songs: the list's own name
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub list: Option<String>,
 }
 
 /// `url` goes after `--`: a link that begins with a dash must never be read as a yt-dlp option (`--exec=…`, `-o`…).
@@ -80,14 +83,24 @@ pub fn transcript(ytdlp: &Path, url: &str) -> Result<String, String> {
     if !ytdlp.exists() {
         return Err(tr!("yt-dlp bulunamadı", "yt-dlp is missing"));
     }
+    // A run cut short (app closed or killed while yt-dlp was working) can leave its folder behind: such leftovers
+    // older than 15 minutes are removed on the next call. A finished run removes its own folder right away.
+    if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {
+        for e in entries.flatten() {
+            let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age.as_secs() > 15 * 60);
+            if old && e.file_name().to_string_lossy().starts_with("luna-subs-") && e.path().is_dir() { let _ = std::fs::remove_dir_all(e.path()); }
+        }
+    }
     let dir = std::env::temp_dir().join(format!("luna-subs-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)));
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let out_tpl = dir.join("t.%(ext)s").to_string_lossy().to_string();
     let args = with_url(&["--no-warnings", "--socket-timeout", "10", "--ignore-errors", "--skip-download", "--no-playlist", "--write-subs", "--write-auto-subs",
-        "--sub-langs", "tr,en,.*-orig", "--sub-format", "vtt", "-o", &out_tpl], url);
+        "--sub-langs", ".*-orig,en", "--sub-format", "vtt", "-o", &out_tpl], url);
     let _ = Command::new(ytdlp).args(&args).creation_flags(CREATE_NO_WINDOW).output().map_err(|e| e.to_string());
     let files: Vec<PathBuf> = std::fs::read_dir(&dir).map(|r| r.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "vtt")).collect()).unwrap_or_default();
-    let rank = |p: &PathBuf| { let n = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(); if n.ends_with(".tr.vtt") { 0 } else if n.ends_with(".en.vtt") { 1 } else { 2 } };
+    // the spoken language's own captions first (what is really said); English after. Turkish ("tr") is not asked for:
+    // on most videos it is YouTube's machine translation, which answers HTTP 429 and then no subtitles come at all.
+    let rank = |p: &PathBuf| { let n = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(); if n.ends_with("-orig.vtt") { 0 } else if n.ends_with(".en.vtt") { 1 } else { 2 } };
     let best = files.iter().min_by_key(|p| rank(p)).cloned();
     let raw = best.and_then(|p| std::fs::read_to_string(p).ok());
     let _ = std::fs::remove_dir_all(&dir);
@@ -126,6 +139,7 @@ fn hit(e: &Value) -> Option<Hit> {
         duration: e["duration"].as_f64(),
         thumb: e["thumbnails"].as_array().and_then(|t| t.last()).and_then(|t| t["url"].as_str()).map(String::from)
             .or_else(|| e["thumbnail"].as_str().map(String::from)),
+        list: None,
         url,
     })
 }
@@ -193,6 +207,7 @@ pub async fn search_api(query: &str, n: u32) -> Result<Vec<Hit>, String> {
                 channel: r["ownerText"]["runs"][0]["text"].as_str().unwrap_or("").to_string(),
                 duration: r["lengthText"]["simpleText"].as_str().and_then(clock),
                 thumb: r["thumbnail"]["thumbnails"].as_array().and_then(|t| t.last()).and_then(|t| t["url"].as_str()).map(String::from),
+                list: None,
             })
         })
         .take(n as usize)
@@ -242,6 +257,52 @@ pub fn stream(ytdlp: &Path, url: &str) -> Result<Stream, String> {
     Ok(Stream { url: url.to_string(), ua: v["http_headers"]["User-Agent"].as_str().map(String::from) })
 }
 
+/// The picture of a YouTube song whose sound is already playing: a video-only stream (up to 1080p, no AV1 so every
+/// GPU decodes it), added beside the sound instead of opening the song again.
+pub fn video_stream(ytdlp: &Path, url: &str) -> Result<Stream, String> {
+    let v = run(ytdlp, &with_url(&["-f", "bestvideo[height<=?1080][vcodec^=avc1]/bestvideo[height<=?1080][vcodec^=vp9]/bestvideo[height<=?1080]", "--no-playlist"], url))?;
+    let v = v["entries"].as_array().and_then(|l| l.first()).unwrap_or(&v);
+    let url = v["url"].as_str().filter(|u| u.starts_with("https://")).ok_or(tr!("Video adresi bulunamadı", "No video address found"))?;
+    Ok(Stream { url: url.to_string(), ua: v["http_headers"]["User-Agent"].as_str().map(String::from) })
+}
+
+/// What a page's media is, for "Luna'da oynat" from any site: sound only or a picture, how long, and whose.
+#[derive(Serialize)]
+pub struct Probe {
+    pub audio: bool,
+    pub duration: Option<f64>,
+    pub title: String,
+    pub channel: String,
+    pub site: String,
+    pub thumb: Option<String>,
+    /// a talk site (its shows are podcasts, even when they are filmed)
+    pub podcast: bool,
+    /// the file's own address (to measure a sound that doesn't say how long it is)
+    #[serde(skip)]
+    pub direct: Option<String>,
+}
+
+pub fn probe(ytdlp: &Path, url: &str) -> Result<Probe, String> {
+    let v = run(ytdlp, &with_url(&["--no-playlist"], url))?;
+    let v = v["entries"].as_array().and_then(|l| l.first()).unwrap_or(&v);
+    let none = |x: &Value| x.as_str().is_none_or(|c| c == "none");
+    // sound only: the chosen stream has no picture and no format of the page has one either
+    let formats = v["formats"].as_array();
+    let audio = none(&v["vcodec"]) && formats.is_none_or(|f| f.iter().all(|x| none(&x["vcodec"]) || x["vcodec"].is_null() && x["ext"].as_str().is_some_and(|e| ["mp3", "m4a", "aac", "ogg", "opus", "wav", "flac"].contains(&e))))
+        || v["ext"].as_str().is_some_and(|e| ["mp3", "m4a", "aac", "ogg", "opus", "wav", "flac"].contains(&e));
+    let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
+    Ok(Probe {
+        audio,
+        duration: v["duration"].as_f64(),
+        title: s("title"),
+        channel: [s("series"), s("channel"), s("uploader"), s("playlist_title")].into_iter().find(|x| !x.is_empty()).unwrap_or_default(),
+        site: s("extractor_key"),
+        thumb: v["thumbnail"].as_str().map(String::from),
+        podcast: false,
+        direct: v["url"].as_str().filter(|u| u.starts_with("http")).map(String::from),
+    })
+}
+
 /// The first `n` YouTube results for a search.
 pub fn search(ytdlp: &Path, query: &str, n: u32) -> Result<Vec<Hit>, String> {
     let v = run(ytdlp, &["--flat-playlist", &format!("ytsearch{n}:{query}")])?;
@@ -252,7 +313,10 @@ pub fn search(ytdlp: &Path, query: &str, n: u32) -> Result<Vec<Hit>, String> {
 pub fn info(ytdlp: &Path, url: &str) -> Result<Vec<Hit>, String> {
     let v = run(ytdlp, &with_url(&["--flat-playlist", "--playlist-end", "200"], url))?;
     match v["entries"].as_array() {
-        Some(l) => Ok(l.iter().filter_map(hit).collect()),
+        Some(l) => {
+            let name = v["title"].as_str().map(str::to_string).filter(|t| !t.is_empty());
+            Ok(l.iter().filter_map(hit).map(|mut h| { h.list = name.clone(); h }).collect())
+        }
         None => Ok(hit(&v).into_iter().collect()),
     }
 }

@@ -110,7 +110,7 @@ export function UpdateBanner() {
 }
 
 /** Settings › General: the update card. */
-export function UpdateSettings({ onBackup }: { onBackup: () => void }) {
+export function UpdateSettings({ onBackup, bare = false }: { onBackup: () => void; bare?: boolean }) {
   const s = useUpd();
   const [auto, setAuto] = useState(updAuto);
   const [beta, setBeta] = useState(updBeta);
@@ -123,7 +123,7 @@ export function UpdateSettings({ onBackup }: { onBackup: () => void }) {
   };
   const confirmBeta = () => { store.set("updBeta", "1"); setBeta(true); setWarn(false); checkUpdate(); };
   return (
-    <div className="set-card">
+    <div className={bare ? "set-update-part" : "set-card"}>
       <div className="field">
         <span>{tt("Güncellemeler")}</span>
         <div className="upd-row">

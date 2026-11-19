@@ -1,9 +1,11 @@
 import { tt, DEC, pctText } from "./i18n";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "./nativeCore";
 import { open } from "@tauri-apps/plugin-dialog";
 import { fmtSize, store } from "./library";
 import { I, Icon } from "./Screens";
+import { DownloadsLibrary, type FileKind } from "./DownloadsLibrary";
 
 export type TorrentStat = {
   id: number; name: string; state: string; error?: string | null; finished: boolean;
@@ -29,7 +31,10 @@ export function useTorrents(active: boolean) {
   useEffect(() => {
     if (!active) return;
     let alive = true;
-    const tick = () => invoke<TorrentStat[]>("torrent_list").then((l) => alive && setList(l)).catch(() => {});
+    // a list that hasn't changed (finished or paused downloads) keeps the same array: a new one every second re-rendered
+    // the whole app, and Keşfet's rows stuttered for 100–180 ms once a second while being dragged
+    let last = "";
+    const tick = () => invoke<TorrentStat[]>("torrent_list").then((l) => { const key = JSON.stringify(l); if (alive && key !== last) { last = key; setList(l); } }).catch(() => {});
     tick();
     const id = setInterval(tick, 1000);
     return () => { alive = false; clearInterval(id); };
@@ -131,13 +136,90 @@ type DlProps = {
   onRemoved?: (id: number, mode: RemoveMode) => void;
 };
 
-export function Downloads(p: DlProps) {
-  return <div className="page"><DownloadsSection {...p} /></div>;
+const SEEN = "dlSeenDone";
+const dlKey = (t: TorrentStat) => t.hash || t.name;
+/** The home screen's downloads: a finished one shows there until the home screen has been left once (it stays on the Downloads page). */
+export const homeDownloads = (list: TorrentStat[]) => {
+  const seen = new Set(store.json<string[]>(SEEN, []));
+  return list.filter((t) => !t.finished || !seen.has(dlKey(t)));
+};
+/** Marks the finished downloads as seen on the home screen. */
+function markSeen(list: TorrentStat[]) {
+  const done = list.filter((t) => t.finished).map(dlKey);
+  if (!done.length) return;
+  const seen = store.json<string[]>(SEEN, []);
+  const add = done.filter((k) => !seen.includes(k));
+  if (add.length) store.set(SEEN, JSON.stringify([...add, ...seen].slice(0, 300)));
+}
+
+/** A download the Chrome add-on started (YouTube video, music or a whole list), as the "yt-download" event reports it. */
+export type WebDl = { id: string; title: string; percent: number; state: "run" | "done" | "error"; file?: string | null; error?: string | null; kind: string; item?: [number, number] | null };
+type WebProps = { web?: WebDl[]; onWebPlay?: (file: string) => void; onWebRemove?: (id: string) => void };
+
+/** The one Downloads page (the same from Film, Müzik and Kitap): what is still downloading on top, then everything
+ *  Luna has downloaded, filtered to the part it was opened from. */
+export function Downloads(p: DlProps & WebProps & { start?: FileKind | "all"; onOpenBook: (path: string) => void }) {
+  const running = (p.web ?? []).filter((d) => d.state === "run").length, finished = (p.web ?? []).filter((d) => d.state === "done").length;
+  // torrents are films and series: their section shows from Film, or anywhere once there is one
+  const torrents = !p.start || p.start === "all" || p.start === "video" || p.list.length > 0;
+  return <div className="page"><WebDownloads list={p.web ?? []} onPlay={p.onWebPlay} onRemove={p.onWebRemove} />
+    {torrents && <DownloadsSection {...p} />}
+    <DownloadsLibrary start={p.start} refreshKey={running * 1000 + finished + p.list.filter((t) => t.finished).length * 7} torrentFiles={p.list.filter((t) => t.finished && t.local).map((t) => t.local!)} onPlay={(f) => p.onWebPlay?.(f)} onOpenBook={p.onOpenBook} /></div>;
+}
+
+/** Add-on downloads: progress while running; a finished file plays (a finished list opens its folder). */
+function WebDownloads({ list, onPlay, onRemove }: { list: WebDl[]; onPlay?: (file: string) => void; onRemove?: (id: string) => void }) {
+  if (!list.length) return null;
+  return (
+    <section className="row">
+      <h2>{tt("Web indirmeleri")} <span className="muted small">{list.length}</span></h2>
+      <div className="dl-list">
+        {list.map((d) => {
+          const folder = !!d.file && !/\.[a-z0-9]{2,4}$/i.test(d.file);
+          // a download from before the file name was read correctly has no path: open its folder instead
+          const sub = d.kind === "audio" ? "Luna Müzik" : "Luna Video";
+          // find it by its title (yt-dlp's safe file name keeps only plain letters and digits of the title)
+          const findAndPlay = async () => {
+            const dir = store.get("dlDir") || await invoke<string | null>("downloads_dir").catch(() => null);
+            if (!dir) return;
+            const key = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, "");
+            const want = key(d.title);
+            const where = dir.replace(/[\\/]$/, "") + "\\" + sub;
+            // list_dir lists only videos; sound files come from the music scan
+            const files = d.kind === "audio"
+              ? (await invoke<{ path: string }[]>("music_scan", { folders: [where] }).catch(() => [])).map((t) => ({ name: t.path.split(/[\\/]/).pop() ?? "", path: t.path, is_dir: false }))
+              : await invoke<{ name: string; path: string; is_dir: boolean }[]>("list_dir", { path: where }).catch(() => []);
+            const hit = want && files.find((f) => !f.is_dir && key(f.name.replace(/\s*\[[^\]]+\]\.[a-z0-9]+$/i, "")) === want);
+            if (hit) onPlay?.(hit.path);
+          };
+          const open = () => { if (!d.file) { if (d.state === "done") void findAndPlay(); return; } if (folder) void invoke("reveal_file", { path: d.file }).catch(() => {}); else onPlay?.(d.file); };
+          return (
+            <div key={d.id} className="dl-row">
+              <div className="dl-main">
+                <button className="dl-name ellipsis" disabled={!d.file && d.state !== "done"} title={folder ? tt("Klasörde göster") : tt("Oynat")} onClick={open}>{d.title || d.file?.split(/[\\/]/).pop()}</button>
+                <div className="dl-bar"><div style={{ width: (d.state === "error" ? 0 : Math.min(100, d.percent)) + "%" }} className={d.state === "done" ? "done" : ""} /></div>
+                <div className="muted small">
+                  {d.state === "error" ? <span className="dl-err">{tt("Hata:")} {d.error}</span>
+                    : d.state === "done" ? tt("Tamamlandı") + (d.kind === "audio" ? " · " + tt("Müzik") : " · " + tt("Video"))
+                    : (d.item ? tt("{0}/{1} · ", d.item[0], d.item[1]) : "") + "%" + d.percent.toFixed(0)}
+                </div>
+              </div>
+              {d.file && <button className="round" aria-label={tt("Klasörde göster")} title={tt("Klasörde göster")} onClick={() => void invoke("reveal_file", { path: d.file }).catch(() => {})}><Icon d={I.folder} size={17} /></button>}
+              {d.state !== "run" && <button className="round" aria-label={tt("Listeden kaldır")} title={tt("Listeden kaldır")} onClick={() => onRemove?.(d.id)}><Icon d={I.x} size={18} /></button>}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 /** The torrent list with play / pause / remove (also shown on the home screen). */
-export function DownloadsSection({ list, onPlay, onRemoving, onRemoved }: DlProps) {
+export function DownloadsSection({ list, onPlay, onRemoving, onRemoved, home }: DlProps & { home?: boolean }) {
   const [confirm, setConfirm] = useState<TorrentStat | null>(null);
+  // on the home screen, what finished counts as seen once the user leaves it
+  const shown = useRef(list); shown.current = list;
+  useEffect(() => { if (home) return () => markSeen(shown.current); }, [home]);
   const [err, setErr] = useState("");
   const remove = async (t: TorrentStat, mode: RemoveMode) => {
     setConfirm(null);
@@ -151,6 +233,7 @@ export function DownloadsSection({ list, onPlay, onRemoving, onRemoved }: DlProp
     }
     onRemoved?.(t.id, mode);
   };
+  const rank = (t: TorrentStat) => t.finished ? 3 : t.error ? 2 : t.state === "paused" ? 1 : 0;
   return (
     <>
       <section className="row">
@@ -158,13 +241,14 @@ export function DownloadsSection({ list, onPlay, onRemoving, onRemoved }: DlProp
         {err && <div className="plugin-msg small err">{err}</div>}
         {!list.length && <div className="muted empty-note downloads-empty"><Icon d={I.down} size={24}/><p>{tt("Henüz torrent yok. Üstteki mıknatıs butonuyla magnet linki ya da torrent dosyası açabilirsin.")}</p></div>}
         <div className="dl-list">
-          {list.map((t) => {
+          {/* what is downloading now on top, then paused ones, finished ones last (newest first in each) */}
+          {[...list].sort((a, b) => rank(a) - rank(b) || b.id - a.id).map((t) => {
             const p = pct(t);
             const paused = t.state === "paused";
             return (
               <div key={t.id} className="dl-row">
                 <div className="dl-main">
-                  <div className="dl-name ellipsis">{t.name || "Torrent #" + t.id}</div>
+                  <button className="dl-name ellipsis" title={tt("Oynat")} onClick={() => onPlay(t.id)}>{t.name || "Torrent #" + t.id}</button>
                   <div className="dl-bar"><div style={{ width: p + "%" }} className={t.finished ? "done" : ""} /></div>
                   <div className="muted small">
                     {t.error ? <span className="dl-err">{tt("Hata:")} {t.error}</span> : t.finished ? tt("Tamamlandı · {0}", fmtSize(t.total_bytes)) :
@@ -173,18 +257,18 @@ export function DownloadsSection({ list, onPlay, onRemoving, onRemoved }: DlProp
                       (t.live?.time_remaining?.human_readable ? tt(" · kalan {0}", t.live.time_remaining.human_readable) : "")}
                   </div>
                 </div>
-                <button className="round" aria-label={tt("Oynat")} title={tt("Oynat")} onClick={() => onPlay(t.id)}><Icon d={I.play} fill size={18} /></button>
-                <button className="round" aria-label={paused ? tt("Devam ettir") : tt("Duraklat")} title={paused ? tt("Devam ettir") : tt("Duraklat")}
+                {!t.finished && <button className="round" aria-label={paused ? tt("Devam ettir") : tt("Duraklat")} title={paused ? tt("Devam ettir") : tt("Duraklat")}
                   onClick={() => invoke("torrent_pause", { id: t.id, pause: !paused })}>
                   <Icon d={paused ? I.play : I.pause} fill size={16} />
-                </button>
+                </button>}
                 <button className="round" aria-label={tt("Kaldır")} title={tt("Kaldır")} onClick={() => setConfirm(t)}><Icon d={I.x} size={18} /></button>
               </div>
             );
           })}
         </div>
       </section>
-      {confirm && (
+      {/* on body: inside the scrolled home page the dialog sat far below the middle */}
+      {confirm && createPortal(
         <div className="modal-bg" onClick={(e) => e.target === e.currentTarget && setConfirm(null)}>
           <div className="modal">
             <h2>{tt("Torrent kaldırılsın mı?")}</h2>
@@ -197,21 +281,26 @@ export function DownloadsSection({ list, onPlay, onRemoving, onRemoved }: DlProp
               <button className="primary danger" onClick={() => remove(confirm, "all")} title={tt("Dosyalar silinir, film kütüphaneden de kalkar")}>{tt("Her şeyi sil")}</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
 }
 
 /** Download block on a details page for a torrent title that isn't on disk. */
-export function DownloadPanel({ pending, stat, onDownload, onCancel }: {
-  pending: boolean; stat?: TorrentStat; onDownload: () => void; onCancel: (id: number) => void;
+export function DownloadPanel({ pending, stat, onDownload, onCancel, label, hideIdle }: {
+  /** a film: the main button says İndir, so the idle block is not shown */
+  hideIdle?: boolean;
+  /** what isn't here, e.g. one episode of a series ("Bu film bilgisayarında yok" by default) */
+  label?: string; pending: boolean; stat?: TorrentStat; onDownload: () => void; onCancel: (id: number) => void;
 }) {
   const [ask, setAsk] = useState(false);
   if (!pending && !stat) {
+    if (hideIdle) return null;
     return (
       <div className="dlp idle">
-        <span className="dlp-off">{tt("Bu film bilgisayarında yok")}</span>
+        <span className="dlp-off">{label ?? tt("Bu film bilgisayarında yok")}</span>
         <button className="ghost" onClick={onDownload}><Icon d={I.down} size={18} />  {tt("İndir")}</button>
       </div>
     );

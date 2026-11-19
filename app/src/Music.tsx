@@ -1,6 +1,6 @@
 import { appStorage as localStorage } from "./appStorage";
 import { logDebug } from "./debugTelemetry";
-import { extraText } from "./Extras";
+import { extraText,MediaNotebook } from "./Extras";
 import { cleanMusicIdentities } from "./musicIdentityModel";
 import { SaveQueuePlaylist } from "./MusicPlaylistTools";
 import { audioResume,playlistCollection,storedAudioPosition,validPlaylist } from "./musicWorkspaceModel";
@@ -25,6 +25,9 @@ import { restoreIndex,seekKeyDelta } from "./musicModel";
 import { convertFileSrc,invoke } from "./nativeCore";
 import { BarMarks,MusicSoundButton } from "./PlaybackExtras";
 import { PodcastExtras } from "./PodcastExtras";
+import { AudioSubPicker, useAudioSubs } from "./AudioSubs";
+import { fold } from "./paletteModel";
+import { pushNotice } from "./Follow";
 import { I,Icon,MenuEntry,openMenu } from "./Screens";
 import { askAssistant,openAssistant } from "./Taste";
 import { ReasonPicker } from "./TastePanel";
@@ -338,7 +341,9 @@ export function markMusicPath(p: string | null) {
   if (/^https?:/i.test(p)) store.set("musicStreamPaths", JSON.stringify([p, ...store.json<string[]>("musicStreamPaths", []).filter((x) => x !== p)].slice(0, 300)));
 }
 /** An address that is plainly sound (podcast episodes, radio): never a film. */
-const audioLike = (p: string) => /^https?:\/\/[^?#]+\.(mp3|m4a|aac|ogg|oga|opus|wav|flac)([?#]|$)/i.test(p);
+const audioLike = (p: string) => /^https?:\/\/[^?#]+\.(mp3|m4a|m4b|aac|ogg|oga|opus|wav|flac)([?#]|$)/i.test(p)
+  // a local sound file too: after a reload the queue is empty but mpv may still play it (never a film screen)
+  || (!/^[a-z][a-z0-9+.-]+:\/\//i.test(p) && /\.(mp3|m4a|m4b|aac|ogg|oga|opus|wav|flac|wma)$/i.test(p));
 /** Music, never a film: also in the moment between two songs (or while a film takes over) when the queue is empty. */
 export const isMusicPath = (p: string | null) => !!p && (musicPaths.has(p) || p.startsWith("ytdl://") || /^https?:\/\/[^/]*googlevideo\.com\//i.test(p) || audioLike(p));
 
@@ -382,10 +387,10 @@ function loadCurrent(preserveIntent = false) {
     setProp("vid", "no");
   }
   // (speed and file loop set for a film don't carry over to music: these hold for this file only)
-  const opts = ["vid=no", "speed=1", "loop-file=no", `pause=${wantsPlayback ? "no" : "yes"}`, ...(c.yt && !ready ? ["ytdl-format=bestaudio/best"] : []),
+  const opts = ["vid=no", `speed=${spokenSpeed(c)}`, "loop-file=no", `pause=${wantsPlayback ? "no" : "yes"}`, ...(c.yt && !ready ? ["ytdl-format=bestaudio/best"] : []),
     ...(ready && d!.ua ? [`user-agent=%${new TextEncoder().encode(d!.ua).length}%${d!.ua}`] : []),
     ...(resume > 0 ? [`start=+${resume}`] : [])];
-  if (ready) musicPaths.add(d!.url);
+  if (ready) markMusicPath(d!.url); // kept: after a reload the stream mpv still plays is not taken for a film
   selectionResume=null;
   mpv("loadfile", ready ? d!.url : c.src, "replace", "-1", opts.join(","));
   // a few seconds in, so finding the next one doesn't slow this one's start
@@ -515,10 +520,10 @@ export function resumeSuspendedMusic() {
   const d = (c.yt||c.server) ? direct.get(c.src) : undefined;
   const ready = !!d && d.exp > Date.now();
   if(c.server&&!ready){wantsPlayback=false;P.paused=true;selectionResume={src:c.src,time:s.time};loadCurrent(true);return;}
-  if (ready) musicPaths.add(d!.url);
+  if (ready) markMusicPath(d!.url); // kept: after a reload the stream mpv still plays is not taken for a film
   directFor = ready ? c.src : null;
   if (c.yt && !ready) { setProp("ytdl-format", "bestaudio/best"); setProp("vid", "no"); }
-  const opts = ["vid=no", "speed=1", "loop-file=no", "pause=yes", ...(c.yt && !ready ? ["ytdl-format=bestaudio/best"] : []),
+  const opts = ["vid=no", `speed=${spokenSpeed(c)}`, "loop-file=no", "pause=yes", ...(c.yt && !ready ? ["ytdl-format=bestaudio/best"] : []),
     ...(ready && d!.ua ? [`user-agent=%${new TextEncoder().encode(d!.ua).length}%${d!.ua}`] : []),
     ...(s.time > 3 && !c.radio ? [`start=${Math.floor(s.time)}`] : [])];
   mpv("loadfile", ready ? d!.url : c.src, "replace", "-1", opts.join(","));
@@ -614,7 +619,7 @@ const NEXT = "M5 5l10 7-10 7zM17 5h2v14h-2z";
 const LYRICS = "M4 6h16M4 12h10M4 18h7M18 14v6M15 17h6";
 
 // ---------- the music pages ----------
-export type MusicView = "home" | "discover" | "library" | "taste" | "radio" | "podcast";
+export type MusicView = "home" | "discover" | "library" | "taste" | "radio" | "podcast" | "downloads";
 // ---------- playlists made in Luna (e.g. from a Spotify list), kept in order ----------
 export type MPlaylist = { id: string; name: string; from?: string; url?: string; cover?: string | null; at: number; items: QItem[] };
 const plSubs = new Set<() => void>();
@@ -680,7 +685,10 @@ const songMenu = (t: Track, play: () => void): MenuEntry[] => [
 export const copy = (u: string) => { navigator.clipboard.writeText(u).catch(() => {}); };
 /** A song's pages: where it plays from (YouTube) and where it came from (Spotify). */
 const songLinks = (t: QItem): MenuEntry[] => [
-  ...(/^https?:/.test(t.src) ? [{ label: tt("YouTube'da aç"), act: () => openUrl(t.src) }, { label: tt("YouTube bağlantısını kopyala"), act: () => copy(t.src) }] : []),
+  // a YouTube song says so; anything else (a podcast site, a page played with "Luna'da oynat") just says "site"
+  ...(/^https?:/.test(t.src) ? (/(^|\.)(youtube\.com|youtu\.be)$/i.test((() => { try { return new URL(t.src).hostname; } catch { return ""; } })())
+    ? [{ label: tt("YouTube'da aç"), act: () => openUrl(t.src) }, { label: tt("YouTube bağlantısını kopyala"), act: () => copy(t.src) }]
+    : [{ label: tt("Sitede aç"), act: () => openUrl(t.src) }, { label: tt("Bağlantıyı kopyala"), act: () => copy(t.src) }]) : []),
   ...(t.page ? [{ label: tt("Spotify'da aç"), act: () => openUrl(t.page!) }, { label: tt("Spotify bağlantısını kopyala"), act: () => copy(t.page!) }] : []),
 ];
 
@@ -731,7 +739,7 @@ export const playedMenu = (q: QItem, onPlay: () => void): MenuEntry[] =>
   songActions(q, onPlay, [{ label: tt("Listeden kaldır"), danger: true, act: () => forgetPlayed(q) }]);
 
 // ---------- podcasts (Apple's free directory to find them; the shows' own RSS feeds to play them) ----------
-export type Show = { feed: string; title: string; author: string; art?: string };
+export type Show = { feed: string; title: string; author: string; art?: string; /** a show read from a site's page: that page, checked again for new episodes */ page?: string };
 export type Episode = { src: string; title: string; date?: number; duration?: number; about?: string };
 export const loadSubs = () => store.json<Show[]>("podcasts", []);
 /** The last episode of each show you listened to (newest first). */
@@ -784,6 +792,19 @@ export async function searchShows(q: string): Promise<Show[]> {
 }
 const durSecs = (d: string) => { const p = d.split(":").map(Number); return p.some(isNaN) ? undefined : p.reduce((n, x) => n * 60 + x, 0); };
 export async function episodes(feed: string): Promise<{ show: Partial<Show>; eps: Episode[] }> {
+  // a show made from pages played with "Luna'da oynat" (no RSS): its episodes are kept here
+  if (feed.startsWith("web:")) {
+    // a show taken from a site's page: the page is read again and its new episodes go on top
+    const page = loadSubs().find((x) => x.feed === feed)?.page;
+    const key = "webPodEps:" + feed;
+    if (page) {
+      const site = await invoke<{ episodes: { url: string; title: string }[] } | null>("site_list", { url: page }).catch(() => null);
+      const old = store.json<Episode[]>(key, []), have = new Set(old.map((e) => e.src));
+      const add = (site?.episodes ?? []).filter((e) => !have.has(e.url)).map((e) => ({ src: e.url, title: e.title, date: Date.now() }));
+      if (add.length) store.set(key, JSON.stringify([...add, ...old].slice(0, 500)));
+    }
+    return { show: {}, eps: store.json<Episode[]>(key, []) };
+  }
   const xml = await invoke<string>("http_text", { url: feed });
   const doc = new DOMParser().parseFromString(xml, "application/xml");
   const ch = doc.getElementsByTagName("channel")[0];
@@ -804,7 +825,9 @@ export async function episodes(feed: string): Promise<{ show: Partial<Show>; eps
 }
 
 export const epItem = (e: Episode, s: { title: string; feed: string }, art?: string | null): QItem =>
-  ({ src: e.src, title: e.title, artist: s.title, album: s.title, cover: art, duration: e.duration, podcast: s.feed, about: e.about, date: e.date });
+  ({ src: e.src, title: e.title, artist: s.title, album: s.title, cover: art, duration: e.duration, podcast: s.feed, about: e.about, date: e.date,
+    // an episode kept from a web page (not a file address) is played through yt-dlp
+    yt: s.feed.startsWith("web:") && !/\.(mp3|m4a|aac|ogg|oga|opus|wav|flac)([?#]|$)/i.test(e.src) || undefined });
 /** An episode from "recently played": the show's episodes are queued from it on (so "Up next" has the rest). */
 export async function playEpisodeInShow(q: QItem) {
   const generation=beginMusicSelection();
@@ -833,6 +856,9 @@ function LikeBtn({ q, big }: { q: QItem; big?: boolean }) {
   );
 }
 
+const BACK10 = "M4 12a8 8 0 1 0 2.4-5.7M4 3v4h4";
+const FWD10 = "M20 12a8 8 0 1 1-2.4-5.7M20 3v4h-4";
+const VIDEO_ICON = "M2.5 7.5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2zM15.5 10.5l6-3.5v10l-6-3.5";
 const THUMB_UP = "M7 10v11H3V10zM7 10l4-8a3 3 0 0 1 3 3v4h6a2 2 0 0 1 2 2.3l-1.4 8A2 2 0 0 1 18.6 21H7";
 const THUMB_DOWN = "M10 15v4a3 3 0 0 0 3 3l4-9V2H5.7a2 2 0 0 0-2 1.7l-1.4 9a2 2 0 0 0 2 2.3zM17 2h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3";
 /** Like and dislike on a song row: shown on hover, or always once set. (Spans, as the row itself is often a button.) */
@@ -961,7 +987,7 @@ export async function openMusicFiles() {
     return { src: p, title: title.trim(), artist: artist.replace(/^\d+[\s.-]*/, "").trim() || undefined };
   }));
 }
-type YtHit = { url: string; title: string; channel: string; duration?: number; thumb?: string };
+type YtHit = { url: string; title: string; channel: string; duration?: number; thumb?: string; list?: string };
 const ytItem = (h: YtHit): QItem => ({ src: h.url, title: h.title, artist: h.channel, cover: h.thumb, duration: h.duration, yt: true });
 /** A YouTube link opened from anywhere plays in the music part, never as a film. */
 export async function playYouTubeLink(url: string): Promise<boolean> {
@@ -1232,7 +1258,7 @@ export function MusicLinkDialog({ onClose, initial }: { onClose: () => void; ini
         const u=new URL(/^https?:/.test(t)?t:"https://"+t);const playlist="https://www.youtube.com/playlist?list="+encodeURIComponent(u.searchParams.get("list")!);
         const hits=await invoke<YtHit[]>("yt_info",{url:playlist});if(stale())return;
         if(!hits.length)throw Error(tt("Bu bağlantıda çalınacak bir şey yok"));
-        setList({source:"YouTube",name:extraText("YouTube listesi","YouTube playlist"),by:hits[0].channel??"",url:playlist,cover:hits[0].thumb,tracks:hits.map(ytItem),total:hits.length});return;
+        setList({source:"YouTube",name:hits[0].list||extraText("YouTube listesi","YouTube playlist"),by:hits[0].channel??"",url:playlist,cover:hits[0].thumb,tracks:hits.map(ytItem),total:hits.length});return;
       }
       if (isYouTube(t)) {
         setBusy(tt("Bağlantı okunuyor…"));
@@ -1265,7 +1291,8 @@ export function MusicLinkDialog({ onClose, initial }: { onClose: () => void; ini
     } catch (e) { if (!stale()) setErr(String(e).replace(/^Error: /, "")); } finally { if (!stale()) setBusy(""); }
   };
   // a link given from outside (a copied link's "İçe aktar") is opened right away
-  useEffect(() => { if (initial) go(); }, []);
+  // a link sent from the add-on that names a list opens the whole list (the user picks songs there)
+  useEffect(() => { if (initial) void go(/[?&]list=/.test(initial) ? "playlist" : undefined); }, []);
   return createPortal(
     <div className="modal-bg" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className={"modal wide mu-link" + (list ? " shifting" : "")}>
@@ -1342,8 +1369,11 @@ export function MusicDock({ mp, switcher }: { mp: MP; switcher?: React.ReactNode
   useEffect(() => { if (c && !c.radio) musicTime = mp.time; }, [Math.floor(mp.time)]);
   const endedFor = useRef<string | null>(null);
   const lastVol = useRef(70);
+  const shared = usePic();
+  useEffect(() => { if (picOn && picOn !== c?.src) setPicOn(null); }, [c?.src]);
+  const picture = !!c?.yt && shared.on === c.src;
   // mpv may report a YouTube song by the media address yt-dlp resolved, not the page link
-  const isNow = (path: string | null) => !!c && !!path && (path === c.src || (!!c.server && path===direct.get(c.src)?.url) || (!!c.yt && /googlevideo\.com/i.test(path)));
+  const isNow = (path: string | null) => !!c && !!path && (path === c.src || (!!c.server && path===direct.get(c.src)?.url) || (!!c.yt && (/googlevideo\.com/i.test(path) || path === direct.get(c.src)?.url)));
   useEffect(() => {
     if (!c || c.radio) return;
     if (mp.eof && isNow(mp.path) && endedFor.current !== c.src + m.index) { endedFor.current = c.src + m.index; nextTrack(true); }
@@ -1353,6 +1383,7 @@ export function MusicDock({ mp, switcher }: { mp: MP; switcher?: React.ReactNode
     if (!c || (!c.podcast&&!c.book) || !isNow(mp.path) || P.loading) return;
     const position=storedAudioPosition(mp.time,mp.duration);
     if(position!==null)store.set((c.podcast?"podPos:":"audioPos:")+c.src,String(position));
+    if(c.podcast&&mp.duration>0&&store.get("podDur:"+c.src)!==String(Math.round(mp.duration)))store.set("podDur:"+c.src,String(Math.round(mp.duration)));
   }, [Math.floor(mp.time / 5), c?.src,mp.path,mp.duration,m.loading]);
   // keys while music plays: Space = pause, Ctrl+→/← = next/previous
   useEffect(() => {
@@ -1385,7 +1416,7 @@ export function MusicDock({ mp, switcher }: { mp: MP; switcher?: React.ReactNode
         <div className="mu-dock-left">
         <button className="mu-dock-now" onClick={() => setView(true)} title={tt("Şimdi çalıyor")}
           onContextMenu={(e) => { if (!c.radio) openMenu(e, songActions(c, () => pauseMusic(false))); }}>
-          <Cover src={c.radio ? c.favicon : c.cover} name={c.album ?? c.title} size={48} radius={8} icon={c.radio ? RADIO_ICON : NOTE} />
+          {picture ? <span className="mu-dock-pic" aria-hidden /> : <Cover src={c.radio ? c.favicon : c.cover} name={c.album ?? c.title} size={48} radius={8} icon={c.radio ? RADIO_ICON : NOTE} />}
           <span className="mu-dock-txt"><b className="ellipsis">{onAir ?? c.title}</b><span className="muted small ellipsis">{m.loading ? <span className="mu-loading-t">{tt("Yükleniyor…")}</span> : c.radio ? (onAir ? c.title : c.artist) : [c.artist, c.album, mp.duration > 0 ? `${fmtTime(mp.time)} / ${fmtTime(mp.duration)}` : ""].filter(Boolean).join(" · ")}</span></span>
         </button>
         {!c.radio && <LikeBtn q={c} />}
@@ -1417,6 +1448,7 @@ export function MusicDock({ mp, switcher }: { mp: MP; switcher?: React.ReactNode
         </div>
       </div>
       {m.view && <NowPlaying mp={mp} onAir={onAir} />}
+      {picture && <PictureFloat c={c} mp={mp} />}
     </>
   );
 }
@@ -1448,11 +1480,223 @@ function Seek({ mp, big }: { mp: MP; big?: boolean }) {
   );
 }
 
+/** A YouTube song's picture, looked up while its sound plays (on the playing screen only), so the video button adds it
+ * beside the sound at once instead of opening the song again. */
+const pictures = new Map<string, Promise<string | null>>();
+function findPicture(c: QItem) {
+  let p = pictures.get(c.src);
+  if (!p) {
+    p = invoke<{ url: string }>("yt_video_stream", { url: c.src.replace(/^ytdl:\/\//, "") }).then((r) => r.url).catch(() => null);
+    pictures.set(c.src, p);
+    // YouTube's addresses stop working after a few hours: found again next time
+    setTimeout(() => { if (pictures.get(c.src) === p) pictures.delete(c.src); }, 3 * 3600e3);
+  }
+  return p;
+}
+/** A YouTube song's picture is on (one at a time) and how far it got. It lives above the playing screen and the mini
+ * player alike, so going to the mini player keeps it playing instead of closing and loading it again. */
+type PicState = "loading" | "ready" | "failed";
+let picOn: string | null = null, picState: PicState = "loading";
+const picSubs = new Set<() => void>();
+const picPing = () => picSubs.forEach((f) => f());
+function setPicOn(src: string | null) { picOn = src; picState = "loading"; picPing(); }
+function setPicState(st: PicState, why?: string) {
+  picState = st; picPing();
+  if (st === "failed") {
+    logDebug("player", "music-video-failed", { why: why ?? "" }, "error");
+    const was = picOn; window.setTimeout(() => { if (picOn === was) setPicOn(null); }, 2200);
+  }
+}
+function usePic() {
+  const [, bump] = useState(0);
+  useEffect(() => { const f = () => bump((n) => n + 1); picSubs.add(f); return () => { picSubs.delete(f); }; }, []);
+  return { on: picOn, state: picState };
+}
+/** The picture plays in the page, muted, kept on the sound's second from the playback clock it is given: the sound in
+ * mpv never waits for it, and it asks mpv nothing (mpv answers one command at a time, a song's loading waits behind). */
+function YtPicture({ c, time, paused, speed }: { c: QItem; time: number; paused: boolean; speed: number }) {
+  const v = useRef<HTMLVideoElement>(null);
+  const [src, setSrc] = useState<string | null>(null);
+  const now = useRef({ time, paused, speed });
+  now.current = { time, paused, speed };
+  useEffect(() => {
+    let live = true;
+    void findPicture(c).then((u) => { if (!live) return; if (u) setSrc(u); else { pictures.delete(c.src); setPicState("failed", "no address"); } });
+    return () => { live = false; };
+  }, [c.src]);
+  const sync = (hard = false) => {
+    const el = v.current, n = now.current;
+    if (!el || el.readyState < 1) return;
+    el.playbackRate = n.speed || 1;
+    if (n.paused) { if (!el.paused) el.pause(); }
+    else if (el.paused && el.readyState >= 2) void el.play().catch(() => {});
+    if (!el.seeking && (hard || Math.abs(el.currentTime - n.time) > 0.8)) el.currentTime = n.time + (n.paused ? 0 : 0.25);
+  };
+  useEffect(() => { sync(); }, [Math.round(time * 2), paused, speed, src]);
+  useEffect(() => {
+    const el = v.current;
+    if (!el || !src) return;
+    let gone = false, shown = false;
+    const show = () => { if (!shown && !gone) { shown = true; setPicState("ready"); } };
+    const meta = () => sync(true);
+    const can = () => sync();
+    const seeked = () => { if (el.paused && el.readyState >= 2) show(); };
+    const bad = () => { pictures.delete(c.src); if (!gone) setPicState("failed", "media " + (el.error?.code ?? "") + " " + (el.error?.message ?? "")); };
+    el.addEventListener("loadedmetadata", meta); el.addEventListener("canplay", can); el.addEventListener("playing", show);
+    el.addEventListener("seeked", seeked); el.addEventListener("error", bad);
+    const limit = window.setTimeout(() => { if (!shown && !gone) setPicState("failed", "timeout " + el.readyState + "/" + el.networkState); }, 25000);
+    return () => {
+      gone = true; clearTimeout(limit);
+      el.removeEventListener("loadedmetadata", meta); el.removeEventListener("canplay", can); el.removeEventListener("playing", show);
+      el.removeEventListener("seeked", seeked); el.removeEventListener("error", bad);
+      el.pause(); el.removeAttribute("src"); el.load();
+    };
+  }, [src]);
+  return <video ref={v} className="mu-np-yt" src={src ?? undefined} muted playsInline preload="auto" aria-hidden />;
+}
+/** Holds the one picture and lays it over the playing screen's video box, or over the mini player's when you leave;
+ * moving between the two it slides and resizes instead of starting again. */
+function PictureFloat({ c, mp }: { c: QItem; mp: MP }) {
+  const box = useRef<HTMLDivElement>(null);
+  const st = usePic().state;
+  useEffect(() => {
+    let frame = 0, last: Element | null = null, moveTill = 0;
+    const tick = () => {
+      const el = box.current;
+      const t = document.querySelector(".mu-np .mu-np-video") ?? document.querySelector(".mu-dock-pic");
+      if (el) {
+        if (t !== last) { if (last && t) { moveTill = performance.now() + 420; el.classList.add("moving"); } last = t; }
+        if (moveTill && performance.now() > moveTill) { moveTill = 0; el.classList.remove("moving"); }
+        if (t) {
+          const r = t.getBoundingClientRect();
+          el.style.cssText = `left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px`;
+          el.classList.toggle("in-dock", t.classList.contains("mu-dock-pic"));
+        } else el.style.cssText = "visibility:hidden";
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  return createPortal(<div ref={box} className={"mu-pic-float " + st}><YtPicture c={c} time={mp.time} paused={mp.paused} speed={spokenSpeed(c)} /></div>,
+    document.querySelector(".root") ?? document.body);
+}
+/** Turning a podcast's picture track on or off can make mpv reopen the stream from the start, or leave the picture a
+ * little behind the sound: it goes back to the second it was at, exactly, so picture and sound start together. */
+async function keepSecond(change: () => Promise<unknown>) {
+  const at = Number(await mpv("get_property", "time-pos").catch(() => 0)) || 0;
+  await change().catch(() => {});
+  await new Promise((r) => setTimeout(r, 350));
+  let now = NaN;
+  for (let i = 0; i < 12 && !Number.isFinite(now); i++) {
+    now = Number(await mpv("get_property", "time-pos").catch(() => NaN));
+    if (!Number.isFinite(now)) await new Promise((r) => setTimeout(r, 150));
+  }
+  const to = Number.isFinite(now) && Math.abs(now - at) <= 3 ? now : at;
+  if (to > 0.5) await mpv("seek", to, "absolute+exact").catch(() => {});
+}
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+/** The speed you chose stays (like YouTube): one for podcasts and audiobooks, one for songs; radio is live, always 1×. */
+const speedKey = (c: { podcast?: unknown; book?: unknown }) => (c.podcast || c.book ? "spokenSpeed" : "songSpeed");
+function spokenSpeed(c: { podcast?: unknown; book?: unknown; radio?: boolean }) {
+  if (c.radio) return 1;
+  const v = Number(store.get(speedKey(c)));
+  return SPEEDS.includes(v) ? v : 1;
+}
+function SpeedButton({ c }: { c: QItem }) {
+  const [v, setV] = useState(() => spokenSpeed(c));
+  useEffect(() => setV(spokenSpeed(c)), [c.src]);
+  const label = (x: number) => (x === 1 ? tt("Normal") : String(x).replace(".", lang() === "tr" ? "," : ".") + "×");
+  return <button className={"chip mu-speed" + (v !== 1 ? " on" : "")} aria-label={tt("Oynatma hızı")} title={tt("Oynatma hızı")}
+    onClick={(e) => openMenu(e, SPEEDS.map((x) => ({ label: (x === v ? "✓ " : "") + label(x), act: () => { setV(x); store.set(speedKey(c), String(x)); void setProp("speed", x).catch(() => {}); } })))}>
+    {v === 1 ? "1×" : label(v)}</button>;
+}
 function NowPlaying({ mp, onAir }: { mp: MP; onAir: string | null }) {
   const m = useMusic();
   const c = m.now!;
   const lastVol = useRef(70);
   const [tab, setTab] = useState<"lyrics" | "queue">("lyrics");
+  // a video podcast: mpv plays only its sound here (vid=no), but it sees the picture track; then a button opens the
+  // episode as a video, from the same second
+  const [hasVideo, setHasVideo] = useState(false);
+  useEffect(() => {
+    setHasVideo(false);
+    if (c.radio || m.loading) return;
+    // a YouTube song always has its video (Luna plays only its sound until you ask for the picture)
+    if (c.yt) { setHasVideo(true); return; }
+    let live = true;
+    void mpv("get_property", "track-list").then((t) => {
+      const tracks = (Array.isArray(t) ? t : []) as { type?: string; image?: boolean; albumart?: boolean }[];
+      if (live) setHasVideo(tracks.some((x) => x.type === "video" && !x.image && !x.albumart));
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [c.src, c.radio, c.yt, m.loading]);
+  // shown in place of the cover, at the size of the left column: the native video sits over this box and follows it
+  const [videoOn, setVideoOn] = useState(false);
+  const videoBox = useRef<HTMLDivElement>(null);
+  // the sound keeps playing; the cover's place says the video is loading until its first picture is there
+  const [pic, setPic] = useState<"loading" | "ready" | "failed">("loading");
+  useEffect(() => { setVideoOn(false); }, [c.src]);
+  useEffect(() => { if (videoOn) setPic("loading"); }, [videoOn]);
+  const shared = usePic();
+  const shown = c.yt ? shared.on === c.src : videoOn;
+  const shownState = c.yt ? shared.state : pic;
+  const toggleVideo = () => { if (c.yt) setPicOn(shown ? null : c.src); else setVideoOn((v) => !v); };
+  const picFailed = () => { setPic("failed"); window.setTimeout(() => setVideoOn(false), 2200); };
+  // a local video (a podcast file): mpv draws it over the box
+  useEffect(() => {
+    if (!videoOn || c.yt) return;
+    let gone = false, last = "", busy = false, again = false, ready = false, growFrom = 0, grow = 0;
+    const GROW_MS = 320;
+    const place = () => {
+      if (gone) return;
+      const el = videoBox.current, d = window.devicePixelRatio || 1, r = el?.getBoundingClientRect();
+      // a window, menu or the assistant over it: the video steps behind the page until it closes
+      const covered = !ready || !r || r.width < 2 || r.height < 2 || document.hidden ||
+        Array.from(document.querySelectorAll(".modal-bg, [role=dialog], .chat-ws, .cm, .global-search, .notify-panel")).some((e) => e.getClientRects().length);
+      let rect: number[] | null = null;
+      if (!covered) {
+        // the picture arrives growing out of the loading card, not popping in
+        const t = growFrom ? Math.min(1, (performance.now() - growFrom) / GROW_MS) : 1;
+        const k = 0.9 + 0.1 * (1 - Math.pow(1 - t, 3));
+        const w = r!.width * k, h = r!.height * k;
+        rect = [r!.x + (r!.width - w) / 2, r!.y + (r!.height - h) / 2, w, h].map((v) => Math.round(v * d));
+      }
+      const key = JSON.stringify(rect);
+      if (key === last) return;
+      if (busy) { again = true; return; }
+      busy = true;
+      void invoke("mpv_dock", { rect }).then(() => { last = key; }).catch(() => {}).finally(() => { busy = false; if (again) { again = false; place(); } });
+    };
+    const growing = () => { if (gone) return; place(); if (performance.now() - growFrom < GROW_MS + 40) grow = requestAnimationFrame(growing); else { growFrom = 0; place(); } };
+    // the words are already on the right: no subtitle burned into the picture
+    void setProp("sub-visibility", false).catch(() => {}); void setProp("secondary-sub-visibility", false).catch(() => {});
+    void keepSecond(() => setProp("vid", "auto"));
+    // ready when mpv draws a picture: then the video takes the card's place
+    const started = performance.now();
+    let asking = false;
+    const watch = window.setInterval(() => {
+      if (asking) return;
+      asking = true;
+      void Promise.all([mpv("get_property", "vo-configured").catch(() => false), mpv("get_property", "video-params").catch(() => null)]).then(([vo, params]) => {
+        if (gone || ready) return;
+        if (vo && params) { ready = true; clearInterval(watch); setPic("ready"); growFrom = performance.now(); grow = requestAnimationFrame(growing); }
+        else if (performance.now() - started > 25000) { clearInterval(watch); if (!gone) picFailed(); }
+      }).finally(() => { asking = false; });
+    }, 400);
+    let frame = 0;
+    const soon = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(place); };
+    const ro = new ResizeObserver(soon);
+    if (videoBox.current) ro.observe(videoBox.current);
+    window.addEventListener("resize", soon); document.addEventListener("scroll", soon, true); document.addEventListener("visibilitychange", soon);
+    const timer = window.setInterval(place, 300);
+    soon();
+    return () => {
+      gone = true; cancelAnimationFrame(frame); cancelAnimationFrame(grow); clearInterval(timer); clearInterval(watch); ro.disconnect();
+      window.removeEventListener("resize", soon); document.removeEventListener("scroll", soon, true); document.removeEventListener("visibilitychange", soon);
+      void invoke("mpv_dock", { rect: null }).catch(() => {}).finally(() => { void keepSecond(() => setProp("vid", "no")); void setProp("sub-visibility", true).catch(() => {}); void setProp("secondary-sub-visibility", true).catch(() => {}); });
+    };
+  }, [videoOn]);
   const [queueQuery,setQueueQuery]=useState("");
   const [ly, setLy] = useState<{ synced: Line[]; plain: string } | null | undefined>(undefined);
   const [epAbout, setEpAbout] = useState<string | null | undefined>(undefined);
@@ -1471,12 +1715,30 @@ function NowPlaying({ mp, onAir }: { mp: MP; onAir: string | null }) {
     lyricsFor(c).then((x) => alive && setLy(x)).catch(() => alive && setLy(null));
     return () => { alive = false; };
   }, [c.src]);
+  // an audiobook or podcast episode: its subtitle shows like synced lyrics
+  const localAudio = (c.book || !!c.podcast) && !c.radio;
+  const subs = useAudioSubs(c.src, !!localAudio);
+  // a subtitle job for this item shows as a pill here; leaving this screen lets its card peek at the top right
+  useEffect(() => {
+    if (!localAudio) return;
+    // subtitle jobs and their notices name the episode, not its (often random) file name
+    if (c.title) store.set("mediaTitle:" + c.src, c.title);
+    if (c.cover) store.set("mediaArt:" + c.src, c.cover);
+    window.dispatchEvent(new CustomEvent("luna-np-screen", { detail: c.src }));
+    return () => { window.dispatchEvent(new CustomEvent("luna-np-screen", { detail: null })); };
+  }, [c.src, localAudio]);
+  const subCues = subs.cues;
+  const [subQ, setSubQ] = useState(""), [subFollow, setSubFollow] = useState(true);
+  useEffect(() => setSubQ(""), [c.src]);
+  const subShown = subCues ? (subQ.trim() ? subCues.map((l, i) => ({ l, i })).filter(({ l }) => fold(l.text).includes(fold(subQ))) : subCues.map((l, i) => ({ l, i }))) : [];
+  const subCur = subCues ? subCues.reduce((n, l, i) => (l.start <= mp.time + 0.25 ? i : n), -1) : -1;
   const cur = ly?.synced.length ? ly.synced.reduce((n, l, i) => (l.t <= mp.time + 0.25 ? i : n), -1) : -1;
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    if (subCues && (!subFollow || subQ.trim())) return;
     const el = box.current?.querySelector(".ly.on") as HTMLElement | null;
     el?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [cur]);
+  }, [cur, subCur, subFollow, subQ]);
   const coverUrl = c.cover ? (/^https?:/.test(c.cover) ? c.cover : convertFileSrc(c.cover)) : c.favicon;
   return createPortal(
     <div className="mu-np" style={{ ["--np-hue" as string]: String(hue(c.album ?? c.title)) }}>
@@ -1485,14 +1747,23 @@ function NowPlaying({ mp, onAir }: { mp: MP; onAir: string | null }) {
         <button className="round" aria-label={tt("Geri")} onClick={() => setView(false)}><Icon d={I.left} size={20} /></button>
         <span className="muted small">{c.radio ? tt("Canlı radyo") : c.podcast ? tt("Podcast · {0}", c.album ?? "") : c.book ? tt("Sesli kitap · {0}", c.album ?? "") : c.album ? tt("Albümden çalıyor · {0}", c.album) : ""}</span>
         <span className="grow" />
+        {subCues && tab === "lyrics" && <div className="mu-sub-tools">
+                  <input value={subQ} onChange={(e) => setSubQ(e.target.value)} placeholder={extraText("Altyazıda ara", "Search subtitle")} aria-label={extraText("Altyazıda ara", "Search subtitle")} />
+                  <label className="look-check small"><input type="checkbox" checked={subFollow} onChange={(e) => setSubFollow(e.target.checked)} />{extraText("Sesi takip et", "Follow audio")}</label>
+                  {subQ.trim() && <small className="muted">{subShown.length} / {subCues.length}</small>}
+                </div>}
         {!c.radio && (
           <div className="seg-row">
-            <button className={"seg sm" + (tab === "lyrics" ? " on" : "")} onClick={() => setTab("lyrics")}>{c.podcast ? tt("Bölüm hakkında") : tt("Sözler")}</button>
-            <button className={"seg sm" + (tab === "queue" ? " on" : "")} onClick={() => setTab("queue")}>{tt("Sıradakiler")}</button>
+            {/* with a subtitle the screen is the subtitle: only "Up next" stays, pressed again it goes back */}
+            {!subCues && <button className={"seg sm" + (tab === "lyrics" ? " on" : "")} onClick={() => setTab("lyrics")}>{c.podcast ? tt("Bölüm hakkında") : tt("Sözler")}</button>}
+            <button className={"seg sm" + (tab === "queue" ? " on" : "")} aria-pressed={tab === "queue"} onClick={() => setTab(subCues && tab === "queue" ? "lyrics" : "queue")}>{tt("Sıradakiler")}</button>
           </div>
         )}
         {!c.radio && !c.podcast && !c.book && <button className="chip mu-np-like" title={tt("Asistan bu şarkıya benzeyen şarkıları bulur; istersen bir listeni onlarla genişletir ya da yeni liste yapar")} onClick={() => askAssistant(likeThisSongs(c.title, c.artist, loadMusicPlaylists().find((p) => p.id === m.from)?.name), tt("“{0}” gibi şarkılar bul", c.title))}>✦ {tt("Bunun gibi şarkılar bul")}</button>}
         {(c.podcast||c.book)&&<button className="chip" onClick={()=>{store.set((c.podcast?"podPos:":"audioPos:")+c.src,"0");loadCurrent();}} title={extraText("Bu bölümdeki dinleme konumunu sıfırla","Reset listening position for this chapter")}>{extraText("Bölümü baştan dinle","Restart this chapter")}</button>}
+        {localAudio && <AudioSubPicker a={subs} src={c.src} title={c.title} />}
+        {(c.podcast||c.book)&&<div className="tracks-anchor note-anchor"><MediaNotebook pop path={c.src} title={c.title} time={mp.time} subtitle="" buttonClass="round"
+          seek={(sec,path)=>{if(path===c.src)void mpv("seek",sec,"absolute");}} /></div>}
         {!c.radio && <MusicSoundButton />}
         <button className="round" aria-label={tt("Asistana sor")} title={tt("Asistana sor")} onClick={openAssistant}>
           <Icon d={I.chat} size={19} />
@@ -1500,12 +1771,18 @@ function NowPlaying({ mp, onAir }: { mp: MP; onAir: string | null }) {
       </div>
       <div className="mu-np-body">
         <div className="mu-np-left">
-          <div className="mu-np-art"><Cover src={c.radio ? c.favicon : c.cover} name={c.album ?? c.title} size="100%" radius={20} icon={c.radio ? RADIO_ICON : NOTE} /></div>
+          {shown ? <div className={"mu-np-video " + shownState} ref={videoBox} role="img" aria-label={tt("Video")}>
+            {c.cover && <img className="mu-np-video-bg" src={c.cover} alt="" />}
+            {shownState !== "ready" && <div className="mu-np-video-wait" role="status">{shownState === "loading" ? <><i className="mu-np-spin" aria-hidden />{tt("Video yükleniyor…")}</> : tt("Video açılamadı")}</div>}
+          </div> : <div className="mu-np-art"><Cover src={c.radio ? c.favicon : c.cover} name={c.album ?? c.title} size="100%" radius={20} icon={c.radio ? RADIO_ICON : NOTE} /></div>}
           <div className="mu-np-title">
             {!c.radio && <span className="mu-np-votes"><LikeBtn q={c} big />
               {!c.podcast && <button className={"mu-ib mu-dis big" + (isDisliked(c.src) ? " on" : "")} aria-pressed={isDisliked(c.src)}
                 aria-label={isDisliked(c.src) ? tt("Beğenmediklerimden çıkar") : tt("Beğenmedim")} title={isDisliked(c.src) ? tt("Beğenmediklerimden çıkar") : tt("Beğenmedim")}
-                onClick={(e) => { if (toggleDislike(c)) askSongRating(c, e.currentTarget); }}><Icon d={THUMB_DOWN} size={20} />{isDisliked(c.src) && songRating(c.src) ? <span className="vote-n">{songRating(c.src)}</span> : null}</button>}</span>}
+                onClick={(e) => { if (toggleDislike(c)) askSongRating(c, e.currentTarget); }}><Icon d={THUMB_DOWN} size={20} />{isDisliked(c.src) && songRating(c.src) ? <span className="vote-n">{songRating(c.src)}</span> : null}</button>}
+              {hasVideo && <button className={"mu-ib mu-dis big mu-np-video-btn" + (shown ? " on" : "")} aria-pressed={shown}
+                aria-label={shown ? tt("Kapağı göster") : tt("Videoyu göster")} title={shown ? tt("Kapağı göster") : tt("Videosu var: kapağın yerinde göster")}
+                onClick={toggleVideo}><Icon d={VIDEO_ICON} size={22} /></button>}</span>}
             <h1>{onAir ?? c.title}</h1>
             <div className="muted">{c.radio ? c.title : [c.artist, c.album].filter(Boolean).join(" · ")}</div>
             {/* a liked song: what made it — the music taste learns from this, apart from films and books */}
@@ -1514,6 +1791,20 @@ function NowPlaying({ mp, onAir }: { mp: MP; onAir: string | null }) {
         </div>
         <div className="mu-np-right" ref={box}>
           {c.radio ? <div className="muted">{tt("Canlı yayında şarkı sözü gösterilmiyor.")}</div>
+            : subCues && tab === "lyrics" ? (
+              <>
+                <div className={"lyrics" + (subs.cues2 && !subQ.trim() ? " dual" : "") + (subs.cues2 && subs.layout === "side" ? " side" : "")}>
+                  {/* two languages: only the line being heard and two on each side, each with its translation under it */}
+                  {(subs.cues2 && !subQ.trim() ? subShown.slice(Math.max(0, subCur - 2), Math.max(0, subCur - 2) + 5) : subShown).map(({ l, i }) => {
+                    const tr = subs.cues2 ? subs.cues2.find((x) => x.start < l.end - 0.1 && x.end > l.start + 0.1)?.text : undefined;
+                    return (
+                      <button key={i} className={"ly" + (i === subCur ? " on" : i < subCur ? " past" : "")} onClick={() => mpv("seek", l.start, "absolute")}>{subs.layout === "side" && subs.cues2 ? <><span>{l.text}</span><span className="ly-tr2">{tr ?? ""}</span></> : <>{l.text}{tr && <small className="ly-tr">{tr}</small>}</>}</button>
+                    );
+                  })}
+                  {!subShown.length && <div className="muted">{extraText("Bu sözcük altyazıda geçmiyor.", "That word isn't in the subtitle.")}</div>}
+                </div>
+              </>
+            )
             : c.book && tab === "lyrics" ? <div className="muted">{tt("Sesli kitap: bölümler “Sıradakiler” sekmesinde.")}</div>
             : c.podcast && tab === "lyrics" ? (
               <div className="pod-about">
@@ -1555,9 +1846,12 @@ function NowPlaying({ mp, onAir }: { mp: MP; onAir: string | null }) {
         {!c.radio && <Seek mp={mp} big />}
         <div className="mu-ctl big">
           {!c.radio && <button className="mu-ib" aria-label={tt("Önceki")} onClick={() => prevTrack(mp.time)}><Icon d={PREV} fill size={22} /></button>}
+          {!c.radio && <button className="mu-ib mu-skip" aria-label={extraText("10 sn geri","Back 10 s")} title={extraText("10 sn geri","Back 10 s")} onClick={() => void mpv("seek", -10, "relative")}><Icon d={BACK10} size={22} /><span aria-hidden>10</span></button>}
           <button className="mu-play big" aria-label={mp.paused ? tt("Oynat") : tt("Duraklat")} onClick={() => toggleMusicPause()}><Icon d={mp.paused ? I.play : I.pause} fill size={24} /></button>
+          {!c.radio && <button className="mu-ib mu-skip" aria-label={extraText("10 sn ileri","Forward 10 s")} title={extraText("10 sn ileri","Forward 10 s")} onClick={() => void mpv("seek", 10, "relative")}><Icon d={FWD10} size={22} /><span aria-hidden>10</span></button>}
           {!c.radio && <button className="mu-ib" aria-label={tt("Sonraki")} onClick={() => nextTrack()}><Icon d={NEXT} fill size={22} /></button>}
           <div className="mu-np-vol">
+            {!c.radio && <SpeedButton c={c} />}
             <button className="mu-ib" aria-label={mp.volume > 0 ? tt("Sesi kapat") : tt("Sesi aç")} title={mp.volume > 0 ? tt("Sesi kapat") : tt("Sesi aç")}
               onClick={() => { if (mp.volume > 0) { lastVol.current = mp.volume; setProp("volume", 0); } else setProp("volume", lastVol.current || 70); }}>
               <Icon d={I.vol} size={18} />{mp.volume === 0 && <span className="mu-mute" aria-hidden />}
@@ -1576,3 +1870,113 @@ export function setSplit_goMusicPage<T extends typeof goMusicPage>(value:T):T{go
 export function setSplit_pendingPl<T extends typeof pendingPl>(value:T):T{pendingPl=value;return value;}
 export function setSplit_openPlaylist<T extends typeof openPlaylist>(value:T):T{openPlaylist=value;return value;}
 export function setSplit_pendingShow<T extends typeof pendingShow>(value:T):T{pendingShow=value;return value;}
+
+/** A song the add-on saved from YouTube ("… [videoId].m4a"): its title and YouTube's own cover picture. */
+export function downloadedSong(path: string): QItem {
+  const name = path.split(/[\\/]/).pop() ?? path;
+  const id = /\[([\w-]{6,20})\]\.[^.]+$/.exec(name)?.[1];
+  const title = name.replace(/\s*\[[^\]]+\]\.[^.]+$/, "").replace(/\.[^.]+$/, "").replace(/^\d{3}\s+/, "").replace(/_/g, " ").trim();
+  return { src: path, title, cover: id ? `https://i.ytimg.com/vi/${id}/mqdefault.jpg` : undefined };
+}
+/** The songs downloaded from the web: everything in the downloads folder's "Luna Müzik" (lists' subfolders too). */
+export async function downloadedSongs(): Promise<QItem[]> {
+  const dir = store.get("dlDir") || await invoke<string | null>("downloads_dir").catch(() => null);
+  if (!dir) return [];
+  const tracks = await invoke<{ path: string }[]>("music_scan", { folders: [dir.replace(/[\\/]$/, "") + "\\Luna Müzik"] }).catch(() => []);
+  return tracks.map((t) => downloadedSong(t.path));
+}
+
+/** YouTube ids of the songs in the downloads folder: a song played from YouTube that is also saved shows the badge too. */
+let dlIds: Set<string> | null = null;
+const dlSubs = new Set<() => void>();
+const ytIdOf = (src: string) => /[?&]v=([\w-]{6,20})|youtu\.be\/([\w-]{6,20})|\[([\w-]{6,20})\]\.[^.\\/]+$/.exec(src)?.slice(1).find(Boolean);
+function loadDlIds() {
+  if (dlIds) return;
+  dlIds = new Set();
+  void downloadedSongs().then((s) => { dlIds = new Set(s.map((q) => ytIdOf(q.src)).filter(Boolean) as string[]); dlSubs.forEach((f) => f()); });
+}
+/** Saved on this computer by Luna (a file in "Luna Müzik", or the YouTube song that file came from). */
+export function isDownloadedSong(q: QItem) {
+  loadDlIds();
+  if (/[\\/]Luna Müzik[\\/]/i.test(q.src)) return true;
+  const id = ytIdOf(q.src);
+  return !!id && !!dlIds?.has(id);
+}
+/** Spotify's green "downloaded" circle, before the small line under a song's title. */
+export function DlBadge({ q }: { q: QItem }) {
+  const [, bump] = useState(0);
+  useEffect(() => { const f = () => bump((n) => n + 1); dlSubs.add(f); return () => { dlSubs.delete(f); }; }, []);
+  if (!isDownloadedSong(q)) return null;
+  return <span className="dl-badge" title={tt("İndirildi")} aria-label={tt("İndirildi")}><svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path d="M8 3.5v9M4.5 9 8 12.5 11.5 9" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg></span>;
+}
+
+// ---------- "Luna'da oynat" from any site: long sound becomes a podcast episode ----------
+/** Sound longer than this is a talk, not a song: it goes to the podcasts. */
+export const PODCAST_MIN_SECS = 600;
+/** Adds an episode to the show named after its channel or site (made on first use), newest first. */
+export function addWebEpisode(showName: string, site: string, e: Episode, art?: string | null): QItem {
+  const name = showName.trim() || site || tt("Web podcastleri");
+  const feed = "web:" + name.toLowerCase().slice(0, 120);
+  const show: Show = { feed, title: name, author: site, art: art ?? undefined };
+  const subs = loadSubs();
+  if (!subs.some((x) => x.feed === feed)) store.set("podcasts", JSON.stringify([show, ...subs]));
+  else if (art && !subs.find((x) => x.feed === feed)?.art) store.set("podcasts", JSON.stringify(subs.map((x) => (x.feed === feed ? { ...x, art } : x))));
+  const key = "webPodEps:" + feed;
+  store.set(key, JSON.stringify([e, ...store.json<Episode[]>(key, []).filter((x) => x.src !== e.src)].slice(0, 500)));
+  changed();
+  return epItem(e, show, art);
+}
+/** Plays a web page's sound: a long one as a podcast episode (its show is made), a short one as a song.
+ *  `page` is played through yt-dlp (it resolves the sound each time); a plain file address plays as it is. */
+export function playWebSound(src: string, o: { title: string; channel: string; site: string; thumb?: string | null; duration?: number | null; viaPage: boolean; podcast?: boolean }) {
+  const long = !!o.podcast || (o.duration ?? 0) >= PODCAST_MIN_SECS;
+  if (long) {
+    const q = addWebEpisode(o.channel, o.site, { src, title: o.title, duration: o.duration ?? undefined, date: Date.now() }, o.thumb);
+    playQueue([{ ...q, yt: o.viaPage || undefined }], 0, false, q.podcast);
+    return "podcast" as const;
+  }
+  playQueue([{ src, title: o.title, artist: o.channel || o.site || undefined, cover: o.thumb ?? undefined, duration: o.duration ?? undefined, yt: o.viaPage || undefined }]);
+  return "music" as const;
+}
+
+/** A whole show from a site's page (Podbee…): every episode goes into the podcasts, and the show opens. */
+export function addWebShow(name: string, site: string, art: string | null | undefined, eps: { url: string; title: string }[], page?: string) {
+  const n = name.trim() || site;
+  // the page lists the newest first; each one added goes on top, so the oldest goes in first
+  for (const e of [...eps].reverse()) addWebEpisode(n, site, { src: e.url, title: e.title }, art);
+  const feed = "web:" + n.toLowerCase().slice(0, 120);
+  // the page is kept so Luna can look for new episodes on it later
+  if (page) store.set("podcasts", JSON.stringify(loadSubs().map((x) => (x.feed === feed ? { ...x, page } : x))));
+  markEpisodesSeen(feed, store.json<Episode[]>("webPodEps:" + feed, []));
+  followPodcast(loadSubs().find((x) => x.feed === feed) ?? { feed, title: n, author: site, art: art ?? undefined, page });
+}
+
+// ---------- new episodes of the shows you follow: a notice (a click plays it) and a "new" mark on the shelf ----------
+export const newEpisodeCount = (feed: string) => Number(store.get("podNew:" + feed) ?? 0) || 0;
+/** The show was opened: what it lists now is not new any more. */
+export function markEpisodesSeen(feed: string, eps: Episode[]) {
+  if (eps.length) store.set("podSeen:" + feed, JSON.stringify(eps.slice(0, 300).map((e) => e.src)));
+  if (newEpisodeCount(feed)) { store.set("podNew:" + feed, "0"); changed(); }
+}
+let checkingPods = false;
+/** Looks at every followed show (RSS and site pages) for episodes not seen before. */
+export async function checkPodcasts() {
+  if (checkingPods) return;
+  checkingPods = true;
+  try {
+    for (const s of loadSubs()) {
+      const eps = (await episodes(s.feed).catch(() => null))?.eps;
+      if (!eps?.length) continue;
+      const seen = store.json<string[] | null>("podSeen:" + s.feed, null);
+      store.set("podSeen:" + s.feed, JSON.stringify(eps.slice(0, 300).map((e) => e.src)));
+      if (!seen) continue; // the first look only learns what is there
+      const fresh = eps.slice(0, 50).filter((e) => !seen.includes(e.src)).slice(0, 5);
+      if (!fresh.length) continue;
+      store.set("podNew:" + s.feed, String(newEpisodeCount(s.feed) + fresh.length));
+      for (const e of [...fresh].reverse())
+        pushNotice({ id: ("pod:" + s.feed + ":" + e.src).slice(0, 800), title: s.title, text: tt("Yeni bölüm: ") + e.title, art: s.art,
+          episode: { feed: s.feed, src: e.src, title: e.title, show: s.title } });
+      changed();
+    }
+  } finally { checkingPods = false; }
+}

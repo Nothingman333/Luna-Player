@@ -32,13 +32,15 @@ export function SubtitleDialog({ path, onAttach, onClose, onWhisper }: {
   const [filter, setFilter] = useState<string>(lang());
 
   const parsed = useMemo(() => parseName(path), [path]);
-  const title = store.json<Record<string, { title?: string; year?: string } | null>>("meta", {});
+  const title = store.json<Record<string, { title?: string; year?: string; id?: number; kind?: string } | null>>("meta", {});
   const metaTitle = title[groupKey(parsed)] ?? undefined;
 
   const [searchTitle,setSearchTitle]=useState(metaTitle?.title ?? parsed.title);
   const [searchedTitle,setSearchedTitle]=useState(metaTitle?.title ?? parsed.title);
   const [manual,setManual]=useState(false);
   const runId = useRef(0);
+  // a text selection dragged out of the dialog ends on the backdrop: only a click that also started there closes
+  const downOnBg = useRef(false);
   const run = (k = key, l = langs, name = searchedTitle, byName = manual) => {
     if (!k) return;
     const my = ++runId.current;
@@ -50,6 +52,7 @@ export function SubtitleDialog({ path, onAttach, onClose, onWhisper }: {
       query: {
         title: name.trim() || metaTitle?.title || parsed.title,
         manual: byName,
+        tmdbId: byName ? undefined : metaTitle?.id, tv: metaTitle?.kind === "tv",
         year: byName ? undefined : parsed.year ?? (metaTitle?.year ? Number(metaTitle.year) : undefined),
         season: byName ? undefined : parsed.season, episode: byName ? undefined : parsed.episode,
       },
@@ -88,7 +91,7 @@ export function SubtitleDialog({ path, onAttach, onClose, onWhisper }: {
   const list = (hits ?? []).filter((h) => effective === "all" || h.language === effective);
 
   return (
-    <div className="modal-bg" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-bg" onMouseDown={(e) => { downOnBg.current = e.target === e.currentTarget; }} onClick={(e) => { if (downOnBg.current && e.target === e.currentTarget) onClose(); downOnBg.current = false; }}>
       <div className="modal wide subdlg" onKeyDown={(e) => e.stopPropagation()}>
         <div className="row-head" style={{ margin: 0 }}>
           <h2>{tt("Altyazı ekle")}</h2>

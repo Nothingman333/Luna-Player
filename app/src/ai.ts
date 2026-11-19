@@ -121,7 +121,10 @@ export async function aiModels(p: AiProvider, key: string, base?: string): Promi
 
 /** One request to the chosen non-Gemini provider, in and out in Gemini's format. Google Search
  *  (a Gemini-only tool) is left out; the caller sees no groundingMetadata and treats it as unsourced. */
-export async function otherAi(body: any, use?: Partial<AiUse> & { provider: AiProvider }): Promise<{ r: any; id: string; noSearch: boolean }> {
+/** Flash mode's choice for the current message (null: the "Thinking" switch decides). */
+let thinkOverride: boolean | null = null;
+export function setThinkOverride(value: boolean | null) { thinkOverride = value; }
+export async function otherAi(body: any, use?: Partial<AiUse> & { provider: AiProvider }, think?: boolean): Promise<{ r: any; id: string; noSearch: boolean }> {
   const p = use?.provider ?? aiProvider();
   const model = use?.model || aiModel(p);
   if (!model) throw new Error(p === "custom" ? "Ayarlar › Hesaplar ve anahtarlar: model adını yaz" : "Model yok");
@@ -134,10 +137,25 @@ export async function otherAi(body: any, use?: Partial<AiUse> & { provider: AiPr
     if (failure) throw new Error(failure);
     return { r: fromAnthropic(raw), id: model, noSearch };
   }
-  const raw = await invoke<any>("llm_post", { kind: "openai", url: endpoint(p, use?.base) + "/chat/completions", key, body: toOpenAiRequest(body, model, p === "custom" ? "custom" : "openai") });
+  const raw = await invoke<any>("llm_post", { kind: "openai", url: endpoint(p, use?.base) + "/chat/completions", key, body: toOpenAiRequest(p === "custom" && (think ?? thinkOverride ?? store.get("aiThink") === "1") ? { ...body, lunaThink: true } : body, model, p === "custom" ? "custom" : "openai") });
   const failure = providerPayloadError(raw);
   if (failure) throw new Error(failure);
-  return { r: fromOpenAi(raw), id: model, noSearch };
+  const r = fromOpenAi(raw);
+  if (p === "custom") cleanLocalAnswer(r, JSON.stringify(body.contents ?? ""));
+  return { r, id: model, noSearch };
+}
+
+/** A local model's answer without stray Chinese / Japanese / Korean characters (unless the conversation itself has them)
+ *  and without Luna's own [ALINTI …] quote markers copied back. */
+const CJK = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff\uff66-\uff9f]+/g;
+function cleanLocalAnswer(r: any, asked: string) {
+  const keepCjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/.test(asked);
+  for (const part of r?.candidates?.[0]?.content?.parts ?? []) {
+    if (typeof part.text !== "string") continue;
+    let t = part.text.replace(/^[ \t]*\[ALINTI(?: SONU)?[^\]\n]*\][ \t]*\n?/gim, "");
+    if (!keepCjk) t = t.replace(CJK, "").replace(/[ \t]{2,}/g, " ").replace(/ ([,.;:!?])/g, "$1");
+    part.text = t.trim();
+  }
 }
 
 // ---------- The AI that reads film reviews ("Worth watching?") ----------
@@ -161,24 +179,34 @@ export function reviewAi(): ReviewAi {
 export const reviewAiName = (r = reviewAi()) => r.use.label + " · " + r.model;
 
 /** One JSON answer from the review AI: the request in Gemini's shape, sent to whichever service is chosen. */
-export async function reviewAiJson(system: string, user: string, r = reviewAi()): Promise<any> {
+export async function reviewAiJson(system: string, user: string, r = reviewAi(), think = true): Promise<any> {
   if (!r.use.key) throw new Error("nokey");
   const body = { systemInstruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts: [{ text: user }] }], generationConfig: { responseMimeType: "application/json", temperature: 0.3 } };
   const res = r.provider === "gemini"
     ? await invoke<any>("gemini", { key: r.use.key, model: r.model, body })
-    : (await otherAi(body, r.use)).r;
+    // a local model's thinking is decided by the analysis (careful for few reviews, quick for many), never by the chat's setting or Flash
+    : (await otherAi(body, r.use, think)).r;
   const text = (res?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? "").join("");
   return extractJsonObject(text);
 }
 
 /** One JSON answer from the assistant's own service (Settings › Accounts), e.g. for the subtitle
  *  studio's translations and word explanations. The request is in Gemini's shape. */
-export async function assistantJson(system: string, user: string, use: AiUse = captureAiUse(), temperature = 0.2): Promise<any> {
+/** How hard the model may think: "" = the provider's default. */
+export type AiEffort = "" | "off" | "low" | "medium" | "high";
+const GEMINI_BUDGET = { off: 0, low: 1024, medium: 4096, high: 12000 } as const;
+export async function assistantJson(system: string, user: string, use: AiUse = captureAiUse(), temperature = 0.2, opts: { effort?: AiEffort; maxTokens?: number } = {}): Promise<any> {
   if (!use.key) throw new Error("nokey");
-  const body = { systemInstruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts: [{ text: user }] }], generationConfig: { responseMimeType: "application/json", temperature } };
+  const effort = opts.effort || "";
+  const gen: any = { responseMimeType: "application/json", temperature };
+  if (opts.maxTokens) gen.maxOutputTokens = opts.maxTokens;
+  // Gemini 2.5: a thinking budget (Pro cannot switch it off: its smallest one)
+  if (effort && use.provider === "gemini") gen.thinkingConfig = { thinkingBudget: effort === "off" && /pro/i.test(use.model) ? 128 : GEMINI_BUDGET[effort] };
+  const body: any = { systemInstruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts: [{ text: user }] }], generationConfig: gen, ...(effort ? { lunaEffort: effort } : {}) };
   const res = use.provider === "gemini"
-    ? await invoke<any>("gemini", { key: use.key, model: use.model, body })
-    : (await otherAi(body, use)).r;
+    ? await invoke<any>("gemini", { key: use.key, model: use.model, body: { ...body, lunaEffort: undefined } })
+    // DeepSeek and other OpenAI-compatible servers only know thinking on/off
+    : (await otherAi(body, use, effort ? effort === "medium" || effort === "high" : undefined)).r;
   const text = (res?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? "").join("");
   return extractJsonObject(text);
 }

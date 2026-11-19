@@ -1,11 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { tt } from "./i18n";
-import { createPlaylist, type Playlist } from "./Taste";
+import { createPlaylist, inPlaylist, loadPlaylists, removeFromPlaylist, type Playlist } from "./Taste";
 
 /** "+ Listeye": only the user's own lists ("Listelerim") and a new one; friends' lists are theirs and are never changed here. */
-export function ListPicker({ lists, onPick, round, btnClass }: { lists: Playlist[]; onPick: (id: string) => Promise<unknown> | void; round?: boolean; btnClass?: string }) {
+export function ListPicker({ lists: given, onPick, round, btnClass, item }: { lists: Playlist[]; onPick: (id: string) => Promise<unknown> | void; round?: boolean; btnClass?: string;
+  /** the film this menu adds: lists that already hold it show a tick and take it out again on a click */ item?: { title: string; year?: string } }) {
   const [open, setOpen] = useState(false);
+  const [ver, setVer] = useState(0);
+  const lists = ver ? loadPlaylists() : given;
   const [q, setQ] = useState("");
   const [naming, setNaming] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -36,13 +39,16 @@ export function ListPicker({ lists, onPick, round, btnClass }: { lists: Playlist
   const needle = q.trim().toLocaleLowerCase();
   const hit = (p: Playlist) => !needle || p.name.toLocaleLowerCase().includes(needle);
   const pick = async (p: Playlist) => {
+    if (item && inPlaylist(p, item.title, item.year)) { removeFromPlaylist(p.id, item.title, item.year); setDone("-" + p.id); setVer((v) => v + 1); setTimeout(() => setDone(null), 900); return; }
     await onPick(p.id);
+    setVer((v) => v + 1);
     setDone(p.id);
     setTimeout(() => { setOpen(false); setDone(null); }, 700);
   };
-  const row = (p: Playlist) => <button key={p.id} role="menuitem" className="lp-item" onClick={() => pick(p)}>
-    <span>{p.name}</span><small>{done === p.id ? "✓ " + tt("Eklendi") : p.items.length}</small>
-  </button>;
+  const row = (p: Playlist) => { const has = !!item && inPlaylist(p, item.title, item.year);
+    return <button key={p.id} role="menuitemcheckbox" aria-checked={has} className={"lp-item" + (has ? " has" : "")} title={has ? tt("Listeden çıkar") : undefined} onClick={() => pick(p)}>
+    <span>{has && <b className="lp-tick" aria-hidden>✓ </b>}{p.name}</span><small>{done === p.id ? "✓ " + tt("Eklendi") : done === "-" + p.id ? tt("Çıkarıldı") : has ? tt("Çıkar") : p.items.length}</small>
+  </button>; };
 
   return <div className="lp" ref={box}>
     {round

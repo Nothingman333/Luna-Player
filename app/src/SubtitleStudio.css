@@ -250,7 +250,7 @@
 /* ---------- the Whisper pill in the player's top bar ---------- */
 .whisper-pill {
   display: inline-flex; align-items: center; gap: 8px; height: 34px; max-width: 340px; padding: 0 14px 0 9px; border-radius: 999px;
-  font-size: 13px; color: var(--text); background: rgba(20, 20, 23, 0.82); border: 1px solid var(--line); backdrop-filter: blur(10px);
+  font-size: 13px; color: var(--text); background: rgba(20, 20, 23, 0.82); border: 1px solid var(--line); backdrop-filter: var(--glass-1);
 }
 .whisper-pill:hover, .whisper-pill:focus-visible { border-color: var(--accent); outline: none; }
 .whisper-pill .ring-bg { fill: none; stroke: #3a3a42; stroke-width: 2.5; }
@@ -310,3 +310,5 @@
 .studio .studio-context { margin-bottom: 10px; }
 .studio .studio-tab { gap: 12px; }
 @media(max-width:620px){.studio .studio-create-grid{grid-template-columns:minmax(0,1fr)}.studio .studio-create-footer{flex-wrap:wrap}.studio .studio-create-footer>span{flex-basis:100%}}
+/* the background subtitle job, shown at the top of every screen */
+.whisper-float { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 85; }

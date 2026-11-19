@@ -331,6 +331,17 @@ pub fn best_subs(paths: &[String], want: &str) -> Vec<Option<String>> {
     }).collect()
 }
 
+/// Every .srt/.vtt that belongs to the audio file `f` (beside it, same name stem), sorted; empty for links and missing files.
+pub fn beside_text_subs(f: &str) -> Vec<String> {
+    let p = Path::new(f);
+    if f.contains("://") || !p.is_file() { return vec![]; }
+    let mut v: Vec<String> = own_subs(p).into_iter()
+        .filter(|s| matches!(s.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).as_deref(), Some("srt" | "vtt")))
+        .map(|s| s.to_string_lossy().into_owned()).collect();
+    v.sort();
+    v
+}
+
 /// How many subtitle files sit next to each video (0 for links and missing files).
 pub fn subs_beside(paths: &[String]) -> Vec<u32> {
     paths.iter().map(|f| {
@@ -416,6 +427,8 @@ pub fn rename(file:&str,new_name:&str)->Result<String,String>{
 /// (a book or a song never does: "Film.pdf" must not take "Film.tr.srt" of "Film.mkv").
 pub fn delete(file: &str) -> Result<u32, String> {
     let p = Path::new(file);
+    // already gone from disk: nothing to move, the caller only forgets it
+    if !p.exists() { return Ok(0); }
     let mut items = vec![p.to_path_buf()];
     if is_video(p) {
         items.extend(own_subs(p));
@@ -495,4 +508,24 @@ mod probe_tests {
         println!("unreachable: {:?} after {:?}", r.err(), t.elapsed());
         assert!(t.elapsed().as_secs() <= 35);
     }
+}
+
+/// Moves a finished download into a folder (made when missing) and returns its new path. A name already taken
+/// there gets " (2)", " (3)"…; across drives it copies, then removes the original.
+pub fn move_into(file: &str, dir: &str) -> Result<String, String> {
+    let src = Path::new(file);
+    if !src.is_file() { return Err("Dosya bulunamadı".into()); }
+    let dir = Path::new(dir);
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    if src.parent().map(|p| p == dir).unwrap_or(false) { return Ok(file.to_string()); }
+    let stem = src.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let ext = src.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    let mut to = dir.join(format!("{stem}{ext}"));
+    let mut n = 2;
+    while to.exists() { to = dir.join(format!("{stem} ({n}){ext}")); n += 1; }
+    if std::fs::rename(src, &to).is_err() {
+        std::fs::copy(src, &to).map_err(|e| e.to_string())?;
+        std::fs::remove_file(src).map_err(|e| e.to_string())?;
+    }
+    Ok(to.to_string_lossy().into_owned())
 }

@@ -1,12 +1,13 @@
+import { formatRemaining } from "./filmCatalogModel";
 import { decodeTextEntities } from "./textEntities";
 // UI-only closure; playback/data helpers remain in Books.tsx.
-import { bookDetails,laterBooks,movePlannedBook,organizeBooks,shelfMap,shelfNames,withBookInfo } from "./BookData";
+import { autoIdentifyBooks,bookDetails,laterBooks,movePlannedBook,organizeBooks,shelfMap,shelfNames,withBookInfo } from "./BookData";
 import { bookFold } from "./bookDataModel";
 import { activeTopic,bookPaths,inBookShelf,libraryView,mergeBookSources,topicCounts,validListedBook,visibleBooks } from "./bookLibraryModel";
 import { BookManager,manageBook } from "./BookManager";
 import "./BookMusic.css";
 import { displayFirstWorking,spineProgress } from "./bookReaderModel";
-import { Ab,abAuthor,abChapters,abCover,abTitle,bkKey,Book,BookNote,BooksView,clearBookRecord,fetchAndOpenBook,forgetBooks,getJson,getPos,libCache,libChanged,librivox,libSubs,loadAbRecent,loadBookFolders,loadBookLibrary,loadBookNotes,loadReadHistory,onScreen,ownedBook,pendingOpen,posKey,rememberAb,requestOpenBook,setSplit_libCache,setSplit_onScreen,setSplit_openHandler,setSplit_pendingOpen,Sitting,wikisourceBooks } from "./Books";
+import { keepBook,keptOpenedBook,Ab,abAuthor,abChapters,abCover,abTitle,bkKey,Book,BookNote,BooksView,clearBookRecord,fetchAndOpenBook,forgetBooks,getJson,getPos,libCache,libChanged,librivox,libSubs,loadAbRecent,loadBookFolders,loadBookLibrary,loadBookNotes,loadReadHistory,onScreen,ownedBook,pendingOpen,posKey,rememberAb,requestOpenBook,setSplit_libCache,setSplit_onScreen,setSplit_openHandler,setSplit_pendingOpen,Sitting,wikisourceBooks } from "./Books";
 import { exportExtra,ExtraModal,extraText } from "./Extras";
 import { QuoteNotebookPanel } from "./QuoteNotebookPanel";
 import { annotationDataWritable,cleanReadingPreferences,mergeReadingSession,readingDayKey } from "./readingExperienceModel";
@@ -34,7 +35,7 @@ import { cleanProfile,filmKey } from "./filmReviewModel";
 import { lang,tt } from "./i18n";
 import { store } from "./library";
 import { collectEntry } from "./Mine";
-import { beginMusicSelection,isMusicSelectionCurrent,MiniMusic,playQueue,useMusic } from "./Music";
+import { addWebEpisode,beginMusicSelection,isMusicSelectionCurrent,MiniMusic,playQueue,useMusic,type Episode } from "./Music";
 import { convertFileSrc,invoke } from "./nativeCore";
 import { addSource,fetchFeed,gutenbergBooks,gutenbergPopular,gutenbergSearch,kindOf,loadSources,OEntry,OFeed,saveSources,searchUrl,Source,SourceHelp } from "./Opds";
 import { attachTts,loadVoices,setRate,setSleep,setTtsMuted,setTtsVolume,setVoice,Sleep,takeHeard,TTS_CSS,ttsNoted,ttsPause,ttsSkip,ttsStart,ttsStop,ttsToggle,useTts,Voice,voiceChoices } from "./ReadAloud";
@@ -70,6 +71,11 @@ function useBookLibrary() {
     window.addEventListener("luna-rescan", f);
     return () => window.removeEventListener("luna-rescan", f);
   }, []);
+  // a book added from the reader ("Kitaplığa ekle") shows in the library at once
+  const [, keptChanged] = useState(0);
+  useEffect(() => { const f = () => keptChanged((n) => n + 1); window.addEventListener("luna-book-kept", f); return () => window.removeEventListener("luna-book-kept", f); }, []);
+  // a downloaded book's folder ("Luna Kitap") was added from outside
+  useEffect(() => { const f = () => setFoldersState(loadBookFolders()); window.addEventListener("luna-book-folders", f); return () => window.removeEventListener("luna-book-folders", f); }, []);
   const sig = folders.join("|");
   useEffect(() => {
     // (a scan cancelled by an early return never reaches its own finally: "scanning" is switched off here too)
@@ -86,8 +92,12 @@ function useBookLibrary() {
       .finally(() => alive && setScanning(false));
     return () => { alive = false; };
   }, [sig, tick]);
+  // new books are identified in the background (name, cover, description)
+  useEffect(() => { if (books?.length) void autoIdentifyBooks(books.map(withBookInfo)); }, [books]);
   const setFolders = (f: string[]) => { store.set("bookFolders", JSON.stringify(f)); setFoldersState(f); };
-  return { folders, setFolders, books:books?.map(withBookInfo)??null, scanning, scanError, rescan: () => setTick((n) => n + 1) };
+  // books opened one by one ("Dosya aç", outside the book folders) belong to the library too
+  const opened = books ? mergeBookSources<Book>(store.json("bookOpened", {})).filter((o) => !books.some((x) => x.path === o.path) && keptOpenedBook(o.path)) : [];
+  return { folders, setFolders, books:books?[...books,...opened].map(withBookInfo):null, scanning, scanError, rescan: () => setTick((n) => n + 1) };
 }
 type Lib = ReturnType<typeof useBookLibrary>;
 export function BookLinkDialog({ onClose }: { onClose: () => void }) {
@@ -179,7 +189,7 @@ const ASK = "✦  ";
 const bookAsks = (b: { title: string; author: string }): [string, string][] => {
   const who = b.author ? ` (${b.author})` : "";
   return [
-    [tt("Ayrıntılı inceleme"), tt("“{0}”{1} kitabı hakkında ayrıntılı bir inceleme yaz. Şunları ayrı başlıklarla ver: 1) internetteki inceleme ve yorumların ortak görüşü (Goodreads, 1000Kitap, gazete ve dergi incelemeleri); 2) bu kitap üzerine öne çıkan YouTube inceleme videoları; 3) makaleler ve akademik yorumlar; 4) büyük düşünürlerin ve eleştirmenlerin bu kitap hakkındaki çıkarımları (kim ne demiş, hangi açıdan bakmış); 5) kitabın neden önemli olduğu ve kimlere hitap ettiği. Her bilginin kaynağını bağlantısıyla göster; olay örgüsünün sonunu verme, spoiler gerekiyorsa önce uyar.", b.title, who)],
+    [tt("Ayrıntılı inceleme"), tt("“{0}”{1} kitabı hakkında ayrıntılı bir inceleme yaz. Şunları ayrı başlıklarla ver: 1) internetteki inceleme ve yorumların ortak görüşü (Goodreads, 1000Kitap, gazete ve dergi incelemeleri); 2) bu kitap üzerine öne çıkan YouTube inceleme videoları; 3) makaleler ve akademik yorumlar; 4) büyük düşünürlerin ve eleştirmenlerin bu kitap hakkındaki çıkarımları (kim ne demiş, nasıl yorumlamış); 5) kitabın neden önemli olduğu ve kimlere hitap ettiği. Her bilginin kaynağını bağlantısıyla göster; olay örgüsünün sonunu verme, spoiler gerekiyorsa önce uyar.", b.title, who)],
     [tt("Bu kitap ne hakkında?"), tt("“{0}”{1} kitabı ne hakkında? Spoiler vermeden anlat", b.title, who)],
     [tt("Bu kitabın filmi ya da dizisi var mı?"), tt("“{0}”{1} kitabının filmi ya da dizisi var mı?", b.title, who)],
     [tt("Buna benzer kitaplar"), tt("“{0}”{1} kitabına benzer kitaplar öner; kitaplığımda olanları önce söyle", b.title, who)],
@@ -242,6 +252,7 @@ function showBook(v: typeof onScreen) {
 export function BooksPage({ view, setView, query }: { view: BooksView; setView: (v: BooksView) => void; query: string }) {
   const lib = useBookLibrary();
   const [reading, setReading] = useState<Book | null>(null);
+  useEffect(()=>{document.body.classList.toggle("luna-reading",!!reading);return()=>document.body.classList.remove("luna-reading");},[reading]);
   const [detail, setDetail] = useState<Book | null>(null);
   const [manager,setManager]=useState<{path?:string;tab:"metadata"|"shelves"}|null>(null);
   useEffect(()=>{const show=(e:Event)=>setManager((e as CustomEvent).detail||{tab:"metadata"});window.addEventListener("luna-book-manage",show);return()=>window.removeEventListener("luna-book-manage",show);},[]);
@@ -250,7 +261,11 @@ export function BooksPage({ view, setView, query }: { view: BooksView; setView: 
     const d = await open({ directory: true, multiple: false });
     if (typeof d === "string" && !lib.folders.includes(d)) lib.setFolders([...lib.folders, d]);
   };
-  const openBook = (b: Book) => requestOpenBook(b);
+  const openBook = (b: Book) => {
+    // an audiobook file: listened to, not opened in the reader
+    if (/\.(mp3|m4a|m4b|aac|flac|ogg|opus|wav)$/i.test(b.path)) { const q = addWebEpisode(tt("Sesli kitaplar"), "", { src: b.path, title: b.title }); playQueue([{ ...q, cover: b.cover || q.cover, artist: b.author || q.artist }], 0, false, q.podcast); return; }
+    requestOpenBook(b);
+  };
   useEffect(() => {
     setSplit_openHandler(setReading);
     if (pendingOpen) { setReading(pendingOpen); setSplit_pendingOpen(null); }
@@ -289,6 +304,7 @@ function BooksHome({ lib, onOpen, onDetail, onAddFolder, onFetch, go }: {
   const cur = recent.find((b) => (getPos(b.path)?.pct ?? 0) < 0.99);
   const pos = cur ? getPos(cur.path) : null;
   const rest = (lib.books ?? []).filter((b) => b !== cur);
+  const myAb = useMyAudiobooks();
   const notesAll = loadBookNotes();
   const known = mergeBookSources<Book>(lib.books,opened);
   const doneShelf = known.filter(isFinishedBook).slice(0, 14);
@@ -326,9 +342,10 @@ function BooksHome({ lib, onOpen, onDetail, onAddFolder, onFetch, go }: {
           <div className="bk-grid">{abRecent.map((a) => <AbCard key={a.identifier} a={a} />)}</div>
         </section>
       )}
-      {rest.length > 0 && (
+      {(rest.length > 0 || myAb.length > 0) && (
         <section className="row"><div className="row-head"><h2>{tt("Kitaplığım")}</h2><button className="chip" onClick={() => go("library")}>{tt("Tümü")}</button></div>
-          <div className="bk-grid">{rest.slice(0, 14).map((b) => <BookCard key={b.path} b={b} onOpen={() => onDetail(b)} onRead={() => onOpen(b)} />)}</div>
+          <div className="bk-grid">{rest.slice(0, 14).map((b) => <BookCard key={b.path} b={b} onOpen={() => onDetail(b)} onRead={() => onOpen(b)} />)}
+            {myAb.map((e) => <LocalAbCard key={e.src} e={e} onOpen={onDetail} />)}</div>
         </section>
       )}
       {likedShelf.length > 0 && (
@@ -683,6 +700,80 @@ function AbRow({ title, q, more }: { title: string; q: string; more?: () => void
   );
 }
 
+/** Audiobooks from this computer (and downloaded ones): added with a button, kept as the "Sesli kitaplar" show. */
+const myAbKey = () => "webPodEps:web:" + tt("Sesli kitaplar").toLowerCase().slice(0, 120);
+function useMyAudiobooks() {
+  const [l, setL] = useState<Episode[]>(() => store.json<Episode[]>(myAbKey(), []));
+  useEffect(() => { const f = () => setL(store.json<Episode[]>(myAbKey(), [])); window.addEventListener("luna-my-ab", f); return () => window.removeEventListener("luna-my-ab", f); }, []);
+  return l;
+}
+/** Like films: how much is left to listen ("1 sa 20 dk kaldı"), or new / finished. */
+function abLeft(src: string) {
+  const pos = Number(store.get("podPos:" + src) || 0), dur = Number(store.get("podDur:" + src) || 0);
+  if (!dur || pos < 5) return tt("yeni");
+  if (dur - pos < 30) return tt("bitti");
+  return tt("{0} kaldı", formatRemaining(dur - pos, tt("sa"), tt("dk")));
+}
+function forgetAb(src: string) {
+  store.set(myAbKey(), JSON.stringify(store.json<Episode[]>(myAbKey(), []).filter((x) => x.src !== src)));
+  window.dispatchEvent(new Event("luna-my-ab"));
+}
+/** An audiobook file from this computer, shown among the books. */
+function LocalAbCard({ e, onOpen }: { e: Episode; onOpen?: (b: Book) => void }) {
+  const m = useMusic();
+  const on = m.now?.src === e.src;
+  // the same recognition as books: title/author/cover looked up from the file name
+  const [, bump] = useState(0);
+  useEffect(() => { const f = () => bump((x) => x + 1); window.addEventListener("luna-book-data", f); return () => window.removeEventListener("luna-book-data", f); }, []);
+  const raw = { path: e.src, title: e.title, author: "", kind: "epub" } as Book;
+  useEffect(() => {
+    const d = bookDetails(e.src); if (d && (d.locked || d.cover)) return;
+    // one more try for files looked up before audiobook names were understood
+    if (!store.get("abIdRetry:" + e.src)) { store.set("abIdRetry:" + e.src, "1"); store.set("bookAutoTried", JSON.stringify(store.json<string[]>("bookAutoTried", []).filter((x) => x !== e.src))); }
+    const t = setTimeout(() => void autoIdentifyBooks([raw]), 1500); return () => clearTimeout(t);
+  }, [e.src]);
+  const b = withBookInfo(raw);
+  const play = () => { const q = addWebEpisode(tt("Sesli kitaplar"), "", e); playQueue([{ ...q, cover: b.cover || q.cover, artist: b.author || q.artist }], 0, false, q.podcast); };
+  return (
+    <button className={"bk-card ab" + (on ? " on" : "")} onClick={play} title={tt("Dinle") + " · " + e.src}
+      onContextMenu={(ev) => openMenu(ev, [
+        { label: tt("Dinle"), act: play },
+        { label: extraText("Kapak ve bilgileri düzenle…", "Find/edit cover and information…"), act: () => manageBook(e.src) },
+        collectEntry({ kind: "book", title: b.title, by: b.author, path: e.src, cover: b.cover }),
+        "sep",
+        { label: tt("Kitaplıktan çıkar"), act: () => forgetAb(e.src) },
+        { label: tt("Dosyayı sil (Geri Dönüşüm Kutusu'na)"), danger: true, act: () => {
+          if (!confirm(tt("“{0}” diskten silinip Geri Dönüşüm Kutusu'na taşınsın mı?", b.title))) return;
+          invoke<number>("delete_file", { path: e.src }).then(() => forgetAb(e.src), (er) => alert(tt("Silinemedi: {0}", String(er)))); } },
+      ])}>
+      <span className="bk-cov-wrap"><BookCover src={b.cover} title={b.title} author={b.author} w="100%" />
+        <span className="ab-badge" aria-label={tt("Sesli kitap")} title={tt("Sesli kitap")}><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15v-3a8 8 0 0 1 16 0v3" /><rect x="3" y="14" width="4" height="7" rx="1.6" /><rect x="17" y="14" width="4" height="7" rx="1.6" /></svg></span>
+        {onOpen && <span className="info-btn" role="button" tabIndex={0} aria-label={tt("Detaylar")} title={tt("Detaylar")}
+          onClick={(ev) => { ev.stopPropagation(); onOpen(b); }}
+          onKeyDown={(ev) => { if (ev.key === "Enter") { ev.stopPropagation(); onOpen(b); } }}>i</span>}</span>
+      <b className="bk-t">{b.title}</b>
+      <span className="muted small ellipsis">{b.author || tt("Sesli kitap")}</span>
+      <span className="bk-prog muted small">{abLeft(e.src)}</span>
+    </button>
+  );
+}
+function MyAudiobooks() {
+  const show = tt("Sesli kitaplar");
+  const list = useMyAudiobooks();
+  const add = async () => {
+    const picked = await open({ multiple: true, filters: [{ name: tt("Sesli kitap"), extensions: ["mp3", "m4a", "m4b", "aac", "flac", "ogg", "opus", "wav"] }] });
+    const files = (Array.isArray(picked) ? picked : picked ? [picked] : []) as string[];
+    for (const f of files) addWebEpisode(show, "", { src: f, title: (f.split(/[\\/]/).pop() ?? f).replace(/\.[^.]+$/, "").replace(/_/g, " "), date: Date.now() });
+    window.dispatchEvent(new Event("luna-my-ab"));
+  };
+  return (
+    <section className="row">
+      <div className="row-head"><h2>{tt("Benim sesli kitaplarım")}</h2><button className="chip" onClick={() => void add()}>{tt("Bilgisayardan ekle")}</button></div>
+      {list.length ? <div className="bk-grid">{list.map((e) => <LocalAbCard key={e.src} e={e} />)}</div>
+        : <p className="muted small">{tt("Bilgisayarındaki sesli kitap dosyalarını (MP3, M4B…) ekle; indirdiklerin de burada görünür.")}</p>}
+    </section>
+  );
+}
 function Audiobooks({ query }: { query: string }) {
   const [q, setQ] = useState(query);
   const [deb, setDeb] = useState(query);
@@ -694,6 +785,7 @@ function Audiobooks({ query }: { query: string }) {
         <label className="search mu-radio-search"><Icon d={I.search} size={18} />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tt("Sesli kitap ya da yazar ara (LibriVox)")} /></label>
       </div>
+      <MyAudiobooks />
       <AbRow key={deb} title={deb.trim() ? tt("“{0}” için sesli kitaplar", deb.trim()) : tt("En çok dinlenenler")} q={deb} />
       <div className="muted small mu-credit">{tt("Kaynak: LibriVox gönüllüleri, archive.org üzerinden (kamu malı, ücretsiz). Çoğu İngilizce.")}</div>
     </>
@@ -793,6 +885,8 @@ function BookDetail({ b, onClose, onRead }: { b: Book; onClose: () => void; onRe
   const bookProfile = cleanProfile(store.json(profileKeyOf("book"), null));
   const [lookupInfo, setInfo] = useState<OlInfo | null | undefined>(undefined);
   const saved=bookDetails(b.path);
+  // a book opened on its own (not from a library folder) is identified when its page opens
+  useEffect(()=>{const d=bookDetails(b.path);if(!d||(!d.locked&&!d.cover))void autoIdentifyBooks([b]);},[b.path]);
   const info:OlInfo|null|undefined=saved?{...lookupInfo,about:saved.description,subjects:saved.subjects,cover:saved.cover,url:saved.url,year:saved.year}:lookupInfo;
   const [, bump] = useState(0);
   useEffect(()=>{const update=()=>bump(n=>n+1);window.addEventListener("film-decision-changed",update);return()=>window.removeEventListener("film-decision-changed",update);},[]);
@@ -822,6 +916,7 @@ function BookDetail({ b, onClose, onRead }: { b: Book; onClose: () => void; onRe
   const [more, setMore] = useState(false);
   const cover = b.cover ?? info?.cover;
   const going = !!pos && pos.pct > 0.01 && pos.pct < 0.99;
+  const isAb = /\.(mp3|m4a|m4b|aac|flac|ogg|opus|wav)$/i.test(b.path);
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === "Escape"&&!document.querySelector(".extra-modal,.bk-page .la-opts")) { e.stopPropagation(); onClose(); } };
     window.addEventListener("keydown", k, true);
@@ -838,16 +933,16 @@ function BookDetail({ b, onClose, onRead }: { b: Book; onClose: () => void; onRe
           <div className="brand">{tt("Kitaplar")}</div>
         </header>
         <div className="d-body bk-d-body">
-          <div className="bk-d-cov" onContextMenu={(e) => openMenu(e, [{ label: tt("Oku"), act: onRead }, "sep", ...deleteEntries(b, onClose)])}><BookCover src={cover} title={b.title} author={b.author} w={170} /></div>
+          <div className="bk-d-cov" onContextMenu={(e) => openMenu(e, [{ label: isAb ? tt("Dinle") : tt("Oku"), act: onRead }, "sep", ...deleteEntries(b, onClose)])}><BookCover src={cover} title={b.title} author={b.author} w={170} /></div>
           <div className="bk-d-main">
-            <span className="eyebrow">{b.kind === "cbz" ? tt("ÇİZGİ ROMAN") : tt("KİTAP")}</span>
+            <span className="eyebrow">{isAb ? tt("SESLİ KİTAP") : b.kind === "cbz" ? tt("ÇİZGİ ROMAN") : tt("KİTAP")}</span>
             <h1>{b.title}</h1>
             <div className="d-meta">
               {info?.rating ? <button className="rating" title={tt("Open Library'de aç")} onClick={() => info.url && openUrl(info.url)}>★ {String(info.rating).replace(".", lang() === "tr" ? "," : ".")}</button> : null}
               {b.author && <span>{b.author}</span>}
               {info?.year ? <span>{info.year}</span> : null}
               {info?.pages ? <span>{tt("{0} sayfa", info.pages)}</span> : null}
-              <span>{b.kind.toUpperCase()}</span>
+              <span>{isAb ? (b.path.split(".").pop() ?? "").toUpperCase() : b.kind.toUpperCase()}</span>
             </div>
             {pos && <div className="bk-d-prog"><div className="bk-bar"><div style={{ width: pos.pct * 100 + "%" }} /></div><span className="muted small">{pos.pct >= 0.99 ? tt("bitti") : pctText(pos.pct)}{pos.chapter ? " · " + pos.chapter : ""}</span></div>}
             {info?.about ? (
@@ -857,7 +952,7 @@ function BookDetail({ b, onClose, onRead }: { b: Book; onClose: () => void; onRe
               </div>
             ) : info === undefined ? <p className="overview muted">{tt("Bilgiler getiriliyor…")}</p> : null}
             <div className="hero-actions">
-              <button className="primary light" onClick={onRead}><Icon d={I.play} fill size={18} /> {going ? tt("Okumaya devam et") : tt("Oku")}</button>
+              <button className="primary light" onClick={onRead}><Icon d={I.play} fill size={18} /> {isAb ? tt("Dinle") : going ? tt("Okumaya devam et") : tt("Oku")}</button>
               <span className="act-sep" aria-hidden="true" />
               <button className={"act" + (note?.read ? " on good" : "")} data-tip={note?.read ? tt("Okumadım") : tt("Okudum")} aria-label={tt("Okudum")}
                 onClick={() => set({ read: note?.read ? undefined : Date.now() })}><Icon d={I.check} size={20} /></button>
@@ -871,6 +966,11 @@ function BookDetail({ b, onClose, onRead }: { b: Book; onClose: () => void; onRe
               </span>
               <button className="act" data-tip={extraText("Kitap defterim","My book notebook")} aria-label={extraText("Kitap defterim","My book notebook")} onClick={()=>setNotebookOpen(true)}><Icon d="M5 3h14v18l-7-4-7 4Z M9 7h6 M9 10h6" size={20}/></button>
               <button className="act" data-tip={tt("Asistana sor")} aria-label={tt("Asistana sor")} onClick={() => { onClose(); askAssistant(bookAsks(b)[0][1]); }}><Icon d={I.chat} size={20} /></button>
+              {/* like the films: what edits the book sits behind ⋯, not in the topic chips */}
+              <button className="act" data-tip={tt("Diğer")} aria-label={tt("Diğer")} onClick={(e) => openMenu(e, [
+                { label: extraText("Düzenle: ad, yazar, kapak…", "Edit: title, author, cover…"), act: () => manageBook(b.path) },
+                { label: extraText("Raflara / okunacaklara ekle…", "Shelves / reading plan…"), act: () => manageBook(b.path, "shelves") },
+              ])}><Icon d={I.more} size={20} /></button>
               {info?.url && <button className="act" data-tip={tt("Open Library'de aç")} aria-label="Open Library" onClick={() => openUrl(info.url!)}><Icon d="M14 3h7v7M21 3l-9 9M5 5h5M5 5v14h14v-5" size={18} /></button>}
             </div>
             {rate && (
@@ -885,7 +985,7 @@ function BookDetail({ b, onClose, onRead }: { b: Book; onClose: () => void; onRe
           </div>
         </div>
       </section>
-      <div className="book-topic-filters"><button className="chip" onClick={()=>manageBook(b.path)}>{extraText("Kapak / bilgileri bul ve düzenle","Find or edit cover / information")}</button><button className="chip" onClick={()=>manageBook(b.path,"shelves")}>{extraText("Raflara / okunacaklara ekle","Shelves / reading plan")}</button>{bookAsks(b).map(([label,question])=><button key={label} className="chip book-ask-shortcut" title={tt("Asistana sor")} onClick={()=>{onClose();askAssistant(question);}}>✦ {label}</button>)}<small className="muted">{(shelfMap()[b.path]||[]).join(" · ")}</small></div>
+      <div className="book-topic-filters">{bookAsks(b).map(([label,question])=><button key={label} className="chip book-ask-shortcut" title={tt("Asistana sor")} onClick={()=>{onClose();askAssistant(question);}}>✦ {label}</button>)}<small className="muted">{(shelfMap()[b.path]||[]).join(" · ")}</small></div>
       {info?.subjects.length ? (
         <section className="row"><h2>{tt("Konular")}</h2><div className="bk-d-subs">{info.subjects.map((s) => <span key={s} className="chip">{s}</span>)}</div></section>
       ) : null}
@@ -1029,8 +1129,11 @@ type Sel = { cfi: string; text: string; x: number; y: number; bottom?: number; i
 type Side = "" | "toc" | "marks" | "notes" | "find";
 
 function Reader({ b, onClose }: { b: Book; onClose: () => void }) {
+  // a book opened from outside the book folders: offered to the library instead of joining it by itself
+  const [kept, setKept] = useState(() => { const norm = (x: string) => x.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase(); const p = norm(b.path); return keptOpenedBook(b.path) || loadBookFolders().some((f) => p.startsWith(norm(f) + "/")); });
   const [set, setSetState] = useState<ReaderSet>(loadSet);
   const setSet = (p: Partial<ReaderSet>) => setSetState((s) => { const n = cleanReadingPreferences({ ...s, ...p }); store.set("readerSet", JSON.stringify(n)); return n; });
+  useEffect(() => { const f = (e: Event) => { const d = (e as CustomEvent).detail; if (d === "text_bigger") setSetState((x) => { const n = cleanReadingPreferences({ ...x, size: Math.min(500, x.size + (x.size >= 200 ? 25 : 10)) }); store.set("readerSet", JSON.stringify(n)); return n; }); else if (d === "text_smaller") setSetState((x) => { const n = cleanReadingPreferences({ ...x, size: Math.max(70, x.size - (x.size > 200 ? 25 : 10)) }); store.set("readerSet", JSON.stringify(n)); return n; }); }; window.addEventListener("luna-book-control", f); return () => window.removeEventListener("luna-book-control", f); }, []);
   const [panel, setPanelNow] = useState<"" | "aa" | "music" | "side">("");
   // a popup that closes fades out instead of vanishing
   const [leaving, setLeaving] = useState<"" | "aa" | "music">("");
@@ -1135,6 +1238,8 @@ function Reader({ b, onClose }: { b: Book; onClose: () => void }) {
           onClick={() => (panel === "side" ? setPanel("") : openSide(side === "find" ? (toc.length ? "toc" : "marks") : side))}><Icon d="M4 6h16M4 12h16M4 18h10" size={16} /></button>
         <div className="bk-r-title"><b className="ellipsis">{b.title}</b><span className="muted small ellipsis">{[b.author, here.chapter].filter(Boolean).join(" · ")}</span></div>
         <span className="grow" />
+        {!kept && <button className="chip glass-ib bk-add-lib" title={extraText("Bu kitabı kitaplığına ekler", "Adds this book to your library")} onClick={() => { keepBook(b.path); setKept(true); }}>
+          <Icon d="M12 5v14M5 12h14" size={14} /> {extraText("Kitaplığa ekle", "Add to library")}</button>}
         {textBook(b.kind) && <button className={"rb" + (tts.active ? " on" : "")} aria-label={tt("Sesli oku")} title={tt("Sesli oku (Ctrl+Shift+U)")}
           onClick={() => { closeAll(); if (tts.active) ttsStop(); else ttsStart(); }}>
           <Icon d="M4 9v6h4l5 4V5L8 9H4zM16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" size={16} /></button>}
@@ -1234,9 +1339,9 @@ function Reader({ b, onClose }: { b: Book; onClose: () => void }) {
         <div className={"bk-panel bk-aa" + (panel !== "aa" ? " -out" : "")}>
           {b.kind !== "cbz" && (
             <div className="bk-size2">
-              <button aria-label={b.kind === "pdf" ? tt("Uzaklaştır") : tt("Yazıyı küçült")} onClick={() => setSet({ size: Math.max(70, set.size - 10) })}><span style={{ fontSize: 15 }}>A</span></button>
+              <button aria-label={b.kind === "pdf" ? tt("Uzaklaştır") : tt("Yazıyı küçült")} onClick={() => setSet({ size: Math.max(70, set.size - (set.size > 200 ? 25 : 10)) })}><span style={{ fontSize: 15 }}>A</span></button>
               <b>{pctText(set.size / 100)}</b>
-              <button aria-label={b.kind === "pdf" ? tt("Yakınlaştır") : tt("Yazıyı büyüt")} onClick={() => setSet({ size: Math.min(200, set.size + 10) })}><span style={{ fontSize: 22 }}>A</span></button>
+              <button aria-label={b.kind === "pdf" ? tt("Yakınlaştır") : tt("Yazıyı büyüt")} onClick={() => setSet({ size: Math.min(500, set.size + (set.size >= 200 ? 25 : 10)) })}><span style={{ fontSize: 22 }}>A</span></button>
             </div>
           )}
           <div className="bk-themes2">
@@ -1465,12 +1570,25 @@ function EpubView({ b, set, nav, onState, onToc, onErr, hl, onSelect, onTap, onM
         const book = await createFoliateBook(buf, b.path.split(/[\\/]/).pop()??"book.epub");
         bookRef.current = book;
         const s0 = setRef.current;
+        let wheelAt = 0;
+        const wheelTurn = (e: WheelEvent) => {
+          if (setRef.current.scroll || e.ctrlKey || Math.abs(e.deltaY) < Math.abs(e.deltaX) || Math.abs(e.deltaY) < 4) return;
+          e.preventDefault();
+          const now = Date.now(); if (now - wheelAt < 350) return; wheelAt = now;
+          void (e.deltaY > 0 ? rendition.next() : rendition.prev());
+        };
+        box.current.addEventListener("wheel", wheelTurn, { passive: false });
+        // the assistant (voice too): turn the page
+        const voicePage = (e: Event) => { if (bookRef.current !== book) { window.removeEventListener("luna-book-control", voicePage); return; } const d = (e as CustomEvent).detail; if (d === "page_next") void rendition.next(); else if (d === "page_prev") void rendition.prev(); };
+        window.addEventListener("luna-book-control", voicePage);
         const rendition = book.renderTo(box.current, { width: "100%", height: "100%", flow: s0.scroll ? "scrolled-doc" : "paginated", spread: s0.spread && !s0.scroll ? "auto" : "none", allowScriptedContent: false } as any);
         r.current = rendition;
         rendition.hooks.content.register((contents: any) => {
           const st = contents.document.createElement("style");
           st.textContent = FONT_CSS + TTS_CSS;
           contents.document.head.appendChild(st);
+          // the mouse wheel turns pages (paginated only; a scrolled book scrolls); one turn per gesture
+          contents.document.addEventListener("wheel", (e: WheelEvent) => wheelTurn(e), { passive: false });
         });
         applyTheme(rendition, setRef.current);
         rendition.on("keydown", (e: KeyboardEvent) => window.dispatchEvent(new KeyboardEvent("keydown", { key: e.key, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey })));
@@ -1604,6 +1722,8 @@ function applyTheme(rendition: any, set: ReaderSet) {
     body: { background: `${t.bg} !important`, color: `${t.fg} !important`, "font-family": READER_FONT[set.font] + " !important",
       "line-height": `${LINE[set.spacing]} !important`, "font-weight": set.bold ? "600 !important" : "inherit" },
     "p, li, blockquote": { "font-family": "inherit !important", "line-height": "inherit !important" },
+    // a book that fixes its text in px (12px…) would ignore Luna's size and only get wider line gaps: the text follows Luna
+    "p, li, blockquote, div, span, a, em, i, b, strong, font": { "font-size": "inherit !important" },
     a: { color: `${t.fg} !important` },
     img: { "max-width": "100% !important" },
     "::selection": { background: "rgba(167,139,250,.35)" },

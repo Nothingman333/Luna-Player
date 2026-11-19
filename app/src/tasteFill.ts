@@ -1,4 +1,5 @@
-import { store } from "./library";
+import { invoke } from "@tauri-apps/api/core";
+import { searchTmdb, store, tmdbKeywords } from "./library";
 import { matchKey } from "./textMatch";
 import { reviewAi, reviewAiJson } from "./ai";
 import { ASPECTS } from "./filmReviewModel";
@@ -8,7 +9,7 @@ import { TASTE_NAMES, loadAspectScores, rememberAspects } from "./reviewTaste";
 /**
  * Books and songs get the same six-topic scores films get from Luna Analiz, so a plain like or dislike
  * teaches the taste map too. The AI only looks each work up once (genre, maker, the six topics out of 10),
- * twenty works in one short message; films are not touched.
+ * twenty works in one short message; films have their own small analysis below.
  */
 type Kind = "book" | "music";
 type Work = { title: string; by?: string; year?: string };
@@ -37,7 +38,7 @@ function pending(kind: Kind): Work[] {
 export const tasteGenres = (kind: Kind) => store.json<Record<string, string[]>>("tasteGenres:" + kind, {});
 
 let busy = false;
-let active:{kind:Kind;count:number}|null=null;
+let active:{kind:Kind|"film";count:number}|null=null;
 export const tasteFillState=()=>active;
 const notifyFill=()=>window.dispatchEvent(new Event("luna-taste-measuring"));
 /** Scores the works that have none yet: at most two messages of twenty per run, at most every ten minutes. */
@@ -75,4 +76,57 @@ export async function fillTaste(kind: Kind, force = false): Promise<number> {
     if (done) window.dispatchEvent(new CustomEvent("film-decision-changed", { detail: { key: "fill:" + kind, origin: "fill" } }));
   }
   return done;
+}
+
+/** Liked films rarely have a full Luna Analiz, so each gets a small one of its own: its TMDB overview and keywords and
+ *  some Letterboxd reviews, one film at a time. Only themes and feelings come out, kept apart: the film's score,
+ *  its details page and the "for you" score never see them. */
+export type FilmThemes = { themes: string[]; emotions: string[] };
+export const filmThemeKey = (title: string, year?: string) => matchKey(title) + "|" + (year ?? "").slice(0, 4);
+export const filmThemes = () => store.json<Record<string, FilmThemes>>("filmThemeAnalysis", {});
+const triedFilmThemes = () => store.json<string[]>("filmThemeAnalysisTried", []);
+export const filmThemesPending = (works: { title: string; year?: string }[]) => {
+  const have = filmThemes(), tried = new Set(triedFilmThemes());
+  return works.filter((w) => { const k = filmThemeKey(w.title, w.year); return !have[k] && !tried.has(k); });
+};
+async function filmSources(w: { title: string; year?: string }) {
+  const year = Number(w.year?.slice(0, 4)) || undefined;
+  const hit = (await searchTmdb(w.title, "movie", year).catch(() => []))[0] ?? (await searchTmdb(w.title, "tv", year).catch(() => []))[0];
+  const keywords = hit ? await tmdbKeywords(hit.kind, hit.id).catch(() => [] as string[]) : [];
+  const page = await invoke<{ reviews: { text?: string }[] }>("letterboxd_reviews", { tmdb: hit?.id ?? null, tv: hit?.kind === "tv", title: w.title, year: year ? String(year) : null, count: 15, spoilers: false }).catch(() => null);
+  return { overview: hit?.overview ?? "", keywords: keywords.slice(0, 20), reviews: (page?.reviews ?? []).map((r) => (r.text ?? "").trim().slice(0, 400)).filter(Boolean) };
+}
+export type ThemeScan = { done: number; error?: "busy" | "nokey" | "failed" };
+/** `again` (the Tara button) also retries titles that came back empty before. */
+export async function fillFilmThemes(works: { title: string; year?: string }[], again = false): Promise<ThemeScan> {
+  if (busy) return { done: 0, error: "busy" };
+  if (!reviewAi().use.key) return { done: 0, error: "nokey" };
+  const have0 = filmThemes();
+  const todo = again ? works.filter((w) => !have0[filmThemeKey(w.title, w.year)]) : filmThemesPending(works);
+  if (!todo.length) return { done: 0 };
+  busy = true;active={kind:"film",count:todo.length};notifyFill();
+  let done = 0, misses = 0;
+  const labels = (x: unknown) => Array.isArray(x) ? x.map((t) => String(t).trim().slice(0, 40)).filter(Boolean).slice(0, 4) : [];
+  const sys = 'Sen bir sinema uzmanısın. Verilen özet, anahtar kelime ve izleyici yorumlarından filmin temalarını ve bıraktığı duyguları çıkar: en fazla 4 tema, 3 duygu. Etiketler Türkçe, 1-2 kelime ve genel olsun (tema: Yas, Aile, Yozlaşma; duygu: Hüzün, Merak, Umut); filme özel isim kullanma. Duygu bir his olmalı, konu değil. Bilgi yetmiyorsa boş liste ver, uydurma. Yalnız JSON yaz: {"themes":[],"emotions":[]}';
+  try {
+    for (const [i, w] of todo.entries()) {
+      active={kind:"film",count:todo.length-i};notifyFill();
+      const src = await filmSources(w);
+      const user = [`Film: ${w.title}${w.year ? ` (${w.year.slice(0, 4)})` : ""}`, src.overview && `Özet: ${src.overview}`, src.keywords.length ? `Anahtar kelimeler: ${src.keywords.join(", ")}` : "", src.reviews.length ? `Yorumlar:\n${src.reviews.join("\n---\n")}` : ""].filter(Boolean).join("\n\n");
+      const r = await reviewAiJson(sys, user).catch((e) => { console.warn("film themes failed", e); return null; });
+      if (!r) { if (++misses >= 3) break; continue; }
+      misses = 0;
+      const key = filmThemeKey(w.title, w.year);
+      store.set("filmThemeAnalysisTried", JSON.stringify([...triedFilmThemes(), key].slice(-2000)));
+      const row = { themes: labels(r.themes), emotions: labels(r.emotions) };
+      if (row.themes.length || row.emotions.length) {
+        store.set("filmThemeAnalysis", JSON.stringify({ ...filmThemes(), [key]: row }));
+        done++;
+        window.dispatchEvent(new CustomEvent("film-decision-changed", { detail: { key: "fill:film", origin: "fill" } }));
+      }
+    }
+  } finally {
+    busy = false;active=null;notifyFill();
+  }
+  return misses >= 3 || (misses && !done) ? { done, error: "failed" } : { done };
 }

@@ -1,0 +1,46 @@
+/* The bell next to Settings: a popover in the style of Discover's filter menu. */
+.notify-anchor{position:relative;flex:none}
+.notify-btn{position:relative}
+.notify-badge{position:absolute;top:4px;right:4px;min-width:17px;height:17px;padding:0 4px;box-sizing:border-box;border-radius:99px;background:var(--accent);color:#111;font-size:10.5px;font-weight:700;line-height:17px;text-align:center;pointer-events:none}
+.notify-panel{position:absolute;top:calc(100% + 10px);right:0;width:min(400px,calc(100vw - 32px));max-height:min(560px,calc(100vh - 120px));display:flex;flex-direction:column;gap:10px;padding:14px;box-sizing:border-box;background:color-mix(in srgb,var(--panel) 96%,transparent);border:1px solid var(--line);border-radius:20px;backdrop-filter: var(--glass-2);box-shadow:0 18px 50px #0007;z-index:60}
+.notify-tabs{display:flex;gap:6px}
+.notify-tabs .seg{flex:1}
+.notify-list{display:flex;flex-direction:column;gap:2px;overflow-y:auto;min-height:0}
+.notify-empty{margin:8px 6px;color:var(--muted);font-size:13px;line-height:1.55}
+.notify-row,.notify-open{display:flex;align-items:center;gap:12px;width:100%;padding:8px;border:0;border-radius:12px;background:none;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.notify-row:has(.notify-open){padding:0 8px 0 0;cursor:default}
+.notify-row:hover,.notify-row:has(.notify-open:hover){background:rgba(255,255,255,.05)}
+.notify-row img,.notify-nop{flex:none;width:38px;height:57px;border-radius:6px;object-fit:cover;background:rgba(255,255,255,.06)}
+.notify-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.notify-t b{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.notify-t small{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.notify-row.unread .notify-t small{color:var(--accent)}
+.notify-row.unread::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:-6px}
+.notify-ago{flex:none;font-size:11px;color:var(--muted)}
+.notify-clear{align-self:center;margin-top:8px}
+.notify-row button:focus-visible,.notify-row:focus-visible,.notify-tabs .seg:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* notice pop-ups: top right, over pages and dialogs */
+.notice-toasts { position: fixed; top: 64px; right: 20px; z-index: 10050; display: flex; flex-direction: column; gap: 8px; width: 340px; max-width: calc(100vw - 32px); }
+.notice-toast {
+  position: relative; display: flex; border-radius: 14px; border: 1px solid #ffffff24; overflow: hidden;
+  background: color-mix(in srgb, var(--panel, #1c1a1f) 78%, transparent);
+  backdrop-filter: var(--glass-1); -webkit-backdrop-filter: var(--glass-1);
+  box-shadow: var(--glass-light), 0 14px 40px #0008;
+  animation: notice-in .25s var(--ease, ease) both;
+}
+@keyframes notice-in { from { opacity: 0; transform: translateX(18px); } }
+@media (prefers-reduced-motion: reduce) { .notice-toast { animation: none; } }
+.notice-toast-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 10px 34px 10px 10px; background: none; border: 0; color: inherit; text-align: left; cursor: pointer; }
+.notice-toast-main:hover { background: #ffffff0d; }
+.notice-toast-main img { width: 36px; height: 54px; object-fit: cover; border-radius: 6px; flex: none; }
+.notice-toast-ic { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 10px; background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+.notice-toast-x { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; border: 0; background: none; color: inherit; opacity: .6; cursor: pointer; }
+.notice-toast-x:hover { opacity: 1; background: #ffffff14; }
+
+.notify-row img.sq,.notice-toast img.sq{height:38px;width:38px;object-fit:cover}
+.notify-nop{display:grid;place-items:center;color:var(--muted)}
+.notify-live{cursor:default}
+.notify-bar{display:block;height:3px;margin-top:3px;border-radius:2px;background:rgba(255,255,255,.08);overflow:hidden}
+.notify-bar i{display:block;height:100%;background:var(--accent);transition:width .4s ease}
+.notify-row .notify-t small{white-space:normal;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}

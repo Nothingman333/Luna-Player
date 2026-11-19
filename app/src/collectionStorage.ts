@@ -6,8 +6,9 @@ export function readCollections(raw: string | null): { collections: Collection[]
   if (!Array.isArray(data)) return { collections: [], damaged: true };
   let damaged = false;
   const record = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
-  const item = (x: unknown): x is CItem => record(x) && ["film", "music", "book"].includes(x.kind as string) && typeof x.title === "string"
+  const item = (x: unknown): x is CItem => record(x) && ["film", "music", "book", "web"].includes(x.kind as string) && typeof x.title === "string"
     && ["by", "year", "note", "path", "src", "url", "from"].every(k => x[k] === undefined || typeof x[k] === "string")
+    && (x.webType === undefined || ["page", "link", "text", "image", "video", "audio"].includes(x.webType as string))
     && (x.cover === undefined || x.cover === null || typeof x.cover === "string");
   const ids = new Set<string>(), collections: Collection[] = [];
   for (const c of data) {

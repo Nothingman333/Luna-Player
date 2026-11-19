@@ -11,7 +11,8 @@ import { cleanRun } from "./reviewAnalysis";
 import type { AiRun } from "./reviewAnalysis";
 import { TASTE_NAMES, effectiveWeight, suggestedWeights, learnedTaste, loadAspectScores, profileKeyOf } from "./reviewTaste";
 import type { TasteKind } from "./reviewTaste";
-import { fillTaste, musicTitle, pendingCount, tasteGenres, tasteFillState } from "./tasteFill";
+import { themeGroups } from "./tasteThemes";
+import { fillFilmThemes, fillTaste, filmThemeKey, filmThemes, filmThemesPending, musicTitle, pendingCount, tasteGenres, tasteFillState } from "./tasteFill";
 
 /** "Zevk profilin": the taste diary laid out the way the shared review-analysis app's profile and
  *  dashboard do it — a taste map of the six topics, where each weight comes from, what is avoided,
@@ -73,6 +74,8 @@ type Extra = { keys?:Record<string,string>; title: string; sub: string; rows: [s
 const norm = (t: string) => matchKey(t).replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 /** a run's title: saved with it, or (older runs) read from its Letterboxd address */
 const titleOf = (run: AiRun) => run.title || (run.url.split("/").filter(Boolean).pop() ?? "").replace(/-\d{4}$/, "").replace(/-/g, " ");
+const isLiked = (e: Diary) => e.vote === "like" || (!e.vote && (e.rating ?? 0) >= 6);
+const runOf = (all: { run: AiRun }[], e: Diary) => all.find(({ run }) => titleOf(run) && norm(titleOf(run)) === norm(e.title) && (!e.year || !run.year || run.year === e.year.slice(0, 4)));
 const n1 = (x: number) => x.toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 function Radar({ values }: { values: Record<Aspect, number> }) {
@@ -84,7 +87,7 @@ function Radar({ values }: { values: Record<Aspect, number> }) {
     {[1, 0.66, 0.33].map((v) => <polygon key={v} points={ring(v)} className="tp-ring" />)}
     {ASPECTS.map((_, i) => { const [x, y] = pt(i, 1); return <line key={i} x1={cx} y1={cy} x2={x} y2={y} className="tp-ring" />; })}
     <polygon points={poly} className="tp-shape" />
-    {ASPECTS.map((a, i) => { const [x, y] = pt(i, Math.min(1, values[a] / 2.2)); return <circle key={a} cx={x} cy={y} r={3.5} className="tp-dot" />; })}
+    {ASPECTS.map((a, i) => { const [x, y] = pt(i, Math.min(1, values[a] / 5)); return <circle key={a} cx={x} cy={y} r={3.5} className="tp-dot" />; })}
     {ASPECTS.map((a, i) => { const [x, y] = pt(i, 1.2); return <text key={a} x={x} y={y + 4} textAnchor="middle" className="tp-label">{name(a)}</text>; })}
   </svg>;
 }
@@ -100,6 +103,10 @@ export function TasteProfile({ onOpen, onWorkOpen, kind = "film", page, sync }: 
   const [libraryCovers,setLibraryCovers]=useState<MQ[]>([]);
   useEffect(()=>{if(kind!=="music"||stat===null)return;let active=true;void import("./Music").then(m=>m.loadMusicLibrary()).then(rows=>{if(active)setLibraryCovers(rows.map(t=>({src:t.path,title:t.title,artist:t.artist,cover:t.cover})));}).catch(()=>{});return()=>{active=false;};},[kind,stat]);
   useEffect(()=>setRecordQuery(""),[stat,artistFilter]);
+  const [allWorks,setAllWorks]=useState(false);
+  const [scanMsg,setScanMsg]=useState("");
+  const [running,setRunning]=useState(()=>tasteFillState());
+  useEffect(()=>{const update=()=>setRunning(tasteFillState());window.addEventListener("luna-taste-measuring",update);return()=>window.removeEventListener("luna-taste-measuring",update);},[]);
   const [syncMsg, setSyncMsg] = useState("");
   const openKey = kind === "film" ? "tasteProfileOpen" : "tasteProfileOpen:" + kind;
   const [open, setOpen] = useState(() => store.get(openKey) !== "0");
@@ -121,6 +128,17 @@ export function TasteProfile({ onOpen, onWorkOpen, kind = "film", page, sync }: 
     setMeasuring(n);
     void fillTaste(kind, true).finally(() => setMeasuring(0));
   }, [page, kind]);
+  // liked films with no analysis get their themes from one short message, once
+  const filmRuns = kind === "film" ? runs() : [];
+  const themeTodo = kind === "film" && (open || page) ? sourceOf("film").diary.filter((e) => isLiked(e) && !runOf(filmRuns, e)) : [];
+  const themeTodoCount = filmThemesPending(themeTodo).length;
+  useEffect(() => { if (themeTodoCount) void fillFilmThemes(themeTodo); }, [themeTodoCount]);
+  const scan = async () => {
+    setScanMsg("");
+    const r = await fillFilmThemes(themeTodo, true);
+    if (r.error === "busy") return;
+    setScanMsg(r.error === "nokey" ? tt("Analiz için bir yapay zekâ anahtarı seçili değil.") : r.error === "failed" ? tt("Tarama yapılamadı. Yapay zekâ cevap vermedi.") : tt("{0} film tarandı.", r.done));
+  };
   NAMES = TASTE_NAMES[kind];
   const { diary, all, extra } = sourceOf(kind);
   const music = kind === "music";
@@ -133,8 +151,8 @@ export function TasteProfile({ onOpen, onWorkOpen, kind = "film", page, sync }: 
   const recordCover=(key:string)=>{const q=coverItems.find(q=>!!q.cover&&(key.startsWith("artist:")?q.artist===key.slice(7):musicTitle(q)===key));return q?.cover?(/^(https?:|data:|asset:|blob:)/.test(q.cover)?q.cover:convertFileSrc(q.cover)):undefined;};
   const eff = Object.fromEntries(ASPECTS.map((a) => [a, effectiveWeight(a, profile, learned)])) as Record<Aspect, number>;
 
-  const liked = diary.filter((e) => e.vote === "like" || (e.rating ?? 0) >= 7);
-  const disliked = diary.filter((e) => e.vote === "dislike" || (e.rating && e.rating <= 4));
+  const liked = diary.filter(isLiked);
+  const disliked = diary.filter((e) => e.vote === "dislike" || (!e.vote && e.rating && e.rating <= 5));
   const rated = diary.filter((e) => e.rating);
   const avg = rated.length ? rated.reduce((s, e) => s + e.rating!, 0) / rated.length : null;
   const month = Date.now() - 30 * 86400000;
@@ -156,15 +174,22 @@ export function TasteProfile({ onOpen, onWorkOpen, kind = "film", page, sync }: 
     .filter(([, v]) => v != null).sort((a, b) => b[1]! - a[1]!) as [Aspect, number][];
 
   // trends across every analysis: praised / criticised topics, themes, feelings
-  const praised: Record<string, number> = {}, criticised: Record<string, number> = {}, themes: Record<string, number> = {}, feels: Record<string, number> = {};
+  const praised: Record<string, number> = {}, criticised: Record<string, number> = {};
   for (const { run } of all) {
     for (const a of run.verdict.aspects) {
       if (a.tone === "positive") praised[name(a.aspect)] = (praised[name(a.aspect)] ?? 0) + 1;
       if (a.tone === "negative" || a.tone === "mixed") criticised[name(a.aspect)] = (criticised[name(a.aspect)] ?? 0) + (a.tone === "negative" ? 1 : 0.5);
     }
-    for (const t of run.verdict.themes) themes[t.name] = (themes[t.name] ?? 0) + t.share / 100;
-    for (const t of run.verdict.emotions) feels[t.name] = (feels[t.name] ?? 0) + t.share / 100;
   }
+  const known = filmThemes();
+  const likedThemes = liked.flatMap((e) => {
+    const weight = e.rating ? e.rating / 10 : 0.7, hit = runOf(all, e), own = kind === "film" ? known[filmThemeKey(e.title, e.year)] : undefined;
+    const even = (names: string[]) => names.map((name) => ({ name, share: 100 / names.length }));
+    return hit ? [{ title: e.title, weight, themes: hit.run.verdict.themes, emotions: hit.run.verdict.emotions }]
+      : own ? [{ title: e.title, weight, themes: even(own.themes), emotions: even(own.emotions) }] : [];
+  });
+  const themes = themeGroups(likedThemes.map((x) => ({ ...x, labels: x.themes })), 8);
+  const feels = themeGroups(likedThemes.map((x) => ({ ...x, labels: x.emotions })), 6).filter((f) => !themes.some((t) => t.name === f.name));
   const top = (o: Record<string, number>, k = 6) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, k);
 
   // the user's ratings against Luna Analiz / the community, where both exist
@@ -208,7 +233,7 @@ export function TasteProfile({ onOpen, onWorkOpen, kind = "film", page, sync }: 
         <button className="tp-stat-button" onClick={()=>{setArtistFilter("");setStat(8);}}><b>{avg != null ? n1(avg) : "–"}</b><span>{tt("puan ortalaman")}</span></button>
         <button className="tp-stat-button" onClick={()=>{setArtistFilter("");setStat(9);}}><b>{all.length}</b><span>{kind === "book" ? tt("analiz edilen kitap") : tt("analiz edilen eser")}</span></button>
         <button className="tp-stat-button" onClick={()=>{setArtistFilter("");setStat(10);}}><b>{reviewsRead}</b><span>{kind === "book" ? tt("okunan inceleme") : tt("okunan yorum")}</span></button>
-        <button className="tp-stat-button" onClick={()=>{setArtistFilter("");setStat(11);}}><b>{diary.filter((e) => (e.watched ?? 0) > month).length + all.filter((x) => x.run.at > month).length}</b><span>{tt("son 30 günde hareket")}</span></button>
+        <button className="tp-stat-button" onClick={()=>{setArtistFilter("");setStat(11);}}><b>{new Set([...diary.filter((e) => (e.watched ?? 0) > month).map((e) => norm(e.title)), ...all.filter((x) => x.run.at > month).map((x) => norm(titleOf(x.run)))]).size}</b><span>{tt("son 30 günde hareket")}</span></button>
       </div>}
 
       <div className="tp-grid">
@@ -245,11 +270,13 @@ export function TasteProfile({ onOpen, onWorkOpen, kind = "film", page, sync }: 
         </div>}
       </div>
 
-      {all.length >= 2 && <div className="tp-grid">
-        {top(praised).length > 0 && <div className="tp-card"><h3>{tt("En çok övülen")}</h3><p className="muted small">{tt("{0} analizde yorumcuların övdüğü konular", all.length)}</p><Bars rows={top(praised)} max={top(praised)[0][1]} tone="good" /></div>}
-        {top(criticised).length > 0 && <div className="tp-card"><h3>{tt("En çok eleştirilen")}</h3><p className="muted small">{tt("{0} analizde yorumcuların eleştirdiği konular", all.length)}</p><Bars rows={top(criticised).map(([l, v]) => [l, v, n1(v)])} max={top(criticised)[0][1]} tone="bad" /></div>}
-        {top(themes).length > 0 && <div className="tp-card"><h3>{tt("Temalar ve duygular")}</h3><p className="muted small">{kind === "book" ? tt("Okuduklarında en sık geçenler") : tt("İzlediklerinde en sık geçenler")}</p>
-          <div className="tp-tags">{top(themes, 8).map(([t]) => <i key={t}>{t}</i>)}{top(feels, 6).map(([t]) => <i key={t} className="-feel">{t}</i>)}</div></div>}
+      {(all.length >= 2 || likedThemes.length > 0 || (kind === "film" && liked.length > 0)) && <div className="tp-grid">
+        {all.length >= 2 && top(praised).length > 0 && <div className="tp-card"><h3>{tt("Yorumcuların en çok övdüğü")}</h3><p className="muted small">{tt("{0} analizde yorumcuların övdüğü konular", all.length)}</p><Bars rows={top(praised)} max={top(praised)[0][1]} tone="good" /></div>}
+        {all.length >= 2 && top(criticised).length > 0 && <div className="tp-card"><h3>{tt("Yorumcuların en çok eleştirdiği")}</h3><p className="muted small">{tt("{0} analizde yorumcuların eleştirdiği konular", all.length)}</p><Bars rows={top(criticised).map(([l, v]) => [l, v, n1(v)])} max={top(criticised)[0][1]} tone="bad" /></div>}
+        {(likedThemes.length > 0 || (kind === "film" && liked.length > 0)) && <div className="tp-card"><h3>{tt("Temalar ve")} <span className="tp-feel-word">{tt("duygular")}</span></h3><p className="muted small">{kind === "book" ? tt("Beğendiğin en az iki kitapta geçenler") : tt("Beğendiğin en az iki filmde geçenler")}</p>
+          {themes.length + feels.length ? <div className="tp-tags">{themes.map((t) => <i key={t.name} title={t.works.join(", ")}>{t.name}</i>)}{feels.map((t) => <i key={t.name} className="-feel" title={t.works.join(", ")}>{t.name}</i>)}</div>
+            : <p className="small">{tt("Henüz tekrar eden bir tema yok. Beğendiğin eserleri analiz ettikçe burası dolar.")}</p>}
+          {kind === "film" && <div className="tp-scan">{running ? <span className="muted small" role="status"><span className="spinner" aria-hidden="true" /> {tt("{0} eser taranıyor…", running.count)}</span> : scanMsg && <span className="muted small" role="status">{scanMsg}</span>}<button className="chip" disabled={!!running} onClick={scan}>{running ? tt("Taranıyor…") : tt("Tara")}</button></div>}</div>}
       </div>}
 
       {(avoided.length > 0 || gaps.length > 0) && <div className="tp-grid">
@@ -261,7 +288,7 @@ export function TasteProfile({ onOpen, onWorkOpen, kind = "film", page, sync }: 
           <div className="tp-tags">{gaps.map((a) => <i key={a}>{name(a)}</i>)}</div></div>}
       </div>}
 
-      {onWorkOpen && diary.length > 0 && <div className="tp-card -wide"><h3>{tt("Eserlerin")}</h3><div className="tp-work-list">{[...new Map(diary.map(work=>[work.key??work.title,work])).values()].slice(0,40).map(work=><button key={work.key??work.title} onClick={()=>onWorkOpen(work.key??work.title,work.title)}><b className="ellipsis">{work.title}</b><small>{work.rating ? work.rating+"/10" : work.vote === "like" ? tt("Beğendin") : work.vote === "dislike" ? tt("Beğenmedin") : tt("Ayrıntılar")}</small><span aria-hidden>↗</span></button>)}</div></div>}
+      {onWorkOpen && diary.length > 0 && <div className="tp-card -wide"><h3>{tt("Eserlerin")}</h3><div className="tp-work-list">{[...new Map(diary.map(work=>[work.key??work.title,work])).values()].sort((a,b)=>(b.watched??0)-(a.watched??0)).slice(0,allWorks?undefined:40).map(work=><button key={work.key??work.title} onClick={()=>onWorkOpen(work.key??work.title,work.title)}><b className="ellipsis">{work.title}</b><small>{work.rating ? work.rating+"/10" : work.vote === "like" ? tt("Beğendin") : work.vote === "dislike" ? tt("Beğenmedin") : tt("Ayrıntılar")}</small><span aria-hidden>↗</span></button>)}</div>{!allWorks&&new Set(diary.map(work=>work.key??work.title)).size>40&&<button className="chip" onClick={()=>setAllWorks(true)}>{tt("Tümünü göster ({0})",new Set(diary.map(work=>work.key??work.title)).size)}</button>}</div>}
       {all.length > 0 && <div className="tp-card -wide"><h3>{tt("Son analizlerin")}</h3>
         <div className="tp-recent">{all.slice(0, 10).map(({ key, run }) => {
           const shown = titleOf(run) || "?";
@@ -273,6 +300,6 @@ export function TasteProfile({ onOpen, onWorkOpen, kind = "film", page, sync }: 
         })}</div>
       </div>}
     </>}
-    {stat!==null&&<ExtraModal title={extraText("Zevk profili kayıtları","Taste profile records")} close={()=>setStat(null)} className="workspace-modal taste-record-modal"><label className="taste-record-search"><span>{artistFilter || extraText("Kayıtlarda ara","Search records")}</span><input type="search" value={recordQuery} onChange={e=>setRecordQuery(e.target.value)} placeholder={extraText("Şarkı, sanatçı veya eser ara…","Search songs, artists or titles…")} /></label><div className="taste-record-list">{(()=>{const i=stat%6;const selected=i===0?liked:i===1?disliked:i===2?diary.filter(x=>x.rating):i===5?diary.filter(x=>(x.watched??0)>month):diary;let rows=selected.map(x=>({key:x.key??x.title,title:x.title}));if(music&&i>=2){const plays=Object.values(store.json<Record<string,{q:MQ;at:number}>>("musicPlays",{}));const history=store.json<{q:MQ;at:number}[]>("musicHistory",[]).filter(x=>!x.q.podcast&&!x.q.radio);if(i===4&&!artistFilter){rows=[...new Set(liked.map(x=>x.key?.split(" | ").slice(1).join(" | ")||"").filter(Boolean))].map(name=>({key:"artist:"+name,title:name}));}else{const source=i===3||i===5?history:artistFilter?[...new Map([...plays,...store.json<{q:MQ;at:number}[]>("musicLikes",[])].map(x=>[musicTitle(x.q),x])).values()]:plays;rows=source.filter(x=>!x.q.podcast&&!x.q.radio&&(i!==5||x.at>month)&&(!artistFilter||x.q.artist===artistFilter)).map(x=>({key:musicTitle(x.q),title:x.q.title+(x.q.artist?" — "+x.q.artist:"")+(i===3||i===5?" · "+new Date(x.at).toLocaleString(locale()):"")}));}}else if(i===5)rows=[...rows,...all.filter(x=>x.run.at>month).map(x=>({key:x.key,title:titleOf(x.run)}))];else if(i===3||i===4)rows=all.map(x=>({key:x.key,title:titleOf(x.run)}));rows=rows.filter(x=>matchKey(x.title+" "+x.key).includes(matchKey(recordQuery)));return rows.length?rows.map((x,index)=><button className="taste-record-row" key={x.key+index} onClick={()=>{if(music&&i===4&&!artistFilter&&x.key.startsWith("artist:")){setArtistFilter(x.key.slice(7));return;}setStat(null);if(onWorkOpen)onWorkOpen(x.key,x.title);else onOpen?.({title:x.title,kind:x.key.startsWith("tv:")?"tv":"movie"});}}><span className="taste-record-icon" aria-hidden="true">{music&&recordCover(x.key)?<img src={recordCover(x.key)} alt="" loading="lazy" onError={e=>{e.currentTarget.style.display="none";}}/>:music?"♫":"▤"}</span><span className="taste-record-copy"><strong>{x.title.split(" — ")[0]}</strong>{(x.title.includes(" — ") || (music&&x.key.includes(" | ")))&&<small>{x.title.includes(" — ")?x.title.split(" — ").slice(1).join(" — "):x.key.split(" | ").slice(1).join(" | ")}</small>}</span><span className="taste-record-arrow" aria-hidden="true">›</span></button>):<p>{extraText("Bu görünümde gösterilecek kayıt yok.","No records to show in this view.")}</p>;})()}</div></ExtraModal>}
+    {stat!==null&&<ExtraModal title={extraText("Zevk profili kayıtları","Taste profile records")} close={()=>setStat(null)} className="workspace-modal taste-record-modal"><label className="taste-record-search"><span>{artistFilter || extraText("Kayıtlarda ara","Search records")}</span><input type="search" value={recordQuery} onChange={e=>setRecordQuery(e.target.value)} placeholder={extraText("Şarkı, sanatçı veya eser ara…","Search songs, artists or titles…")} /></label><div className="taste-record-list">{(()=>{const i=stat%6;const selected=i===0?liked:i===1?disliked:i===2?diary.filter(x=>x.rating):i===5?diary.filter(x=>(x.watched??0)>month):diary;let rows:{key:string;title:string;year?:string}[]=selected.map(x=>({key:x.key??x.title,title:x.title,year:x.year}));if(music&&i>=2){const plays=Object.values(store.json<Record<string,{q:MQ;at:number}>>("musicPlays",{}));const history=store.json<{q:MQ;at:number}[]>("musicHistory",[]).filter(x=>!x.q.podcast&&!x.q.radio);if(i===4&&!artistFilter){rows=[...new Set(liked.map(x=>x.key?.split(" | ").slice(1).join(" | ")||"").filter(Boolean))].map(name=>({key:"artist:"+name,title:name}));}else{const source=i===3||i===5?history:artistFilter?[...new Map([...plays,...store.json<{q:MQ;at:number}[]>("musicLikes",[])].map(x=>[musicTitle(x.q),x])).values()]:plays;rows=source.filter(x=>!x.q.podcast&&!x.q.radio&&(i!==5||x.at>month)&&(!artistFilter||x.q.artist===artistFilter)).map(x=>({key:musicTitle(x.q),title:x.q.title+(x.q.artist?" — "+x.q.artist:"")+(i===3||i===5?" · "+new Date(x.at).toLocaleString(locale()):"")}));}}else if(i===5){const seen=new Set(rows.map(x=>norm(x.title)));rows=[...rows,...all.filter(x=>x.run.at>month&&!seen.has(norm(titleOf(x.run)))).map(x=>({key:x.key,title:titleOf(x.run),year:x.run.year}))];}else if(i===3||i===4)rows=all.map(x=>({key:x.key,title:titleOf(x.run),year:x.run.year}));rows=rows.filter(x=>matchKey(x.title+" "+x.key).includes(matchKey(recordQuery)));return rows.length?rows.map((x,index)=><button className="taste-record-row" key={x.key+index} onClick={()=>{if(music&&i===4&&!artistFilter&&x.key.startsWith("artist:")){setArtistFilter(x.key.slice(7));return;}setStat(null);if(onWorkOpen)onWorkOpen(x.key,x.title);else onOpen?.({title:x.title,year:x.year,kind:x.key.startsWith("tv:")?"tv":x.key.startsWith("movie:")?"movie":undefined});}}><span className="taste-record-icon" aria-hidden="true">{music&&recordCover(x.key)?<img src={recordCover(x.key)} alt="" loading="lazy" onError={e=>{e.currentTarget.style.display="none";}}/>:music?"♫":"▤"}</span><span className="taste-record-copy"><strong>{x.title.split(" — ")[0]}</strong>{(x.title.includes(" — ") || (music&&x.key.includes(" | ")))&&<small>{x.title.includes(" — ")?x.title.split(" — ").slice(1).join(" — "):x.key.split(" | ").slice(1).join(" | ")}</small>}</span><span className="taste-record-arrow" aria-hidden="true">›</span></button>):<p>{extraText("Bu görünümde gösterilecek kayıt yok.","No records to show in this view.")}</p>;})()}</div></ExtraModal>}
   </section>;
 }

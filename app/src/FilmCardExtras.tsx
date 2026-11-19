@@ -9,9 +9,14 @@ import { friendRatingSummary, friendsWhoWatched, type WatchingFriend } from "./f
 import { FriendAvatar } from "./FriendProfile";
 import { I, Icon, openMenu, titleAsks } from "./Screens";
 import { extraText } from "./Extras";
+import { filmAnalysisRecords, savedFilmAnalysis, type SavedFilmAnalysis } from "./filmAnalysisStorage";
+import { cleanProfile } from "./filmReviewModel";
+import { learnedTaste, personalScore, profileKeyOf } from "./reviewTaste";
+import { setFinished, store } from "./library";
 import { DEC, tt } from "./i18n";
 
-export type CardTitle = { title: string; year?: string; id?: number; kind: "movie" | "tv" };
+/** paths: the library files behind the card, so "İzledim" also fills Bitirdiklerim like the details' Bitirdim */
+export type CardTitle = { title: string; year?: string; id?: number; kind: "movie" | "tv"; paths?: string[] };
 
 // One snapshot of recs, playlists, friend ratings and the watch-later list for every card, rebuilt only when taste data
 // changes. Results are cached per title, and a title no friend data mentions skips the full scan, so big grids stay fast.
@@ -162,11 +167,86 @@ function ActionRow({ t, onPlay, onDetail, extra }: ActionProps) {
       <span className={"round" + (later ? " on" : "")} title={later ? tt("Sonra izle listesinden çıkar") : tt("Sonra izle")} aria-label={tt("Sonra izle")}
         {...act(() => { if (later) laterOff(t.title, t.year); else markLater(label, true); reset(); })}><Icon d={later ? I.check : I.plus} size={14} /></span>
       <span className={"round" + (watched ? " on" : "")} title={watched ? tt("İzlemedim") : tt("İzledim")} aria-label={tt("İzledim")}
-        {...act(() => diarySet(t.title, t.year, { watched: watched ? undefined : Date.now() }))}><Icon d={I.check} size={14} /></span>
+        {...act((e) => { if (watched) { diarySet(t.title, t.year, { watched: undefined }); if (t.paths?.length) setFinished(t.paths, false); } else openRate((e.currentTarget as HTMLElement).getBoundingClientRect(), t); })}><Icon d={I.check} size={14} /></span>
       <span className="round" title={tt("Diğer")} aria-label={tt("Diğer")}
         {...act((e) => openMenu(e, [...titleAsks(t.title, t.year, t.kind), "sep", { label: tt("Detaylar"), act: onDetail }]))}>⋯</span>
       {extra}
-      <CardFriends t={t} inline />
+      {/* friends are written under the card */}
     </span>
   );
+}
+
+// The rating box is one app-wide host, not part of the card: the card's row unmounts when the pointer leaves it, and
+// Keşfet drops a watched film from its grid, so a box owned by the card vanished mid-choice.
+type RateReq = { at: DOMRect; t: CardTitle; vote?: "like" | "dislike" };
+let rateReq: RateReq | null = null;
+const rateSubs = new Set<() => void>();
+export function openRate(at: DOMRect, t: CardTitle, vote?: "like" | "dislike") {
+  // already rated: "watched" just marks it, the score stays
+  if (!vote && diaryGet(t.title, t.year)?.rating) { diarySet(t.title, t.year, { watched: Date.now() }); return; }
+  rateReq = { at, t, vote }; rateSubs.forEach((f) => f()); }
+export function RateHost() {
+  const [, bump] = useState(0);
+  useEffect(() => { const f = () => bump((n) => n + 1); rateSubs.add(f); return () => { rateSubs.delete(f); }; }, []);
+  if (!rateReq) return null;
+  const r = rateReq;
+  return <RateAsk key={r.t.title + r.at.top + r.at.left} at={r.at} t={r.t} vote={r.vote} onDone={() => { if (rateReq === r) { rateReq = null; bump((n) => n + 1); window.dispatchEvent(new Event("luna-rate-done")); } }} />;
+}
+
+/** After "İzledim": a quick 1–10. 6 and up counts as a like, 5 and below as a dislike, the same as the buttons in the
+ *  details; "Puansız" only marks it watched. */
+function RateAsk({ at, t, vote, onDone }: { at: DOMRect; t: CardTitle; vote?: "like" | "dislike"; onDone: () => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const out = (e: PointerEvent) => { if (!box.current?.contains(e.target as Node)) { diarySet(t.title, t.year, { watched: Date.now() }); if (t.paths?.length) setFinished(t.paths, true); onDone(); } };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onDone(); };
+    const id = setTimeout(() => document.addEventListener("pointerdown", out), 0);
+    document.addEventListener("keydown", esc);
+    box.current?.querySelector<HTMLElement>("button")?.focus();
+    return () => { clearTimeout(id); document.removeEventListener("pointerdown", out); document.removeEventListener("keydown", esc); };
+  }, []);
+  const pick = (n?: number) => { diarySet(t.title, t.year, n ? { watched: Date.now(), rating: n, vote: n >= 6 ? "like" : "dislike" } : { watched: Date.now() }); if (t.paths?.length) setFinished(t.paths, true); onDone(); };
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  const w = 268, left = Math.max(8, Math.min(window.innerWidth - w - 8, at.left + at.width / 2 - w / 2));
+  const top = at.top > 110 ? at.top - 8 : at.bottom + 8;
+  return createPortal(
+    <div ref={box} className={"fc-rate" + (at.top > 110 ? " up" : "")} role="dialog" aria-label={tt("Kaç puan verirsin?")} style={{ left, top, width: w }} onClick={stop} onPointerDown={stop}>
+      <div className="fc-rate-q">{tt("Kaç puan verirsin?")}</div>
+      <div className="fc-rate-n">{Array.from({ length: 10 }, (_, i) => i + 1).filter((n) => !vote || (vote === "like" ? n >= 6 : n <= 5)).map((n) => <button key={n} type="button" className={n >= 6 ? "hi" : "lo"} onClick={() => pick(n)}>{n}</button>)}</div>
+      <button type="button" className="fc-rate-skip" onClick={() => pick()}>{tt("Puansız işaretle")}</button>
+    </div>, document.body);
+}
+
+// ---- the user's own score, or Luna Analiz's "Senin için" score, beside the TMDB one on a card ----
+// Saved analyses are read once and kept until an analysis or a taste setting changes.
+let analyses: SavedFilmAnalysis[] | null = null;
+const forYou = new Map<string, number | null>();
+let analysisWired = false;
+function forYouScore(t: CardTitle): number | null {
+  if (!analysisWired) { analysisWired = true; window.addEventListener("film-decision-changed", () => { analyses = null; forYou.clear(); }); }
+  const k = t.kind + "|" + (t.id ?? "") + "|" + t.title + "|" + (t.year ?? "");
+  if (forYou.has(k)) return forYou.get(k)!;
+  analyses ??= filmAnalysisRecords();
+  let out: number | null = null;
+  const run = analyses.length ? savedFilmAnalysis({ title: t.title, year: t.year, kind: t.kind, id: t.id }, analyses) : null;
+  const v = run?.verdict;
+  if (v) {
+    const aspects = Object.fromEntries(v.aspects.filter((a) => a.score != null).map((a) => [a.aspect, a.score!]));
+    out = personalScore(v.score ?? run!.community ?? null, aspects, cleanProfile(store.json(profileKeyOf("film"), null)), learnedTaste("film"))?.score ?? null;
+  }
+  forYou.set(k, out);
+  return out;
+}
+const one = (n: number) => n.toFixed(1).replace(/\.0$/, "").replace(".", DEC);
+/** ♥ 8 = the score you gave; ✦ 7,4 = what Luna Analiz worked out for you (only when you have not scored it yourself). */
+export function MyScore({ t, long }: { t: CardTitle; long?: boolean }) {
+  useSnap();
+  const [, bump] = useState(0);
+  useEffect(() => { const f = () => bump((n) => n + 1); window.addEventListener("film-decision-changed", f); return () => window.removeEventListener("film-decision-changed", f); }, []);
+  if (!t.title) return null;
+  const own = diaryGet(t.title, t.year)?.rating;
+  if (own) return <span className="my-score -own" title={extraText(`Senin puanın: ${own}/10`, `Your rating: ${own}/10`)}>{long && <i>{extraText("Senin puanın", "Your rating")}</i>}♥ {one(own)}</span>;
+  const ai = forYouScore(t);
+  if (ai == null) return null;
+  return <span className="my-score -ai" title={extraText(`Luna Analiz'e göre senin için: ${one(ai)}/10`, `Luna Analysis for you: ${one(ai)}/10`)}>{long && <i>{extraText("Senin için", "For you")}</i>}✦ {one(ai)}</span>;
 }

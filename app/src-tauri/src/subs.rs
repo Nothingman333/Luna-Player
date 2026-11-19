@@ -37,6 +37,11 @@ pub struct Query {
     pub episode: Option<u32>,
     #[serde(default)]
     pub manual: bool,
+    /// TMDB id of the film/show: searches by id, so a Turkish library title still finds subtitles
+    #[serde(default)]
+    pub tmdb_id: Option<u64>,
+    #[serde(default)]
+    pub tv: bool,
 }
 
 #[derive(Serialize)]
@@ -92,6 +97,14 @@ fn msg(f: Fail) -> String {
         Fail::Again(m) | Fail::Stop(m) => m,
     }
 }
+/** OpenSubtitles' own answer that the key is wrong (its bot shield's page says nothing about a key). */
+fn key_refused(body: &str) -> bool {
+    let b = body.to_ascii_lowercase();
+    b.contains("api key") || b.contains("api-key") || b.contains("apikey")
+}
+fn busy() -> String {
+    tr!("OpenSubtitles isteği şu an geri çevirdi (403); biraz sonra yeniden dene", "OpenSubtitles turned the request away just now (403); try again in a moment")
+}
 async fn pause(attempt: u32) {
     tokio::time::sleep(std::time::Duration::from_millis(700 * (attempt as u64 + 1))).await;
 }
@@ -122,7 +135,12 @@ async fn request_once(http: &reqwest::Client, key: &str, params: &[(&str, String
         .map_err(|e| Fail::Again(tr!("OpenSubtitles'a ulaşılamadı: {}", "Couldn't reach OpenSubtitles: {}", e)))?;
     match res.status().as_u16() {
         200 => {}
-        401 | 403 => return Err(Fail::Stop(tr!("OpenSubtitles API anahtarı geçersiz", "The OpenSubtitles API key is invalid"))),
+        401 => return Err(Fail::Stop(tr!("OpenSubtitles API anahtarı geçersiz", "The OpenSubtitles API key is invalid"))),
+        // a 403 is often OpenSubtitles' bot shield or a busy moment, not the key: tried again unless it names the key
+        403 => {
+            let body = res.text().await.unwrap_or_default();
+            return Err(if key_refused(&body) { Fail::Stop(tr!("OpenSubtitles API anahtarı geçersiz", "The OpenSubtitles API key is invalid")) } else { Fail::Again(busy()) });
+        }
         429 => return Err(Fail::Again(tr!("OpenSubtitles çok fazla istek dedi, biraz sonra tekrar dene", "OpenSubtitles says too many requests; try again a bit later"))),
         s => return Err(Fail::Again(tr!("OpenSubtitles arama hatası ({})", "OpenSubtitles search error ({})", s))),
     }
@@ -167,14 +185,17 @@ pub async fn search(video: &str, key: &str, langs: &str, q: Query) -> Result<Vec
             }
         }
     }
-    let mut params = vec![
-        ("query", q.title.clone().unwrap_or_else(|| query_from_name(path))),
-        ("languages", langs.to_string()),
-    ];
+    let mut params = match q.tmdb_id.filter(|_| !q.manual) {
+        Some(id) => vec![(if q.tv { "parent_tmdb_id" } else { "tmdb_id" }, id.to_string()), ("languages", langs.to_string())],
+        None => vec![
+            ("query", q.title.clone().unwrap_or_else(|| query_from_name(path))),
+            ("languages", langs.to_string()),
+        ],
+    };
     if let (Some(s), Some(e)) = (q.season, q.episode) {
         params.push(("season_number", s.to_string()));
         params.push(("episode_number", e.to_string()));
-    } else if let Some(y) = q.year {
+    } else if let Some(y) = q.year.filter(|_| q.tmdb_id.is_none() || q.manual) {
         params.push(("year", y.to_string()));
     }
     match request(&http, key, &params).await {
@@ -241,7 +262,9 @@ async fn fetch_once(http: &reqwest::Client, key: &str, hit_id: i64) -> Result<Ve
     let Some(link) = dl["link"].as_str() else {
         return Err(match status {
             406 | 429 => Fail::Stop(tr!("Bugünkü ücretsiz indirme hakkın doldu (OpenSubtitles sınırı)", "You've used today's free downloads (OpenSubtitles limit)")),
-            401 | 403 => Fail::Stop(tr!("OpenSubtitles API anahtarı geçersiz", "The OpenSubtitles API key is invalid")),
+            401 => Fail::Stop(tr!("OpenSubtitles API anahtarı geçersiz", "The OpenSubtitles API key is invalid")),
+            403 if key_refused(dl["message"].as_str().unwrap_or("")) => Fail::Stop(tr!("OpenSubtitles API anahtarı geçersiz", "The OpenSubtitles API key is invalid")),
+            403 => Fail::Again(busy()),
             _ => Fail::Again(dl["message"].as_str().map(str::to_string).unwrap_or_else(|| tr!("İndirme reddedildi", "Download refused"))),
         });
     };

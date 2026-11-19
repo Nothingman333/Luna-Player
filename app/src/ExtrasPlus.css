@@ -10,7 +10,7 @@
 .lx-note { margin: 2px 0 0; line-height: 1.45; }
 
 /* ---- sound panel (film) ---- */
-.tracks.vset.lx-sound { width: 380px; right: -60px; max-height: min(80vh, 640px); gap: 12px; padding: 16px 18px 14px; background: rgba(30,30,34,0.97); border: 1px solid rgba(255,255,255,0.07); border-radius: 14px; -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); animation: fadeUp 0.18s var(--ease, ease) both; }
+.tracks.vset.lx-sound { width: 380px; right: -60px; max-height: min(80vh, 640px); gap: 12px; padding: 16px 18px 14px; background: rgba(30,30,34,0.97); border: 1px solid rgba(255,255,255,0.07); border-radius: 14px; -webkit-backdrop-filter: var(--glass-1); backdrop-filter: var(--glass-1); animation: fadeUp 0.18s var(--ease, ease) both; }
 .lx-sound .vset-head { gap: 10px; }
 .lx-sound-body { display: flex; flex-direction: column; gap: 10px; }
 .lx-fx-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -50,7 +50,7 @@
 .lx-pop {
   position: absolute; right: 0; top: calc(100% + 10px); z-index: 30; width: 370px; max-height: 76vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
   padding: 16px 18px; border-radius: 16px; background: rgba(30,30,34,0.97); box-shadow: var(--shadow-2, 0 14px 38px rgba(0,0,0,0.55));
-  border: 1px solid rgba(255,255,255,0.08); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); animation: fadeUp 0.18s var(--ease, ease) both;
+  border: 1px solid rgba(255,255,255,0.08); -webkit-backdrop-filter: var(--glass-1); backdrop-filter: var(--glass-1); animation: fadeUp 0.18s var(--ease, ease) both;
 }
 .lx-pop .vset-head { display: flex; align-items: center; gap: 10px; }
 .lx-pop .vset-head h3 { margin: 0; font-family: Sora, sans-serif; font-size: 17px; }
@@ -67,7 +67,7 @@
   position: fixed; left: 0; right: 0; margin-inline: auto; width: max-content; max-width: 92vw; bottom: 120px; z-index: 50; display: flex; align-items: center; gap: 10px; overflow: hidden;
   padding: 8px 10px 8px 14px; border-radius: 999px; background: rgba(20,20,23,0.9); color: var(--text);
   border: 1px solid rgba(255,255,255,0.1); box-shadow: var(--shadow-1, 0 4px 14px rgba(0,0,0,0.35));
-  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); font-size: 14px; animation: fadeUp 0.22s var(--ease, ease) both;
+  -webkit-backdrop-filter: var(--glass-1); backdrop-filter: var(--glass-1); font-size: 14px; animation: fadeUp 0.22s var(--ease, ease) both;
 }
 .lx-toast.film { bottom: 150px; }
 .lx-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; box-shadow: 0 0 0 3px rgba(255,255,255,0.06); }
@@ -98,7 +98,7 @@
 .lx-cue mark { background: rgba(var(--acc-rgb, 232, 112, 26), 0.35); color: var(--text); border-radius: 3px; padding: 0 1px; }
 
 /* ---- fast reader ---- */
-.lx-rsvp { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); animation: fadeIn 0.2s ease both; }
+.lx-rsvp { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); -webkit-backdrop-filter: var(--glass-1); backdrop-filter: var(--glass-1); animation: fadeIn 0.2s ease both; }
 .lx-rsvp-card { width: min(780px, 92vw); padding: 26px 30px 18px; border-radius: 22px; background: var(--panel); border: 1px solid rgba(255,255,255,0.08); box-shadow: var(--shadow-2, 0 14px 38px rgba(0,0,0,0.55)); animation: modalIn 0.28s var(--ease, ease) both; }
 .lx-rsvp-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; font-size: 13px; }
 .lx-rsvp-stage { position: relative; }

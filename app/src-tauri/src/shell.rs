@@ -24,7 +24,7 @@ pub fn tray_mode() -> bool {
 }
 
 fn show_main(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
+    if let Some(w) = crate::main_window(app) {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
@@ -59,7 +59,7 @@ pub fn setup_tray(app: &AppHandle, visible: bool) -> tauri::Result<()> {
         .on_tray_icon_event(|tray, ev| {
             if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = ev {
                 let app = tray.app_handle();
-                match app.get_webview_window("main") {
+                match crate::main_window(app) {
                     Some(w) if w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false) => {
                         let _ = w.hide();
                         let _ = app.emit("window-hidden", ());

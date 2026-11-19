@@ -18,7 +18,7 @@ TypeScript/Vite derlemesi, ESLint, i18n kontrolü ve sürüm kontrolü başarıl
 
 Headless Edge + sahte Tauri/sentetik veri, 1280 ve 640 piksel: oyuncuların analizden önce gelmesi; defter ikonuyla birleşik sahne sekmesinin açılması; önceki sahne notunun korunması, yeni sahne ekleme; düşünce ve yorum taslağı kaydetme ve sekme değişiminde korunma; 12 sağlayıcının tamamına erişim, fare/klavye/Escape/dışarı tıklama; sağlayıcı açılır alanının ekran sınırları; çark başlığının şeffaf zemini; ayrı oynatıcı defteri ve kelime kaydı doğrulandı. Gerçek API/anahtar/kullanıcı kaydı kullanılmadı. Tarayıcı çalışma zamanı hatası yok. İlk fixture dış ağ yanıtlarını yanlış taklit ettiği için bir betik ayrıştırma hatası üretti; yalnız fixture düzeltildi ve son kontrol temiz geçti.
 
-Gerçek Windows Luna/WebView2/mpv penceresi otomatik kullanılmadı; kullanıcı Luna Dev.cmd ile görünümü doğrulayacak. Rust işlevi değişmedi; yeni cargo/installer/exe üretilmedi. Mevcut büyük FilmReviewAi chunk uyarısı derlemeyi engellemiyor. Kanıtlar: C:\Users\fatme\Documents\Luna-1.7.3C-Defter (ui-result.json, PNG’ler, build-final.log, lint-final.log, sürüm/i18n logları). QA dosyaları ana projeye dahil edilmez.
+Gerçek Windows Luna/WebView2/mpv penceresi otomatik kullanılmadı; kullanıcı Luna Dev.cmd ile görünümü doğrulayacak. Rust işlevi değişmedi; yeni cargo/installer/exe üretilmedi. Mevcut büyük FilmReviewAi chunk uyarısı derlemeyi engellemiyor. Kanıtlar: ~\Documents\Luna-1.7.3C-Defter (ui-result.json, PNG’ler, build-final.log, lint-final.log, sürüm/i18n logları). QA dosyaları ana projeye dahil edilmez.
 
 ## Devir
 

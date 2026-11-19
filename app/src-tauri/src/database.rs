@@ -7,7 +7,7 @@ static WRITE: Mutex<()> = Mutex::new(());
 
 fn allowed(key: &str) -> bool {
     !key.is_empty() && key.len() <= 32768 && key != "__seed" && ![
-        "syncplayPassword", "ankiKey", "geminiKey", "tmdbKey", "osKey", "openaiKey", "claudeKey", "customAiKey", "listenbrainzToken", "lastfmKey", "lastfmSecret", "lastfmSession", "traktSecret", "traktToken", "traktRefresh",
+        "syncplayPassword", "ankiKey", "geminiKey", "tmdbKey", "osKey", "openaiKey", "claudeKey", "customAiKey", "listenbrainzToken", "lastfmKey", "lastfmSecret", "lastfmSession", "traktSecret", "traktToken", "traktRefresh", "braveKey",
     ].contains(&key) && !(1..=8).any(|i| key == format!("aiProfileKey{i}") || key == format!("mcpEnv{i}") || key == format!("mediaSourceSecret{i}"))
 }
 fn connection(path: &Path) -> Result<Connection, String> {

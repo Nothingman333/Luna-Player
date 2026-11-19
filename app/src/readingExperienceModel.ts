@@ -11,7 +11,7 @@ export type ReadingPreferences={theme:"day"|"quiet"|"sepia"|"dusk"|"night"|"fore
 export function cleanReadingPreferences(raw:unknown):ReadingPreferences{
  const x=(raw&&typeof raw==="object"&&!Array.isArray(raw)?raw:{})as Partial<ReadingPreferences>;
  const theme=(["day","quiet","sepia","dusk","night","forest"].includes(x.theme||"")?x.theme:(x.theme as string)==="gray"?"dusk":"sepia")as ReadingPreferences["theme"];
- return{theme,size:clamp(x.size,100,70,200),font:x.font==="sans"||x.font==="atkinson"||x.font==="dyslexic"||x.font==="lexend"?x.font:"serif",spread:x.spread!==false,spacing:x.spacing==="tight"||x.spacing==="loose"?x.spacing:"normal",bold:x.bold===true,scroll:x.scroll===true,dim:clamp(x.dim,0,0,.7),warm:clamp(x.warm,0,0,1)};
+ return{theme,size:clamp(x.size,100,70,500),font:x.font==="sans"||x.font==="atkinson"||x.font==="dyslexic"||x.font==="lexend"?x.font:"serif",spread:x.spread!==false,spacing:x.spacing==="tight"||x.spacing==="loose"?x.spacing:"normal",bold:x.bold===true,scroll:x.scroll===true,dim:clamp(x.dim,0,0,.7),warm:clamp(x.warm,0,0,1)};
 }
 export type ReadingSession<B={path:string}>={b:B;at:number;mins:number;from:number;to:number;aloud?:number;endAt?:number};
 export function mergeReadingSession<B extends{path:string}>(rows:ReadingSession<B>[],entry:ReadingSession<B>):ReadingSession<B>[]{

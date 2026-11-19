@@ -1,0 +1,11 @@
+/* Anchored under the address bar like Chrome's "Add extension?" bubble; cut out of the native page. */
+.browser-store-install{position:absolute;top:calc(100% + 12px);right:12px;z-index:460;width:min(360px,calc(100vw - 24px));padding:16px;box-sizing:border-box;border-radius:18px;background:rgba(22,22,26,.97);backdrop-filter: var(--glass-2);border:1px solid var(--line);box-shadow:0 16px 40px #0008;color:var(--text)}
+.browser-store-install .bsi-title{display:block;font-size:15px;line-height:1.35;overflow-wrap:anywhere}
+.browser-store-install .bsi-sub,.browser-store-install .bsi-line{margin:8px 0 0;font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px;overflow-wrap:anywhere}
+.browser-store-install [role=alert]{color:var(--accent)}
+.browser-store-install .bsi-access{margin:6px 0 0;padding-left:18px;font-size:12.5px;color:var(--text);max-height:120px;overflow-y:auto}
+.browser-store-install .bsi-access li{overflow-wrap:anywhere;margin:2px 0}
+.browser-store-install .bsi-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.bsi-spin{flex:none;width:14px;height:14px;border-radius:50%;border:2px solid rgba(var(--acc-rgb),.25);border-top-color:var(--accent);animation:bsi-spin .8s linear infinite}
+@keyframes bsi-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.bsi-spin{animation:none}}

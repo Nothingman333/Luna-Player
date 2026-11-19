@@ -1,6 +1,6 @@
 # Luna 1.7.2C — 23 Ekim 2026 arayüz geri bildirimi
 
-Bu tur kullanıcının ekran görüntülü isteğini mevcut 1.7.1C kaynak üzerinde uygular. Önceki paketler yeniden uygulanmadı. Ana kaynak hedefi E:\deepseek deneme\vlc modern; çalışma ve kontrol kanıtları C:\Users\fatme\Documents\Luna-1.7.2C-UI içindedir. GitHub push Claude tarafından yapılacak; Codex commit/push/release veya kurulum paketi üretmedi.
+Bu tur kullanıcının ekran görüntülü isteğini mevcut 1.7.1C kaynak üzerinde uygular. Önceki paketler yeniden uygulanmadı. Ana kaynak hedefi E:\deepseek deneme\vlc modern; çalışma ve kontrol kanıtları ~\Documents\Luna-1.7.2C-UI içindedir. GitHub push Claude tarafından yapılacak; Codex commit/push/release veya kurulum paketi üretmedi.
 
 ## Yapılanlar
 

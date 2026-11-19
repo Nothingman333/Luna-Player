@@ -15,11 +15,14 @@ import "./SubtitleStudio.css";
 import { tt, lang as uiLang } from "./i18n";
 import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { ExtraModal, exportExtra, putExtra } from "./Extras";
+import { ExtraModal, exportExtra, extraText, putExtra } from "./Extras";
 import { localList, validWord } from "./extrasModel";
-import { aiName, aiReady, assistantJson, captureAiUse } from "./ai";
+import { aiName, aiProfiles, aiReady, assistantJson, captureAiUse, getAiProfileUse, type AiEffort, type AiProfile } from "./ai";
+import { isOpenAiReasoningModel } from "./assistantRequestModel";
 import { classifyAiError } from "./assistantReliability";
 import { store } from "./library";
+import { convertFileSrc } from "./nativeCore";
+import { pushNotice, setLiveTasks, type LiveTask } from "./Follow";
 import { notifyUser, setTaskbarProgress } from "./shellBridge";
 import { fmtTime } from "./mpv";
 import {
@@ -46,7 +49,7 @@ const fileLang = (p: string) => { const m = fileName(p).match(/\.([a-z]{2,3}(?:-
 const errText = (e: unknown) => String((e as Error)?.message ?? e).replace(/^Error: /, "");
 const isLink = (p: string) => /^[a-z][a-z0-9+.-]*:\/\//i.test(p);
 const PHASE: Record<string, string> = {
-  start: tt("Hazırlanıyor…"), vad: tt("Ses algılama modeli indiriliyor…"), download: tt("İndiriliyor…"), unpack: tt("Açılıyor…"), audio: tt("Ses çıkarılıyor…"),
+  start: tt("Hazırlanıyor…"), vad: tt("Ses algılama modeli indiriliyor…"), download: tt("İndiriliyor…"), fetch: extraText("Ses indiriliyor…", "Downloading audio…"), unpack: tt("Açılıyor…"), audio: tt("Ses çıkarılıyor…"),
   analyse: tt("Ses dinleniyor…"), align: tt("Eşleştiriliyor…"), transcribe: tt("Yazıya dökülüyor…"), translate: tt("Çevriliyor…"),
 };
 const etaText = (sec: number | null) => {
@@ -124,7 +127,26 @@ export type QueueItem = {
 };
 let queue: QueueItem[] = [];
 const subs = new Set<() => void>();
-const changed = () => { queue = queue.slice(); trackQueue(); subs.forEach((f) => f()); };
+const changed = () => { queue = queue.slice(); trackQueue(); publishLive(); subs.forEach((f) => f()); };
+const leftText = (eta: number | null) => eta ? " · " + extraText(`~${Math.max(1, Math.round(eta / 60))} dk kaldı`, `~${Math.max(1, Math.round(eta / 60))} min left`) : "";
+/** the cover the now-playing screen remembered for this item, ready for an <img> */
+const artOf = (path: string) => { const a = store.get("mediaArt:" + path); return a ? (/^https?:/i.test(a) ? a : convertFileSrc(a)) : undefined; };
+/** running and waiting jobs show live in the bell */
+/** translations running in the background (the studio closes when one starts) */
+const trLive = new Map<string, LiveTask & { path: string }>();
+const setTrLive = (id: string, t: (LiveTask & { path: string }) | null) => {
+  const fresh = !!t && !trLive.has(id);
+  if (t) trLive.set(id, t); else trLive.delete(id);
+  publishLive();
+  if (fresh) peek(); else peekers.forEach((f) => f());
+};
+function publishLive() {
+  setLiveTasks([...[...trLive.values()].map(({ path: _p, ...t }) => t), ...queue.filter((q) => q.status === "wait" || q.status === "run").map((q) => ({
+    id: "whisper-live:" + q.id, title: q.title, art: artOf(q.path), pct: q.status === "run" ? q.pct : null,
+    text: q.status === "wait" ? extraText("Altyazı sırada bekliyor", "Subtitle waiting in line")
+      : extraText("Altyazı hazırlanıyor", "Making subtitle") + leftText(q.eta),
+  }))]);
+}
 /** Taskbar progress and a notification for the whole batch (items added while it runs belong to it). */
 let batchDone = 0, batchActive = false;
 function trackQueue() {
@@ -148,7 +170,7 @@ export const useWhisperQueue = () => useSyncExternalStore((f) => { subs.add(f); 
 export function enqueueWhisper(items: { path: string; title: string; duration?: number }[], lang: string, translate: boolean, opts: { prompt: string; tidy: boolean; vad?: boolean; preset?: string }) {
   for (const it of items) {
     if (queue.some((q) => q.path === it.path && (q.status === "wait" || q.status === "run"))) continue;
-    queue.push({ id: S.newJob(), path: it.path, title: it.title, duration: it.duration, lang, translate, prompt: opts.prompt, tidy: opts.tidy, vad: opts.vad ?? S.prefs.vad(), preset: opts.preset ?? S.prefs.preset(), status: "wait", phase: "", pct: null, eta: null });
+    queue.push({ id: S.newJob(), path: it.path, title: store.get("mediaTitle:" + it.path) || it.title, duration: it.duration, lang, translate, prompt: opts.prompt, tidy: opts.tidy, vad: opts.vad ?? S.prefs.vad(), preset: opts.preset ?? S.prefs.preset(), status: "wait", phase: "", pct: null, eta: null });
   }
   changed();
   void pump();
@@ -181,7 +203,7 @@ async function pump() {
           if (e.phase !== cur.phase) samples.length = 0;
           cur.phase = e.phase; cur.pct = e.pct;
           if (e.pct != null) { samples.push({ t: Date.now(), pct: e.pct }); while (samples.length > 2 && Date.now() - samples[0].t > 60000) samples.shift(); }
-          cur.eta = e.phase === "transcribe" ? etaSeconds(samples) : null;
+          cur.eta = etaSeconds(samples);
           changed();
         });
         // the 0.9 MB voice-activity model comes along on first use; without it Whisper simply runs on everything
@@ -195,11 +217,13 @@ async function pump() {
         const file = await S.saveSubtitle(it.path, code, serializeSrt(cues));
         it.status = "done"; it.file = file; it.pct = 100; it.eta = null; it.lines = cues.length;
         store.set("hasSub:" + it.path, "1");
+        pushNotice({ id: "whisper:" + it.path.slice(0, 600) + ":" + Date.now(), title: it.title, art: artOf(it.path), text: extraText("Altyazı hazır", "Subtitle ready") });
         window.dispatchEvent(new CustomEvent("luna-studio-done", { detail: { path: it.path, file, label: tt("Whisper · {0}", code === "und" ? tt("otomatik dil") : langLabel(code)) } }));
       } catch (e) {
         const msg = errText(e);
         it.status = /İptal edildi|Cancelled/.test(msg) ? "cancelled" : "error";
         it.error = msg;
+        if (it.status === "error") pushNotice({ id: "whisper:" + it.path.slice(0, 600) + ":" + Date.now(), title: it.title, art: artOf(it.path), text: extraText("Altyazı oluşturulamadı: ", "Subtitle failed: ") + msg.slice(0, 160) });
       } finally {
         off?.();
         changed();
@@ -211,7 +235,7 @@ async function pump() {
 }
 
 /** A small pill in the player's top bar while Whisper works (the studio itself may be closed). */
-export function WhisperPill({ onOpen }: { onOpen: () => void }) {
+export function WhisperPill({ onOpen }: { onOpen: (path?: string) => void }) {
   const q = useWhisperQueue();
   const run = q.find((i) => i.status === "run");
   const waiting = q.filter((i) => i.status === "wait").length;
@@ -219,7 +243,7 @@ export function WhisperPill({ onOpen }: { onOpen: () => void }) {
   const pct = run?.pct ?? 0;
   const r = 7, c = 2 * Math.PI * r;
   return (
-    <button className="whisper-pill" onClick={onOpen} title={tt("Altyazı stüdyosu › Oluştur")}>
+    <button className="whisper-pill" onClick={() => onOpen(run?.path)} title={tt("Altyazı stüdyosu › Oluştur")}>
       <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
         <circle cx="10" cy="10" r={r} className="ring-bg" />
         <circle cx="10" cy="10" r={r} className="ring" strokeDasharray={c} strokeDashoffset={c * (1 - pct / 100)} />
@@ -230,6 +254,43 @@ export function WhisperPill({ onOpen }: { onOpen: () => void }) {
       </span>
     </button>
   );
+}
+
+/** The audio screen showing `src` in full: its own pill covers the job there (null when it is closed). */
+let npSrc: string | null = null;
+let peekUntil = 0;
+const peekers = new Set<() => void>();
+const peek = () => { peekUntil = Date.now() + 6000; peekers.forEach((f) => f()); };
+function setWhisperScreen(src: string | null) { const was = npSrc; npSrc = src; if (was && !src) peek(); else peekers.forEach((f) => f()); }
+// the audio screen says when it opens/closes (an event, so Music does not import the studio)
+window.addEventListener("luna-np-screen", (e) => setWhisperScreen((e as CustomEvent<string | null>).detail ?? null));
+/** Top-right card like the other background tasks: shows for a few seconds when the job starts or its audio screen is left. */
+export function WhisperToast() {
+  const q = useWhisperQueue();
+  const [, redraw] = useState(0);
+  const run = q.find((i) => i.status === "run");
+  const runId = run?.id;
+  useEffect(() => { if (runId != null) peek(); }, [runId]);
+  useEffect(() => { const f = () => redraw((n) => n + 1); peekers.add(f); const id = setInterval(f, 1000); return () => { peekers.delete(f); clearInterval(id); }; }, []);
+  if (!run) {
+    // a translation running in the background: the same pill on its audio screen, the same card elsewhere
+    const tr = [...trLive.values()].find((t) => t.path === npSrc) ?? [...trLive.values()][0];
+    if (!tr) return null;
+    const pct = tr.pct ?? 0, rr = 7, cc = 2 * Math.PI * rr;
+    if (tr.path === npSrc) return <div className="whisper-float"><span className="whisper-pill" role="status">
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r={rr} className="ring-bg" /><circle cx="10" cy="10" r={rr} className="ring" strokeDasharray={cc} strokeDashoffset={cc * (1 - pct / 100)} /></svg>
+      <span className="ellipsis">{tr.text.replace(/^[^·]*·\s*/, extraText("Çeviri ", "Translation ")) + " " + Math.round(pct) + "%"}</span></span></div>;
+    if (Date.now() > peekUntil) return null;
+    return <div className="an-tasks" role="status"><div className="an-task"><span className="spinner" aria-hidden="true" /><span className="an-copy">
+      <b className="ellipsis">{tr.title}</b><small className="ellipsis">{tr.text} {Math.round(pct)}%</small></span></div></div>;
+  }
+  // on that item's own audio screen: the small pill at the top, as in the film player
+  if (run.path === npSrc) return <div className="whisper-float"><WhisperPill onOpen={(p) => { if (p) window.dispatchEvent(new CustomEvent("luna-sub-studio", { detail: { path: p, title: run.title } })); }} /></div>;
+  if (Date.now() > peekUntil) return null;
+  return <div className="an-tasks" role="status"><div className="an-task"><span className="spinner" aria-hidden="true" /><span className="an-copy">
+    <b className="ellipsis">{run.title}</b>
+    <small className="ellipsis">{PHASE[run.phase] ?? tt("Whisper")}{run.pct != null ? " " + Math.round(run.pct) + "%" : ""}{run.eta != null ? " · " + etaText(run.eta) : ""}</small>
+  </span></div></div>;
 }
 
 // ---------- the studio window ----------
@@ -281,7 +342,7 @@ export function SubtitleStudio(p: StudioProps) {
     requestAnimationFrame(() => box.current?.querySelector<HTMLElement>(`[data-tab="${next}"]`)?.focus());
   };
   return (
-    <ExtraModal title={tt("Altyazı stüdyosu")} close={p.onClose}>
+    <ExtraModal title={tt("Altyazı stüdyosu")} close={p.onClose} className="sub-studio-modal">
       <div className="luna-extra studio" ref={box}>
         <div className="studio-context">
           <span className="studio-title ellipsis">{p.title}</span>
@@ -318,7 +379,10 @@ const MODEL_INFO: Record<string, { speed: number; quality: number; note: string 
   medium: { speed: 2, quality: 4, note: tt("Daha doğru, daha yavaş") },
   "large-v3-turbo-q5_0": { speed: 3, quality: 5, note: tt("Önerilen: büyük modelin sıkıştırılmış hâli") },
   "large-v3-turbo": { speed: 2, quality: 5, note: tt("En doğrusu; ekran kartında rahat çalışır") },
+  "tr-itu-turbo-q5_0": { speed: 3, quality: 5, note: extraText("Türkçe için eğitilmiş (İTÜ, large-v3-turbo); Türkçe konuşmada en doğrusu", "Trained for Turkish (ITU, large-v3-turbo); the most accurate for Turkish speech") },
 };
+/** a model the user added to the models folder (e.g. the Turkish one) gets a readable name in the list */
+const MODEL_LABEL: Record<string, () => string> = { "tr-itu-turbo-q5_0": () => extraText("Türkçe · İTÜ turbo", "Turkish · ITU turbo") };
 function Dots({ n, label }: { n: number; label: string }) {
   return <span className="studio-dots" aria-label={`${label} ${n}/5`} title={`${label} ${n}/5`}>{[1, 2, 3, 4, 5].map((i) => <i key={i} className={i <= n ? "on" : ""} />)}</span>;
 }
@@ -341,7 +405,7 @@ function CreateTab(p: StudioProps) {
   const [st, setSt] = useState<S.WhisperStatus | null>(null);
   const [err, setErr] = useState("");
   const [engine, setEngine] = useState("");
-  const [engineType,setEngineType]=useState<"cpu"|"cuda"|"own">("cpu");
+  const [engineType,setEngineType]=useState<"cpu"|"cuda"|"vulkan"|"own">("cpu");
   const [modelChoice,setModelChoice]=useState(store.get("studioModelHint")??"base");
   const [model, setModel] = useState("");
   const [lng, setLng] = useState(S.prefs.lang());
@@ -357,7 +421,7 @@ function CreateTab(p: StudioProps) {
   const dl = useJob();
   const q = useWhisperQueue();
   const refresh = async (which:"both"|"engine"|"model"="both") => {
-    try { await systemProfile().catch(()=>null); const s = await S.whisperStatus(); setSt(s); if(which!=="model"){const selectedEngine=S.pickEngine(s);setEngine(selectedEngine);setEngineType(/[\\/]cuda[\\/]/i.test(selectedEngine)?"cuda":/[\\/]cpu[\\/]/i.test(selectedEngine)?"cpu":selectedEngine?"own":store.get("studioEngineHint")==="cuda"?"cuda":"cpu");}if(which!=="engine"){const selectedModel=S.pickModel(s);setModel(selectedModel);setModelChoice(s.models.find(m=>m.path===selectedModel)?.name??(selectedModel?"own":store.get("studioModelHint")??"base"));} } catch (e) { setErr(errText(e)); }
+    try { await systemProfile().catch(()=>null); const s = await S.whisperStatus(); setSt(s); if(which!=="model"){const selectedEngine=S.pickEngine(s);setEngine(selectedEngine);setEngineType(/[\\/]vulkan[\\/]/i.test(selectedEngine)?"vulkan":/[\\/]cuda[\\/]/i.test(selectedEngine)?"cuda":/[\\/]cpu[\\/]/i.test(selectedEngine)?"cpu":selectedEngine?"own":store.get("studioEngineHint")==="cuda"?"cuda":"cpu");}if(which!=="engine"){const selectedModel=S.pickModel(s);setModel(selectedModel);setModelChoice(s.models.find(m=>m.path===selectedModel)?.name??(selectedModel?"own":store.get("studioModelHint")??"base"));} } catch (e) { setErr(errText(e)); }
   };
   useEffect(() => { void refresh(); }, []);
   const getEngine = (v: "cpu" | "cuda") => { setDlTarget("engine:" + v); return dl.run(async (job) => {
@@ -384,10 +448,13 @@ function CreateTab(p: StudioProps) {
     S.prefs.setVad(vad); S.prefs.setPreset(preset);
     const items = [{ path: p.path, title: p.title }, ...p.queue].filter((x) => picked.has(x.path));
     enqueueWhisper(items.map((x) => ({ ...x, duration: x.path === p.path ? p.duration : undefined })), lng, translate, { prompt: usePrompt ? prompt : "", tidy, vad, preset });
+    // the work goes on in the background; its progress shows as a pill at the top, so the window gets out of the way
+    p.onClose();
   };
   const cpu = st?.engines.find((e) => /[\\/]bin[\\/]cpu[\\/]/i.test(e));
   const cuda = st?.engines.find((e) => /[\\/]bin[\\/]cuda[\\/]/i.test(e));
-  const own = engine && engine !== cpu && engine !== cuda ? engine : st?.engines.find((e) => e !== cpu && e !== cuda);
+  const vulkan = st?.engines.find((e) => /[\\/]bin[\\/]vulkan[\\/]/i.test(e));
+  const own = engine && engine !== cpu && engine !== cuda && engine !== vulkan ? engine : st?.engines.find((e) => e !== cpu && e !== cuda && e !== vulkan);
   const installed = new Map(st?.models.map((m) => [m.name, m]) ?? []);
   const offered = st?.offered ?? [];
   const ownModel = model && !st?.models.some((m) => m.path === model) ? model : "";
@@ -397,19 +464,19 @@ function CreateTab(p: StudioProps) {
   const modelOffer=offered.find(([name])=>name===modelChoice);
   const selectedInstalled=installed.get(modelChoice);
   const compatible=engineType!=="cuda"||!caps.known||caps.nvidia;
-  const enginePath=engineType==="cpu"?cpu:engineType==="cuda"?cuda:own;
-  const changeEngine=(type:"cpu"|"cuda"|"own")=>{setEngineType(type);const path=type==="cpu"?cpu:type==="cuda"?cuda:own;if(path)selectEngine(path);else setEngine("");};
+  const enginePath=engineType==="cpu"?cpu:engineType==="cuda"?cuda:engineType==="vulkan"?vulkan:own;
+  const changeEngine=(type:"cpu"|"cuda"|"vulkan"|"own")=>{setEngineType(type);const path=type==="cpu"?cpu:type==="cuda"?cuda:type==="vulkan"?vulkan:own;if(path)selectEngine(path);else setEngine("");};
   const changeModel=(name:string)=>{setModelChoice(name);const found=installed.get(name);if(found)selectModel(found.path);else if(name==="own"&&ownModel)setModel(ownModel);else setModel("");};
   return <div className="studio-tab studio-create">
     <p className="studio-lead">{tt("Konuşmayı bilgisayarında yazıya dök. Motoru ve modeli seç; ardından altyazıyı oluştur.")}</p>
     <div className="studio-create-grid">
-      <section className="studio-config"><h4>{tt("Motor")}</h4><label className="studio-select-label">{tt("Çalıştırma yöntemi")}<select aria-label={tt("Whisper motoru")} value={engineType} disabled={!!dl.state} onChange={e=>changeEngine(e.target.value as "cpu"|"cuda"|"own")}><option value="cpu">{tt("İşlemci (CPU)")}{cpu?" · "+tt("Kurulu"):" · 4 MB"}</option><option value="cuda" disabled={caps.known&&!caps.nvidia}>NVIDIA CUDA 12{cuda?" · "+tt("Kurulu"):" · 457 MB"}</option><option value="own">{tt("Kendi motor dosyam")}</option></select></label>
-        <p className="muted small">{engineType==="cuda"?tt("NVIDIA ekran kartı ve uyumlu CUDA sürücüsü gerekir."):engineType==="cpu"?tt("Intel ve AMD sistemlerde de çalışır. Ses internete gönderilmez."):tt("Uyumlu whisper-cli.exe dosyanı seç.")}</p>
-        <div className="studio-row">{engineType==="own"?<button className="chip" disabled={!!dl.state} onClick={chooseEngine}>{tt("whisper-cli.exe seç…")}</button>:enginePath?<span className="studio-ready">✓ {tt("Kurulu")}</span>:<button className="chip" disabled={!!dl.state||!compatible} onClick={()=>getEngine(engineType)}>{tt("Motoru indir")}</button>}</div>
+      <section className="studio-config"><h4>{tt("Motor")}</h4><label className="studio-select-label">{tt("Çalıştırma yöntemi")}<select aria-label={tt("Whisper motoru")} value={engineType} disabled={!!dl.state} onChange={e=>changeEngine(e.target.value as "cpu"|"cuda"|"vulkan"|"own")}><option value="cpu">{tt("İşlemci (CPU)")}{cpu?" · "+tt("Kurulu"):" · 4 MB"}</option>{vulkan&&<option value="vulkan">{extraText("Ekran kartı (Vulkan)","Graphics card (Vulkan)")} · {tt("Kurulu")}</option>}{!(caps.known&&!caps.nvidia)&&<option value="cuda">NVIDIA CUDA 12{cuda?" · "+tt("Kurulu"):" · 457 MB"}</option>}<option value="own">{tt("Kendi motor dosyam")}</option></select></label>
+        <p className="muted small">{engineType==="vulkan"?extraText("Ekran kartında çalışır (Intel Arc, AMD, NVIDIA); işlemciden çok daha hızlı. Ses internete gönderilmez.","Runs on the graphics card (Intel Arc, AMD, NVIDIA); far faster than the processor. Audio never leaves this PC."):engineType==="cuda"?tt("NVIDIA ekran kartı ve uyumlu CUDA sürücüsü gerekir."):engineType==="cpu"?tt("Intel ve AMD sistemlerde de çalışır. Ses internete gönderilmez."):tt("Uyumlu whisper-cli.exe dosyanı seç.")}</p>
+        <div className="studio-row">{engineType==="own"?<button className="chip" disabled={!!dl.state} onClick={chooseEngine}>{tt("whisper-cli.exe seç…")}</button>:enginePath?<span className="studio-ready">✓ {tt("Kurulu")}</span>:<button className="chip" disabled={!!dl.state||!compatible} onClick={()=>{if(engineType==="cpu"||engineType==="cuda")void getEngine(engineType);}}>{tt("Motoru indir")}</button>}</div>
         {engineType==="own"&&engine&&<small className="extra-path" title={engine}>{fileName(engine)}</small>}
         {dlTarget.startsWith("engine:")&&dl.state&&<Progress phase={dl.state.phase} pct={dl.state.pct} eta={dl.state.eta}/>}
       </section>
-      <section className="studio-config"><h4>{tt("Model")}</h4><label className="studio-select-label">{tt("Altyazı modeli")}<select aria-label={tt("Whisper modeli")} disabled={!st||!!dl.state} value={modelOffer||modelChoice==="own"?modelChoice:""} onChange={e=>changeModel(e.target.value)}><option value="" disabled>{tt("Model seç")}</option>{offered.map(([name,size])=><option key={name} value={name}>{name}{name===recommended?" · "+tt("Önerilen"):""}{installed.has(name)?" · "+tt("Kurulu"):" · "+Math.round(size/1048576)+" MB"}</option>)}<option value="own">{tt("Kendi model dosyam")}</option></select></label>
+      <section className="studio-config"><h4>{tt("Model")}</h4><label className="studio-select-label">{tt("Altyazı modeli")}<select aria-label={tt("Whisper modeli")} disabled={!st||!!dl.state} value={modelOffer||selectedInstalled||modelChoice==="own"?modelChoice:""} onChange={e=>changeModel(e.target.value)}><option value="" disabled>{tt("Model seç")}</option>{offered.map(([name,size])=><option key={name} value={name}>{name}{name===recommended?" · "+tt("Önerilen"):""}{installed.has(name)?" · "+tt("Kurulu"):" · "+Math.round(size/1048576)+" MB"}</option>)}{st?.models.filter(m=>!offered.some(([n])=>n===m.name)).map(m=><option key={m.name} value={m.name}>{MODEL_LABEL[m.name]?.()??m.name} · {tt("Kurulu")}</option>)}<option value="own">{tt("Kendi model dosyam")}</option></select></label>
         {modelInfo&&<div className="studio-meters"><span>{tt("Hız")} <Dots n={modelInfo.speed} label={tt("Hız")}/></span><span>{tt("Doğruluk")} <Dots n={modelInfo.quality} label={tt("Doğruluk")}/></span></div>}
         <p className="muted small">{modelInfo?.note??tt("Bilgisayarındaki uyumlu ggml modelini seç.")}{selectedInstalled?" · "+mb(selectedInstalled.size)+" MB":""}</p>
         <div className="studio-row">{modelChoice==="own"?<button className="chip" disabled={!!dl.state} onClick={chooseModel}>{tt("Model dosyası seç…")}</button>:selectedInstalled?<span className="studio-ready">✓ {tt("Kurulu")}</span>:<button className="chip" disabled={!!dl.state||!modelOffer} onClick={()=>getModel(modelChoice)}>{tt("Modeli indir")}</button>}</div>
@@ -481,9 +548,26 @@ function NeedsFile({ embedded }: { embedded: boolean }) {
 
 type TrRun = { out: Cue[]; next: number; total: number; missing: number; last: number[] };
 
+/** Which AI translates ("" = the assistant's) and how hard it may think; both remembered. */
+const trProfile = (): AiProfile | null => { const v = store.get("studioTrAi") ?? ""; return v ? aiProfiles().find((x) => String(x.slot) === v) ?? null : null; };
+const trEffort = (): AiEffort => { const v = store.get("studioTrEffort"); return v === "off" || v === "medium" || v === "high" ? v : "low"; };
+/** what the chosen model can do with an effort: levels, on/off only, or nothing */
+function effortKind(provider: string, model: string): "levels" | "onoff" | "none" {
+  if (provider === "gemini") return "levels";
+  if (provider === "openai") return isOpenAiReasoningModel(model) ? "levels" : "none";
+  return "onoff"; // Claude, DeepSeek and other OpenAI-compatible servers: thinking on or off
+}
 function TranslateTab(p: StudioProps) {
+  const [aiSel, setAiSel] = useState(() => store.get("studioTrAi") ?? "");
+  const [effort, setEffortState] = useState<AiEffort>(trEffort);
+  const setEffort = (v: AiEffort) => { store.set("studioTrEffort", v || "low"); setEffortState(v); };
+  const profiles = aiProfiles();
+  const chosen = aiSel ? profiles.find((x) => String(x.slot) === aiSel) ?? null : null;
+  const cur = chosen ? getAiProfileUse(chosen) : captureAiUse();
+  const kind = effortKind(cur.provider, cur.model);
   const { cues, err: loadErr } = useSubCues(p.subFile);
-  const [target, setTarget] = useState(() => S.prefs.target() || (uiLang() === "tr" ? "tr" : "en"));
+  // never the subtitle's own language (a Turkish one goes to English by default)
+  const [target, setTarget] = useState(() => { const t = S.prefs.target() || (uiLang() === "tr" ? "tr" : "en"); const src = p.subFile ? fileLang(p.subFile) : ""; return src && src === t ? (t === "en" ? "tr" : "en") : t; });
   const [secondary, setSecondary] = useState(true);
   const [style, setStyle] = useState<TranslationStyle>(() => (store.get("studioStyle") === "literal" ? "literal" : "natural"));
   const [busy, setBusy] = useState(false);
@@ -492,15 +576,17 @@ function TranslateTab(p: StudioProps) {
   const [msg, setMsg] = useState("");
   const stop = useRef(false);
   const etaRef = useEta();
-  useEffect(() => () => { stop.current = true; }, []);
+  // the studio closes when a translation starts: it keeps running, shown in the bell
   // a new target or style starts over
   useEffect(() => { setRun(null); setMsg(""); }, [target, style, p.subFile]);
   if (!p.subFile) return <NeedsFile embedded={p.embedded} />;
   const source = fileLang(p.subFile);
   const batches = cues ? translationBatches(cues) : [];
+  // the language-learning style is its own file and its own entry, next to a normal translation of the same language
   const save = async (list: Cue[]) => {
-    const file = await S.saveSubtitle(p.path, target, serializeSrt(list));
-    p.onAttach(file, tt("Çeviri · {0}", langLabel(target)), secondary);
+    const literal = style === "literal";
+    const file = await S.saveSubtitle(p.path, literal ? target + "-lit" : target, serializeSrt(list));
+    p.onAttach(file, tt("Çeviri · {0}", langLabel(target)) + (literal ? " · " + extraText("dil öğrenme", "language learning") : ""), secondary);
   };
   const go = async (from: TrRun | null) => {
     if (!cues?.length) return;
@@ -508,33 +594,51 @@ function TranslateTab(p: StudioProps) {
     store.set("studioStyle", style);
     stop.current = false;
     setMsg(""); setBusy(true); etaRef.reset(); setEta(null);
-    const use = captureAiUse();
+    const pr = trProfile();
+    const use = pr ? getAiProfileUse(pr) : captureAiUse();
+    const k = effortKind(use.provider, use.model), eff = trEffort();
+    const runEffort: AiEffort = k === "none" ? "" : k === "onoff" ? (eff === "medium" || eff === "high" ? "high" : "off") : eff;
     const glossary = glossaryFrom(p.meta);
     let state: TrRun = from ?? { out: cues, next: 0, total: batches.length, missing: 0, last: [] };
     setRun(state);
+    const liveId = "tr-live:" + p.path + ":" + target, title = p.title, path = p.path;
+    const live = (pct: number, eta: number | null) => setTrLive(liveId, { id: liveId, path, title, art: artOf(path), pct,
+      text: extraText("Çeviri yapılıyor · ", "Translating · ") + langLabel(target) + leftText(eta) });
+    live((state.next / Math.max(1, state.total)) * 100, null);
+    let notice = "";
     try {
       for (let i = state.next; i < batches.length; i++) {
         if (stop.current) { setMsg(tt("Durduruldu. Kaldığı yerden devam edebilir ya da çevrilen kısmı saklayabilirsin.")); return; }
         const { system, user } = translationPrompt(batches[i], langLabel(target) + ` (${target})`, p.meta?.title ?? p.title, glossary, style);
-        let answer: unknown;
-        try { answer = await assistantJson(system, user, use); }
-        catch (error) {
-          // Retrying a missing/rejected key or quota cannot fix this batch.
-          if (stop.current || !use.key || !["server", "network", "unknown"].includes(classifyAiError(error))) throw error;
-          answer = await assistantJson(system, user, use);
+        let answer: unknown = null;
+        // a garbled or cut-off answer is asked again (up to 3 times); if it stays unreadable only this group keeps its
+        // original lines and the rest goes on. A missing/rejected key or quota cannot be fixed by asking again.
+        for (let tryNo = 1; ; tryNo++) {
+          // room for a whole group's answer (a 2500-token cap cut it off and broke the JSON)
+          try { answer = await assistantJson(system, user, use, 0.2, { effort: runEffort, maxTokens: 8192 }); break; }
+          catch (error) {
+            if (stop.current || !use.key || !["server", "network", "unknown"].includes(classifyAiError(error))) throw error;
+            if (tryNo >= 3) { if (/JSON/i.test(String(error))) { answer = null; break; } throw error; }
+          }
         }
-        const r = applyTranslation(state.out, batches[i], answer);
+        const r = answer == null ? { cues: state.out, missing: batches[i].lines.length } : applyTranslation(state.out, batches[i], answer);
         state = { out: r.cues, next: i + 1, total: batches.length, missing: state.missing + r.missing, last: batches[i].lines.slice(-4).map((l) => l.id) };
         setRun(state);
-        setEta(etaRef.push((state.next / state.total) * 100));
+        const e2 = etaRef.push((state.next / state.total) * 100);
+        setEta(e2); live((state.next / state.total) * 100, e2);
       }
       await save(state.out);
-      setMsg(state.missing ? tt("Çeviri kaydedildi. {0} satır çevrilemedi ve orijinal kaldı.", state.missing) : tt("Çeviri kaydedildi ve yüklendi."));
+      notice = state.missing ? tt("Çeviri kaydedildi. {0} satır çevrilemedi ve orijinal kaldı.", state.missing) : extraText("Çeviri hazır · ", "Translation ready · ") + langLabel(target);
+      setMsg(notice);
     } catch (e) {
       const t = errText(e);
-      setMsg(t === "nokey" ? tt("Ayarlar › Hesaplar ve anahtarlar'dan asistan için bir yapay zekâ seç.") : tt("Çeviri durdu: {0}", t));
+      notice = t === "nokey" ? tt("Ayarlar › Hesaplar ve anahtarlar'dan asistan için bir yapay zekâ seç.")
+        : /JSON/i.test(t) ? extraText("Çeviri durdu: yapay zekânın cevabı bozuk geldi, okunamadı. Tekrar dene.", "Translation stopped: the AI's answer came back garbled. Try again.")
+        : tt("Çeviri durdu: {0}", t);
+      setMsg(notice);
     } finally {
-      setBusy(false); setEta(null);
+      setBusy(false); setEta(null); setTrLive(liveId, null);
+      if (notice) pushNotice({ id: "whisper-tr:" + path.slice(0, 500) + ":" + Date.now(), title, art: artOf(path), text: notice });
     }
   };
   const partial = run && run.next > 0 && run.next < run.total && !busy;
@@ -547,7 +651,7 @@ function TranslateTab(p: StudioProps) {
         <div><small>{tt("Kaynak")}</small><b>{source === "und" ? tt("dil bilinmiyor") : langLabel(source)}</b></div>
         <div><small>{tt("Satır")}</small><b>{cues?.length ?? "…"}</b></div>
         <div><small>{tt("İstek")}</small><b>{batches.length || "…"}</b></div>
-        <div><small>{tt("Yapay zekâ")}</small><b className="ellipsis">{aiReady() ? aiName() : tt("seçilmemiş")}</b></div>
+        <div><small>{tt("Yapay zekâ")}</small><b className="ellipsis">{chosen ? chosen.name : aiReady() ? aiName() : tt("seçilmemiş")}</b></div>
       </div>
       <div className="studio-row">
         <label className="look-field">{tt("Hedef dil")}
@@ -558,6 +662,24 @@ function TranslateTab(p: StudioProps) {
           <button className={"seg sm" + (style === "literal" ? " on" : "")} disabled={busy} onClick={() => setStyle("literal")}>{tt("Aslına yakın (dil öğrenmek için)")}</button>
         </div>
       </div>
+      <div className="studio-row">
+        <label className="look-field">{extraText("Çeviren yapay zekâ", "Translating AI")}
+          <select value={aiSel} disabled={busy} onChange={(e) => { setAiSel(e.target.value); store.set("studioTrAi", e.target.value); }}>
+            <option value="">{extraText("Asistanınki", "The assistant's")}{aiReady() ? " · " + aiName() : ""}</option>
+            {profiles.map((x) => <option key={x.slot} value={String(x.slot)}>{x.name}{x.model ? " · " + x.model : ""}</option>)}
+          </select>
+        </label>
+        <div className="look-field">{extraText("Efor", "Effort")}
+          {kind === "levels" ? <div className="look-row" role="group" aria-label={extraText("Efor", "Effort")}>
+            {([["off", extraText("Kapalı", "Off")], ["low", extraText("Düşük", "Low")], ["medium", extraText("Orta", "Medium")], ["high", extraText("Yüksek", "High")]] as [AiEffort, string][]).map(([v, l]) =>
+              <button key={v} className={"seg sm" + (effort === v ? " on" : "")} aria-pressed={effort === v} disabled={busy} onClick={() => setEffort(v)}>{l}</button>)}
+          </div> : kind === "onoff" ? <div className="look-row" role="group" aria-label={extraText("Düşünme", "Thinking")}>
+            <button className={"seg sm" + (effort === "off" || effort === "low" ? " on" : "")} disabled={busy} onClick={() => setEffort("low")}>{extraText("Düşünme kapalı", "Thinking off")}</button>
+            <button className={"seg sm" + (effort === "medium" || effort === "high" ? " on" : "")} disabled={busy} onClick={() => setEffort("high")}>{extraText("Düşünme açık", "Thinking on")}</button>
+          </div> : <small className="muted">{extraText("Bu model düşünme ayarı almıyor.", "This model has no thinking setting.")}</small>}
+        </div>
+      </div>
+      {kind !== "none" && (effort === "medium" || effort === "high") && <small className="muted">{extraText("Altyazı çevirisinde düşünme kaliteyi az artırır; daha yavaştır ve daha çok token harcar.", "For subtitle translation thinking helps little; it is slower and uses more tokens.")}</small>}
       <label className="look-check"><input type="checkbox" checked={secondary} onChange={(e) => setSecondary(e.target.checked)} />{tt("İkinci altyazı olarak göster (orijinal de kalsın)")}</label>
       {!aiReady() && <div className="extra-warning">{tt("Asistan için yapay zekâ seçilmemiş (Ayarlar › Hesaplar ve anahtarlar).")}</div>}
       {busy && run ? (
@@ -567,7 +689,7 @@ function TranslateTab(p: StudioProps) {
         </div>
       ) : (
         <div className="studio-row">
-          <button className="primary" disabled={!cues?.length || !aiReady() || target === source} onClick={() => go(null)}>{tt("Çevir")}</button>
+          <button className="primary" disabled={!cues?.length || !aiReady() || target === source} onClick={() => { void go(null); p.onClose(); }}>{tt("Çevir")}</button>
           {partial && <button className="chip on" onClick={() => go(run)}>{tt("Kaldığı yerden devam et ({0}/{1})", run!.next, run!.total)}</button>}
           {partial && <button className="chip" onClick={() => save(run!.out).then(() => setMsg(tt("Çevrilen kısım kaydedildi; kalan satırlar orijinal."))).catch((e) => setMsg(errText(e)))}>{tt("Çevrilen kısmı kaydet")}</button>}
         </div>

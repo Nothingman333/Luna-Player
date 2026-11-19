@@ -270,6 +270,8 @@
 .tp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 12px; margin-bottom: 12px; }
 .tp-card { padding: 18px; border-radius: 18px; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.05); min-width: 0; }
 .tp-card.-wide { margin-bottom: 12px; }
+.tp-feel-word { color: var(--accent-soft); }
+.tp-scan { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 12px; }
 .tp-card h3 { font-family: Sora, sans-serif; font-size: 14px; margin: 0 0 4px; }
 .tp-card > p.muted { margin: 0 0 12px; }
 .tp-radar { width: 100%; max-width: 380px; display: block; margin: 0 auto; }
@@ -337,3 +339,8 @@
 
 button.tp-bar { width: 100%; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: 8px; padding: 4px; }
 button.tp-bar:hover { background: rgba(var(--acc-rgb),.08); }
+
+/* developer mode: how long the analysis took */
+.la-dev-time { margin-left: 10px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.la-dev-times { margin: 8px 0 0; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.la-dev-times b { color: var(--text); font-weight: 600; }

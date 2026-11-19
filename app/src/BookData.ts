@@ -4,7 +4,7 @@ import{invoke}from"./nativeCore";
 import{store}from"./library";
 import type{Book}from"./Books";
 import{writeDelta}from"./extrasModel";
-import{validIsbn,cleanBookQuery,olCandidates,googleCandidates,bookIdentity,publicImage,plainBookText}from"./bookDataModel";
+import{splitBookName,sameBook,validIsbn,cleanBookQuery,olCandidates,googleCandidates,bookIdentity,publicImage,plainBookText}from"./bookDataModel";
 import type{BookDetails,BookCandidate}from"./bookDataModel";
 export type{BookDetails,BookCandidate}from"./bookDataModel";
 function objectData<T>(key:string):Record<string,T>{const x=store.json<unknown>(key,{});return x&&typeof x==="object"&&!Array.isArray(x)?x as Record<string,T>:{};}
@@ -70,4 +70,32 @@ export function movePlannedBook(path:string,direction:-1|1){
  guard("bookWantToRead","array");const before=store.get("bookWantToRead");
  const next=reorderReadingPlan(laterBooks(),path,direction);
  writeDelta(localStorage,[{key:"bookWantToRead",before,after:JSON.stringify(next)}]);bookDataChanged();
+}
+
+/** Books added without details get them by themselves: the name cleaned, then Open Library / Google Books.
+ *  Only a sure match brings a cover and description; otherwise just the cleaned name. Each book is tried once;
+ *  details written by hand (locked) are never touched, and "Bilgileri düzenle" can still change all of it. */
+let identifying=false;
+export async function autoIdentifyBooks(books:{path:string;title:string;author:string;isbn?:string;identityTitle?:string;identityAuthor?:string}[]){
+ if(identifying)return;identifying=true;
+ try{
+  const tried=new Set(store.json<string[]>("bookAutoTried",[]));
+  // found once without a cover (an older, stricter match): looked up again one time
+  const coverTried=new Set(store.json<string[]>("bookCoverTried",[]));
+  const noCover=(p:string)=>{const d=bookDetails(p);return !!d&&!d.locked&&!d.cover&&!coverTried.has(p);};
+  const todo=books.filter(b=>b.path&&((!tried.has(b.path)&&!bookDetails(b.path))||noCover(b.path))).slice(0,25);
+  for(const b of todo){
+   const raw={title:b.identityTitle??b.title,author:b.identityAuthor??b.author};
+   const want=splitBookName(raw.title,raw.author);
+   let details:BookDetails|null=null;
+   try{const r=await lookupBookInfo({...want,isbn:b.isbn},true);const hit=r.candidates.find(c=>sameBook(want,c));if(hit){details=await candidateDetails(hit);
+    // "Kesin Inanclilar" on Open Library: the file's own spelling (with its Turkish letters) is kept when it is the same title
+    if(want.title&&sameBook({title:want.title,author:""},{title:details.title,author:""})&&want.title.length>=details.title.length)details.title=want.title;}}catch{/* offline: the cleaned name below */}
+   if(!details&&(want.title!==raw.title.trim()||want.author!==raw.author.trim()))details={title:want.title,author:want.author,isbn:b.isbn??"",cover:"",description:"",subjects:[]};
+   tried.add(b.path);store.set("bookAutoTried",JSON.stringify([...tried]));
+   if(noCover(b.path)){coverTried.add(b.path);store.set("bookCoverTried",JSON.stringify([...coverTried]));if(!details?.cover)continue;}
+   if(details){try{saveBookDetails([{path:b.path,details:{...details,locked:false,source:details.source||"auto"}}]);}catch{/* a bad cover address etc.: left as it was */}}
+   await new Promise(r=>setTimeout(r,400));
+  }
+ }finally{identifying=false;}
 }

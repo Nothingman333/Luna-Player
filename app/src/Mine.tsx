@@ -10,10 +10,10 @@ import { menuAgain,MenuEntry } from "./Screens";
 import { uniqueCollectionItems } from "./safety";
 
 // ---------- collections ----------
-export type CKind = "film" | "music" | "book";
+export type CKind = "film" | "music" | "book" | "web";
 export type CItem = { kind: CKind; title: string; by?: string; year?: string; note?: string; path?: string; src?: string; cover?: string | null;
   /** a free edition found for a book (downloaded on a click) and where it is from */
-  url?: string; from?: string };
+  url?: string; from?: string; webType?: "page" | "link" | "text" | "image" | "video" | "audio" };
 export type Collection = { id: string; name: string; about?: string; at: number; items: CItem[] };
 
 export const subs = new Set<() => void>();
@@ -68,7 +68,7 @@ export const endFilmSitting = () => { sess = null; };
 // ---------- what the assistant knows (every part) ----------
 export function mineContext(): string {
   const sec = (h: string, l: string[]) => `## ${h}\n${l.length ? l.map((x) => "- " + x).join("\n") : "(yok)"}`;
-  const kindName: Record<CKind, string> = { film: "film", music: "müzik", book: "kitap" };
+  const kindName: Record<CKind, string> = { film: "film", music: "müzik", book: "kitap", web: "web/medya" };
   const since = Date.now() - 14 * 86400_000;
   const hist = [
     ...loadFilmHistory().filter((x) => x.at > since).map((x) => ({ at: x.at, t: `film: ${x.title} (${Math.round(x.mins)} dk)` })),

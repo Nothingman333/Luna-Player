@@ -1,11 +1,14 @@
 import { appStorage as localStorage } from "./appStorage";
-import { flushDatabaseStorage } from "./databaseStorage";
+import { flushDatabaseStorage, storageVersion } from "./databaseStorage";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {startupPhase,startupFailure,startupReady} from "./startupStatus";
 import {installDebugTelemetry,debugSecrets} from "./debugTelemetry";
 import { createSnapshotWriter } from "./snapshotWriter";
 import { applyAccessibility } from "./Extras";
 import React from "react";
+import { installMenuPlate } from "./menuPlate";
+import { installExitGhosts } from "./exitGhosts";
+import { installRubberBand, installScrollCalm } from "./rubberBand";
 import ReactDOM from "react-dom/client";
 // Fonts ship with the app: no network wait, no flash of fallback text, works offline.
 import "@fontsource/sora/500.css";
@@ -55,13 +58,22 @@ if(!isSubs){debugSecrets(()=>SECRET_KEYS.map(key=>store.get(key)||""));installDe
 // WebView2 keeps localStorage in a database it may throw away after a crash. Luna mirrors it to
 // luna-state.json and restores from there when the webview's copy is gone.
 const saveSnapshot = createSnapshotWriter(json => invoke<void>("state_save", { json }));
-const snapshot = () => {
+// The copy is the whole of localStorage (7 MB here) read and turned into one string on the page's thread: done every
+// 20 s it froze Keşfet's rows for 100–500 ms mid-drag. It now runs only after a change, and when the page is idle.
+let snappedAt = -1;
+const snapshotNow = () => {
   if (storageRestoreInProgress()) return;
+  snappedAt = storageVersion;
   try {
     const o: Record<string, string> = {};
     for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i)!; if (!SECRET_KEYS.includes(k)) o[k] = localStorage.getItem(k) ?? ""; }
     if (Object.keys(o).length > 2) void saveSnapshot(o).catch(() => {});
   } catch {}
+};
+const snapshot = (now = false) => {
+  if (!now && snappedAt === storageVersion) return;
+  if (now || typeof requestIdleCallback !== "function") return snapshotNow();
+  requestIdleCallback(() => { if (snappedAt !== storageVersion) snapshotNow(); }, { timeout: 15000 });
 };
 
 (async () => {
@@ -84,11 +96,15 @@ const snapshot = () => {
       catch { startupFailure(new Error("Kayıtlar diske yazılamadı. Pencere açık tutuldu; boş alanı kontrol edip yeniden kapatın.")); }
     });
     setInterval(snapshot, 20000);
-    window.addEventListener("beforeunload", snapshot);
-    document.addEventListener("visibilitychange", () => { snapshot();void flushDatabaseStorage().catch(()=>{}); });
+    window.addEventListener("beforeunload", () => snapshot(true));
+    document.addEventListener("visibilitychange", () => { snapshot(document.visibilityState === "hidden");void flushDatabaseStorage().catch(()=>{}); });
     setTimeout(snapshot, 5000);
   }
   startupPhase("react_render · Arayüz / Interface");
+  installMenuPlate();
+  installExitGhosts();
+  installRubberBand();
+  installScrollCalm();
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
       {isSubs ? <SubsOverlay /> : <ErrorBoundary><App /></ErrorBoundary>}

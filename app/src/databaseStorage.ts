@@ -4,12 +4,18 @@ let pending = new Map<string,string|null>();
 let timer: ReturnType<typeof setTimeout> | undefined;
 let writing: Promise<void> | null = null;
 let excluded = new Set<string>();
+/** Goes up with every stored change: the state file copy is skipped while nothing changed. */
+export let storageVersion = 0;
+/** True while the user drags a poster row: the batched disk write waits until the drag ends, so it can't take frames from it. */
+export const uiBusy = { drag: false };
+const later = () => { clearTimeout(timer); timer = setTimeout(() => { if (uiBusy.drag) later(); else void flushDatabaseStorage().catch(() => {}); }, uiBusy.drag ? 300 : 150); };
 export function startDatabaseStorage(data: Record<string,string>, secrets: string[]) {
   excluded=new Set(secrets);
   activateStorage(data,(key,value) => {
+    storageVersion++;
     if(excluded.has(key)||key==="__seed")return;
     pending.set(key,value);
-    clearTimeout(timer);timer=setTimeout(()=>void flushDatabaseStorage().catch(()=>{}),150);
+    later();
   });
 }
 /** Retain failed deltas, and always apply an older batch before a newer mutation of the same key. */

@@ -15,6 +15,7 @@ import { invoke } from "./nativeCore";
 import { I,Icon,MenuEntry,openMenu } from "./Screens";
 import { askAssistant,libMatch,youtubeTrailer } from "./Taste";
 
+import { webSource, webTypeLabel } from "./BrowserCollections";
 import { identityText,matchCollectionBook,sameCollectionItem } from "./safety";
 function useTick() {
   const [, bump] = useState(0);
@@ -37,11 +38,12 @@ function historyEntries(items: Item[], play: (path: string) => void): HEntry[] {
 
 // ---------- the page ----------
 const KIND_ICON: Record<CKind, string> = {
+  web: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c-5 5-5 13 0 18 5-5 5-13 0-18",
   film: "M4 4h16v16H4zM8 4v16M16 4v16",
   music: "M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
   book: "M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5",
 };
-const KIND_LABEL = (): Record<CKind, string> => ({ film: tt("Filmler ve diziler"), music: tt("Müzik"), book: tt("Kitaplar") });
+const KIND_LABEL = (): Record<CKind, string> => ({ film: tt("Filmler ve diziler"), music: tt("Müzik"), book: tt("Kitaplar"), web: tt("Web ve medya") });
 const ASK_FOR = (x: CItem) => x.kind === "film" ? tt("“{0}”{1} filmini kütüphanemde ara; yoksa nasıl izleyebileceğimi söyle", x.title, x.year ? ` (${x.year})` : "")
   : x.kind === "music" ? tt("“{0}”{1} şarkısını çal", x.title, x.by ? ` (${x.by})` : "")
   : tt("“{0}”{1} kitabını bul", x.title, x.by ? ` (${x.by})` : "");
@@ -73,6 +75,7 @@ export function MinePage({ tab, setTab, items, play, onClose, openId }: { tab: M
   const ask = (q: string) => askAssistant(q);
   // what's at hand: a film or a book on disk opens at once, anything else goes to the assistant
   const local = (x: CItem): (() => void) | null => {
+    if (x.kind === "web") return x.url ? () => { close(); openUrl(x.webType === "text" ? x.from || x.url! : x.url!); } : null;
     if (x.kind === "film") {
       const it = (x.path && items.find((i) => i.files.some((f) => f.path === x.path))) || libMatch(items, { title: x.title, year: x.year });
       return it ? () => { close(); play(x.path && it.files.some((f) => f.path === x.path) ? x.path : it.files[0].path); } : null;
@@ -142,7 +145,7 @@ export function MinePage({ tab, setTab, items, play, onClose, openId }: { tab: M
     { label: tt("Koleksiyonu sil"), danger: true, act: () => del(c) },
   ];
   const itemMenu = (c: Collection, x: CItem): MenuEntry[] => [
-    { label: local(x) ? (x.kind === "film" ? tt("Oynat") : x.kind === "book" ? tt("Oku") : tt("Çal")) : x.url ? tt("İndir ve oku") : tt("Asistanla bul"), act: () => go(x, c) },
+    { label: x.kind === "web" ? tt("Kaynak bağlantısını aç") : local(x) ? (x.kind === "film" ? tt("Oynat") : x.kind === "book" ? tt("Oku") : tt("Çal")) : x.url ? tt("İndir ve oku") : tt("Asistanla bul"), act: () => go(x, c) },
     { label: "✦  " + tt("Bu ne hakkında?"), act: () => ask(tt("“{0}”{1} ne hakkında? Spoiler vermeden anlat", x.title, x.by ? ` (${x.by})` : x.year ? ` (${x.year})` : "")) },
     { label: tt("Google'da ara"), act: () => openUrl(googleFor(x)) },
     ...(x.kind === "film" ? [{ label: tt("YouTube'da fragman"), act: () => openUrl(youtubeTrailer(x.year ? `${x.title} (${x.year})` : x.title)) }] : []),
@@ -157,7 +160,7 @@ export function MinePage({ tab, setTab, items, play, onClose, openId }: { tab: M
           <aside className="ws-side">
             <div className="ws-side-head"><div className="ws-brand"><Icon d={STACK} size={18} />  {tt("Benim Luna'm")}</div></div>
             <nav className="ws-hist set-nav">
-              {([["collections", tt("Koleksiyonlar"), tt("Film, müzik, kitap bir arada"), STACK], ["history", tt("Geçmiş"), tt("İzlediğin, dinlediğin, okuduğun"), CLOCK]] as const).map(([id, label, sub, ic]) => (
+              {([["collections", tt("Koleksiyonlar"), tt("Film, müzik, kitap ve web bir arada"), STACK], ["history", tt("Geçmiş"), tt("İzlediğin, dinlediğin, okuduğun"), CLOCK]] as const).map(([id, label, sub, ic]) => (
                 <button key={id} className={"set-nav-i" + (id === tab ? " on" : "")} onClick={() => { setTab(id); setOpen(null); }}>
                   <Icon d={ic} size={18} />
                   <span className="set-nav-t"><b>{label}</b><small>{sub}</small></span>
@@ -203,30 +206,31 @@ export function MinePage({ tab, setTab, items, play, onClose, openId }: { tab: M
                     </form>
                   )}
                   {cur.items.length > 0 && !cur.items.some((x) => matches([x.title, x.by, x.year, x.note].join(" "))) && <div className="muted library-empty">{tt("Eşleşen film yok.")}</div>}
-                  {cur.items.length ? (["film", "music", "book"] as CKind[]).filter((k) => cur.items.some((x) => x.kind === k)).map((k) => (
+                  {cur.items.length ? (["film", "music", "book", "web"] as CKind[]).filter((k) => cur.items.some((x) => x.kind === k)).map((k) => (
                     <section key={k} className="mine-sec">
                       <h3><Icon d={KIND_ICON[k]} size={15} />  {KIND_LABEL()[k]}</h3>
                       <div className="mine-items">
                         {cur.items.filter((x) => x.kind === k && matches([x.title, x.by, x.year, x.note].join(" "))).map((x) => {
                           const here = !!local(x);
                           return (
-                            <div role="button" tabIndex={0} key={x.title + (x.by ?? "")} className={"mine-item" + (getting === x.title ? " busy" : "")} onClick={() => getting !== x.title && go(x, cur)}
+                            <div role="button" tabIndex={0} key={x.title + (x.by ?? "") + (x.url ?? "") + (x.note ?? "")} className={"mine-item" + (getting === x.title ? " busy" : "")} onClick={() => getting !== x.title && go(x, cur)}
                               onKeyDown={(e) => e.key === "Enter" && e.currentTarget === e.target && go(x, cur)} onContextMenu={(e) => openMenu(e, itemMenu(cur, x))}
-                              title={here ? tt("Kütüphanende var · aç") : x.url ? tt("Ücretsiz baskısı var ({0}) · indir ve oku", x.from ?? "") : tt("Kütüphanende yok · asistan bulsun")}>
-                              <span className={"mine-ic " + k}><Icon d={KIND_ICON[k]} size={16} /></span>
+                              title={x.kind === "web" ? tt("Kaynak bağlantısını aç") : here ? tt("Kütüphanende var · aç") : x.url ? tt("Ücretsiz baskısı var ({0}) · indir ve oku", x.from ?? "") : tt("Kütüphanende yok · asistan bulsun")}>
+                              <span className={"mine-ic " + k}>{x.kind === "web" && x.cover ? <img src={x.cover} alt="" referrerPolicy="no-referrer" loading="lazy" style={{width:36,height:36,objectFit:"cover",borderRadius:8}} onError={e=>{e.currentTarget.style.display="none";}}/> : <Icon d={KIND_ICON[k]} size={16} />}</span>
                               <span className="mine-t">
                                 <b className="ellipsis">{x.title}{x.year ? <span className="muted"> ({x.year})</span> : null}</b>
                                 {x.by && <span className="muted small ellipsis">{x.by}</span>}
+                                {x.kind === "web" && <span className="muted small ellipsis">{webTypeLabel(x)} · {webSource(x)}</span>}
                                 {x.note && <span className="small mine-note">{x.note}</span>}
                               </span>
                               <span className="mine-acts" onClick={(e) => e.stopPropagation()}>
                                 {k === "film" && <button className="mine-ab yt" title={tt("YouTube'da fragman")} aria-label={tt("YouTube'da fragman")}
                                   onClick={() => openUrl(youtubeTrailer(x.year ? `${x.title} (${x.year})` : x.title))}><Icon d={YT} size={15} /></button>}
-                                <button className="mine-ab g" title={tt("Google'da ara")} aria-label={tt("Google'da ara")} onClick={() => openUrl(googleFor(x))}><GoogleG /></button>
+                                <button className="mine-ab g" title={tt("Google'da ara")} aria-label={tt("Google'da ara")} onClick={() => { if(x.kind === "web")close();openUrl(googleFor(x)); }}><GoogleG /></button>
                                 {!here && <button className="mine-ab" title={tt("Asistana buldur")} aria-label={tt("Asistana buldur")} onClick={() => go(x, cur)}>✦</button>}
                                 {getting === x.title ? <span className="mine-ab"><span className="mu-spin sm" /></span>
-                                  : here ? <button className="mine-ab on" title={k === "film" ? tt("Oynat") : k === "book" ? tt("Oku") : tt("Çal")} aria-label={k === "film" ? tt("Oynat") : k === "book" ? tt("Oku") : tt("Çal")} onClick={() => go(x, cur)}>
-                                      <Icon d={k === "book" ? KIND_ICON.book : I.play} fill={k !== "book"} size={14} /></button>
+                                  : here ? <button className="mine-ab on" title={k === "web" ? tt("Bağlantıyı aç") : k === "film" ? tt("Oynat") : k === "book" ? tt("Oku") : tt("Çal")} aria-label={k === "web" ? tt("Bağlantıyı aç") : k === "film" ? tt("Oynat") : k === "book" ? tt("Oku") : tt("Çal")} onClick={() => go(x, cur)}>
+                                      <Icon d={k === "web" ? "M7 17 17 7M7 7h10v10" : k === "book" ? KIND_ICON.book : I.play} fill={k !== "book" && k !== "web"} size={14} /></button>
                                   : x.url ? <button className="mine-ab on" title={tt("İndir ve oku")} aria-label={tt("İndir ve oku")} onClick={() => go(x, cur)}><Icon d={I.down} size={15} /></button> : null}
                               </span>
                             </div>
@@ -247,7 +251,7 @@ export function MinePage({ tab, setTab, items, play, onClose, openId }: { tab: M
                         {visibleCols.map((c) => (
                           <button key={c.id} className="mine-col" onClick={() => setOpen(c.id)} onContextMenu={(e) => openMenu(e, colMenu(c))}>
                             <b className="ellipsis">{c.name}</b>
-                            <span className="muted small">{(["film", "music", "book"] as CKind[]).map((k) => [k, c.items.filter((x) => x.kind === k).length] as const).filter(([, n]) => n).map(([k, n]) => `${n} ${k === "film" ? tt("film") : k === "music" ? tt("şarkı") : tt("kitap")}`).join(" · ") || tt("boş")}</span>
+                            <span className="muted small">{(["film", "music", "book", "web"] as CKind[]).map((k) => [k, c.items.filter((x) => x.kind === k).length] as const).filter(([, n]) => n).map(([k, n]) => `${n} ${k === "film" ? tt("film") : k === "music" ? tt("şarkı") : k === "web" ? tt("web/medya") : tt("kitap")}`).join(" · ") || tt("boş")}</span>
                             {c.about && <span className="small mine-note">{c.about}</span>}
                           </button>
                         ))}

@@ -1,0 +1,10 @@
+const fs=require('fs'),path=require('path'),assert=require('assert/strict'),ts=require('typescript');
+const m={exports:{}};new Function('exports','module',ts.transpileModule(fs.readFileSync(path.join(__dirname,'../src/tasteThemes.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText)(m.exports,m);
+const {themeGroups:g}=m.exports,w=(title,...names)=>({title,weight:1,labels:names.map(name=>({name,share:50}))});
+assert.equal(g([w('A','Moral ambiguity of Robin Hood')],8).length,0);
+const t=g([w('A','Çözülmemiş Travmalar'),w('B','Yas ve Travma')],8);assert.equal(t.length,1);assert.deepEqual(t[0].works,['A','B']);
+assert.equal(g([w('A','Aile'),w('A','Aile bağları')],8).length,0);
+const order=g([w('A','Yalnızlık','Merak'),w('B','Yalnızlık'),{title:'C',weight:.2,labels:[{name:'Merak',share:50}]}],8);assert.deepEqual(order.map(x=>x.name),['Yalnızlık','Merak']);
+const bridge=g([w('A','Aile'),w('B','Travma'),w('C','Aile travması')],8);assert.equal(bridge.length,1);assert.equal(bridge[0].works.length,3);
+assert.equal(g([],8).length,0);
+console.log('Taste themes: single-title labels hidden, shared words grouped, weighted order, bridged groups merged.');

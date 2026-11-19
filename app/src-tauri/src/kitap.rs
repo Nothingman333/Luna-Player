@@ -15,6 +15,8 @@ pub struct BookReviews {
     /// the book's score on 1000Kitap (out of 10) and how many people read it
     pub rating: Option<f64>,
     pub readers: Option<u64>,
+    /// where the reviews came from ("1000Kitap", "Goodreads" or both), for the labels
+    pub site: String,
 }
 
 fn fold(s: &str) -> String {
@@ -95,7 +97,7 @@ fn parse_page(data: &Value) -> (Vec<Review>, bool, Option<f64>, Option<u64>) {
     (out, r["hasMore"].as_bool().unwrap_or(false), book["puan"].as_f64(), book["okuduDuz"].as_u64())
 }
 
-pub async fn reviews(title: &str, author: Option<&str>, count: usize, progress: Progress<'_>, found: &(dyn Fn(&[Review]) + Send + Sync)) -> Result<BookReviews, String> {
+async fn kitap_reviews(title: &str, author: Option<&str>, count: usize, progress: Progress<'_>, found: &(dyn Fn(&[Review]) + Send + Sync)) -> Result<BookReviews, String> {
     let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(20)).build().map_err(|e| e.to_string())?;
     let count = count.clamp(1, 100);
     progress(tr!("1000Kitap'ta aranıyor", "Looking on 1000Kitap"));
@@ -128,7 +130,102 @@ pub async fn reviews(title: &str, author: Option<&str>, count: usize, progress: 
         }
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     }
-    Ok(BookReviews { url, reviews: out, rating, readers })
+    Ok(BookReviews { url, reviews: out, rating, readers, site: "1000Kitap".into() })
+}
+
+const GR: &str = "https://www.goodreads.com";
+
+/// Goodreads review HTML ("<b>", "<br />", "&amp;") as plain text.
+fn strip_html(h: &str) -> String {
+    let h = h.replace("<br />", "
+").replace("<br>", "
+").replace("<br/>", "
+");
+    let mut out = String::new();
+    let mut tag = false;
+    for c in h.chars() {
+        match c { '<' => tag = true, '>' => tag = false, c if !tag => out.push(c), _ => {} }
+    }
+    let out = out.replace("&amp;", "&").replace("&quot;", "\"").replace("&#39;", "'").replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " ");
+    let lines: Vec<&str> = out.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+    lines.join("
+").chars().take(6000).collect()
+}
+
+/// Goodreads' review list from a book page's Apollo state: the reviews, the average (out of 5) and how many rated it.
+fn parse_goodreads(data: &Value) -> (Vec<Review>, Option<f64>, Option<u64>) {
+    let Some(state) = data["props"]["pageProps"]["apolloState"].as_object() else { return (vec![], None, None) };
+    let mut out = vec![];
+    let (mut rating, mut count) = (None, None);
+    for v in state.values() {
+        match v["__typename"].as_str() {
+            Some("Review") => {
+                let text = strip_html(v["text"].as_str().unwrap_or(""));
+                if text.chars().count() < 40 { continue; }
+                let author = v["creator"]["__ref"].as_str().and_then(|k| state.get(k)).and_then(|u| u["name"].as_str()).unwrap_or("").to_string();
+                let stars = v["rating"].as_f64().filter(|r| *r > 0.0).map(|r| r as f32);
+                out.push(Review { author, stars, spoiler: v["spoilerStatus"].as_bool().unwrap_or(false), text, full: None });
+            }
+            Some("BookWork") | Some("Work") => {
+                rating = rating.or(v["stats"]["averageRating"].as_f64());
+                count = count.or(v["stats"]["ratingsCount"].as_u64());
+            }
+            _ => {}
+        }
+    }
+    (out, rating, count)
+}
+
+/// The first book on a Goodreads search page.
+fn pick_goodreads(html: &str) -> Option<String> {
+    let at = html.find("href=\"/book/show/")? + 6;
+    let slug = html[at..].split(['"', '?']).next()?;
+    Some(slug.to_string())
+}
+
+async fn goodreads_reviews(title: &str, author: Option<&str>, progress: Progress<'_>) -> Result<BookReviews, String> {
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(20)).build().map_err(|e| e.to_string())?;
+    progress(tr!("Goodreads'te aranıyor", "Looking on Goodreads"));
+    let q = match author { Some(a) if !a.trim().is_empty() => format!("{title} {a}"), _ => title.to_string() };
+    let search = get_page(&client, &format!("{GR}/search?q={}", urlencoding(&q))).await?;
+    let path = pick_goodreads(&search).ok_or_else(|| tr!("Goodreads'te bu kitap bulunamadı", "This book wasn't found on Goodreads"))?;
+    let url = format!("{GR}{path}");
+    let html = get_page(&client, &url).await?;
+    let data = next_data(&html).ok_or_else(|| tr!("Goodreads sayfası okunamadı", "Couldn't read the Goodreads page"))?;
+    let (reviews, rating, readers) = parse_goodreads(&data);
+    Ok(BookReviews { url, reviews, rating: rating.map(|r| r * 2.0), readers, site: "Goodreads".into() })
+}
+
+/// Reviews from 1000Kitap and Goodreads together, whatever Luna's language: Goodreads gives up to half,
+/// 1000Kitap fills the rest, and Goodreads tops up when 1000Kitap has too few (or doesn't know the book).
+/// Only the analysis written from them follows Luna's language.
+pub async fn reviews(title: &str, author: Option<&str>, count: usize, progress: Progress<'_>, found: &(dyn Fn(&[Review]) + Send + Sync)) -> Result<BookReviews, String> {
+    let count = count.clamp(1, 100);
+    let gr = goodreads_reviews(title, author, progress).await;
+    let mut gr_rows: Vec<Review> = gr.as_ref().map(|g| g.reviews.clone()).unwrap_or_default();
+    let first: Vec<Review> = gr_rows.drain(..gr_rows.len().min(count / 2)).collect();
+    found(&first);
+    let kitap = kitap_reviews(title, author, count - first.len(), progress, found).await;
+    let mut out = first;
+    let (url, rating, readers, mut sites) = match &kitap {
+        Ok(k) => { out.extend(k.reviews.iter().cloned()); (k.url.clone(), k.rating, k.readers, vec!["1000Kitap"]) }
+        Err(_) => (String::new(), None, None, vec![]),
+    };
+    let rest: Vec<Review> = gr_rows.into_iter().take(count.saturating_sub(out.len())).collect();
+    found(&rest);
+    out.extend(rest);
+    if let Ok(g) = &gr {
+        if out.iter().any(|r| g.reviews.iter().any(|x| x.text == r.text)) { sites.push("Goodreads"); }
+    }
+    if out.is_empty() {
+        return Err(match (kitap, gr) { (Err(a), Err(b)) => format!("{a} · {b}"), (Err(a), _) => a, (_, Err(b)) => b, _ => tr!("İnceleme bulunamadı", "No reviews found") });
+    }
+    progress(tr!("{} inceleme alındı", "{} reviews read", out.len()));
+    let (url, rating, readers) = match (&gr, url.is_empty()) {
+        (Ok(g), true) => (g.url.clone(), g.rating, g.readers),
+        _ => (url, rating, readers),
+    };
+    Ok(BookReviews { url, reviews: out, rating, readers, site: sites.join(" + ") })
 }
 
 #[cfg(test)]

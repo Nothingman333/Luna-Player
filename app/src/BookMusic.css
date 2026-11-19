@@ -45,3 +45,67 @@
 .book-page-notes label{display:flex;align-items:center;gap:8px}.book-page-notes input{width:110px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text)}
 .book-page-notes textarea{width:100%;min-height:90px;resize:vertical;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text);font:inherit}
 .book-page-note-list{max-height:40vh;overflow:auto;display:grid;gap:8px;margin-top:16px}.book-page-note{display:flex;gap:10px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:10px}.book-page-note-jump{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;text-align:left;background:none;color:var(--text);border:0;padding:4px;cursor:pointer}.book-page-note-jump b{color:var(--accent);font-size:12px}.book-page-note-jump span{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px}
+
+/* audiobook mark: a corner tab cut into the cover's top left, moving with the cover */
+.bk-cov-wrap .ab-badge{position:absolute;top:0;left:0;z-index:2;display:grid;place-items:center;width:30px;height:28px;
+  border-radius:4px 0 10px 0;background:rgba(0,0,0,.55);color:var(--text);-webkit-backdrop-filter: none;backdrop-filter: none;
+  pointer-events:none;transition:transform .3s var(--ease, ease)}
+.bk-card:hover:not(:disabled) .ab-badge{transform:translateY(-4px)}
+/* the usual "i", placed as the headphone tab's mirror: same corner gap, same centre line */
+.bk-card.ab .bk-cov-wrap .info-btn{top:-1px;right:0}
+.bk-card.ab:hover:not(:disabled) .bk-cov-wrap .info-btn{transform:translateY(-4px)}
+.bk-card.ab:hover:not(:disabled) .bk-cov-wrap .info-btn:hover{transform:translateY(-4px) scale(1.12) !important}
+/* the studio opened from the full-screen audiobook/podcast view sits above it */
+.modal-bg:has(.sub-studio-modal) { z-index: 80; }
+
+/* ---- subtitle picker and search on the audiobook / podcast screen ---- */
+.mu-subpick { width: 340px; gap: 6px; }
+.mu-sp-row { display: flex; align-items: stretch; gap: 6px; }
+.mu-sp-pick { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 8px 12px; border-radius: 12px; text-align: left; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03); color: var(--text); font-size: 13px; }
+.mu-sp-pick:hover { border-color: rgba(255,255,255,0.24); }
+.mu-sp-pick.on { border-color: var(--accent); background: rgba(255,255,255,0.07); }
+.mu-sp-pick > * { max-width: 100%; }
+.mu-sp-x { width: 32px; flex: none; border-radius: 12px; font-size: 18px; color: var(--muted); border: 1px solid rgba(255,255,255,0.08); }
+.mu-sp-x:hover { color: var(--text); border-color: rgba(255,255,255,0.28); }
+.mu-sp-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); }
+.mu-sub-tools { display: flex; align-items: center; flex-wrap: nowrap; gap: 12px; margin-right: 8px; }
+.mu-sub-tools input[type="text"], .mu-sub-tools input:not([type]) { height: 32px; min-width: 180px; padding: 0 12px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.14); background: rgba(0,0,0,0.35); color: var(--text); font-size: 13px; }
+/* the delete question under a subtitle beside the user's file */
+.mu-sp-row { flex-wrap: wrap; }
+.mu-sp-row > .mu-sp-actions { flex-basis: 100%; }
+.lyrics.dual{justify-content:center;min-height:100%}
+.ly .ly-tr{display:block;margin-top:4px;font-size:.62em;font-weight:500;color:var(--accent)}
+.ly:not(.on) .ly-tr{opacity:.55}
+.mu-sp-2{flex:none;border:1px solid var(--line);background:none;color:var(--muted);border-radius:999px;font:inherit;font-size:11px;padding:3px 8px;cursor:pointer}
+.mu-sp-2.on{background:var(--accent);border-color:var(--accent);color:#000}
+.lyrics.side{align-items:stretch}
+.lyrics.side .ly{display:grid;grid-template-columns:1fr 1fr;gap:20px;width:100%;text-align:left}
+.lyrics.side .ly-tr2{color:var(--accent)}
+.lyrics.side .ly:not(.on) .ly-tr2{opacity:.55}
+.mu-sp-item{flex:1;min-width:0;display:flex;align-items:center;gap:8px;padding-right:10px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(255,255,255,.03)}
+.mu-sp-item:hover{border-color:rgba(255,255,255,.24)}
+.mu-sp-item.on{border-color:var(--accent);background:rgba(255,255,255,.07)}
+.mu-sp-item .mu-sp-pick{border:0;background:none;padding:10px 12px}
+.mu-sp-badge{flex:none;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font:inherit;font-size:12px;font-weight:600;padding:0}
+.mu-sp-badge.one{background:var(--accent);color:#000}
+.mu-sp-badge.two{background:none;border:1.5px dashed rgba(255,255,255,.28);color:var(--muted);cursor:pointer}
+.mu-sp-badge.two:hover{border-color:var(--accent);color:var(--accent)}
+.mu-sp-badge.two.on{border:1.5px solid var(--accent);color:var(--accent)}
+.mu-sp-add{text-align:left;padding:10px 12px;border-radius:12px;border:1px dashed rgba(255,255,255,.14);background:none;color:var(--muted);font:inherit;font-size:13px;cursor:pointer}
+.mu-sp-add:hover{color:var(--text);border-color:rgba(255,255,255,.3)}
+.mu-sp-lb{margin-top:4px}
+.mu-sp-layouts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mu-sp-lay{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);color:var(--text);font:inherit;font-size:13px;cursor:pointer}
+.mu-sp-lay.on{border-color:var(--accent)}
+.mu-sp-lay .pv{display:flex;gap:4px;width:100%}
+.mu-sp-lay .pv.stack{flex-direction:column}
+.mu-sp-lay .pv i{display:block;height:4px;border-radius:2px;background:rgba(255,255,255,.75)}
+.mu-sp-lay .pv i+i{background:var(--accent)}
+.mu-sp-lay .pv.stack i{width:85%}.mu-sp-lay .pv.stack i+i{width:60%;height:3px}
+.mu-sp-lay .pv.side i{flex:1}
+.lx-pop.mu-subpick{width:440px}
+.lx-pop.mu-subpick > .mu-sp-actions{flex-wrap:nowrap}
+.mu-subpick > .mu-sp-actions .lx-pill{white-space:nowrap}
+.mu-sp-toggle{background:var(--accent);border-color:var(--accent);color:#000}
+.mu-sp-toggle.off{background:none;color:var(--accent)}
+.lyrics.dual .ly.on{margin:6px 0}

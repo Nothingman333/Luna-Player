@@ -169,6 +169,18 @@ fn first_block(xml: &str) -> Option<(usize, usize)> {
     Some((a, b))
 }
 
+fn titles(xml: &str) -> Vec<String> {
+    let mut out = vec![];
+    let mut from = 0;
+    while let Some(a) = xml[from..].find("<Profile>").map(|i| i + from) {
+        let Some(b) = xml[a..].find("</Profile>").map(|i| i + a + "</Profile>".len()) else { break };
+        // the default profile has an empty title on a fresh install: <Title /> gives nothing here
+        if let Some(t) = get(&xml[a..b], "Title") { out.push(t); }
+        from = b;
+    }
+    out
+}
+
 fn get(block: &str, key: &str) -> Option<String> {
     let a = block.find(&format!("<{key}>"))? + key.len() + 2;
     let b = block[a..].find(&format!("</{key}>"))? + a;
@@ -214,6 +226,8 @@ pub struct Status {
     pub scaling: bool,
     pub settings: BTreeMap<String, String>,
     pub hotkey: String,
+    /// The other profiles in Lossless Scaling, to copy settings from.
+    pub profiles: Vec<String>,
 }
 
 pub fn status() -> Status {
@@ -231,6 +245,7 @@ pub fn status() -> Status {
         running: p.is_some(),
         scaling: p.is_some_and(win::is_scaling),
         settings,
+        profiles: titles(&xml).into_iter().filter(|t| t != PROFILE).collect(),
         hotkey: format!("{} + {}", get(&xml, "HotkeyModifierKeys").unwrap_or_default().replace(' ', " + "), get(&xml, "Hotkey").unwrap_or_default()),
     }
 }
@@ -239,19 +254,49 @@ pub fn status() -> Status {
 /// and started again afterwards if it was running.
 pub fn save(values: BTreeMap<String, String>) -> Result<(), String> {
     // Check everything before touching Lossless Scaling or its file.
-    if let Some((k, v)) = values.iter().find(|(k, v)| KEYS.contains(&k.as_str()) && !valid(k, v)) {
-        return Err(tr!("Geçersiz değer: {} = {}", "Invalid value: {} = {}", k, v));
+    check_values(&values)?;
+    with_closed(|path| write_profile(path, &values))
+}
+
+fn check_values(values: &BTreeMap<String, String>) -> Result<(), String> {
+    match values.iter().find(|(k, v)| KEYS.contains(&k.as_str()) && !valid(k, v)) {
+        Some((k, v)) => Err(tr!("Geçersiz değer: {} = {}", "Invalid value: {} = {}", k, v)),
+        None => Ok(()),
     }
+}
+
+/// Copies another Lossless Scaling profile's settings into Luna's. Read after closing it, because it
+/// may hold changes made in its own window until it exits.
+pub fn import(from: String) -> Result<(), String> {
+    with_closed(|path| {
+        let xml = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+        let (a, b) = block_range(&xml, &from).ok_or(tr!("Profil bulunamadı: {}", "Profile not found: {}", from))?;
+        let values: BTreeMap<String, String> = KEYS.iter().filter_map(|k| get(&xml[a..b], k).filter(|v| valid(k, v)).map(|v| (k.to_string(), v))).collect();
+        write_profile(path, &values)
+    })
+}
+
+fn with_closed(work: impl FnOnce(&std::path::Path) -> Result<(), String>) -> Result<(), String> {
     let path = settings_path();
     let was_running = running();
     stop();
     // whatever happens while writing, Lossless Scaling is started again if it was running
-    let result = write_profile(&path, &values);
+    let result = work(&path);
     if was_running {
         let started = start();
         result.as_ref().ok().map(|_| started).transpose()?;
     }
     result
+}
+
+/// This program's real file name comes first: a development build runs as app.exe, and the window title
+/// carries the film's name during playback, so the fixed names may not match it.
+fn luna_path() -> String {
+    let base = "Luna Player.exe;Luna Player";
+    match std::env::current_exe().ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())) {
+        Some(n) if !base.split(';').any(|x| x.eq_ignore_ascii_case(&n)) => format!("{n};{base}"),
+        _ => base.to_string(),
+    }
 }
 
 fn write_profile(path: &std::path::Path, values: &BTreeMap<String, String>) -> Result<(), String> {
@@ -276,7 +321,7 @@ fn write_profile(path: &std::path::Path, values: &BTreeMap<String, String>) -> R
     }
     // The profile applies to Luna's window; scaling itself is switched by Luna (only while a video plays).
     // "Path": executable name, full path or window title, ';'-separated (Lossless Scaling's own field).
-    block = set(&block, "Path", "Luna Player.exe;Luna Player");
+    block = set(&block, "Path", &luna_path());
     block = remove(&block, "Filter"); // left by an earlier Luna version, never read by Lossless Scaling
     block = set(&block, "AutoScale", "false");
     xml.replace_range(a..b, &block);
@@ -297,7 +342,7 @@ fn ensure_profile() -> Result<(), String> {
     let xml = std::fs::read_to_string(settings_path()).unwrap_or_default();
     let ok = block_range(&xml, PROFILE).is_some_and(|(a, b)| {
         let blk = &xml[a..b];
-        get(blk, "Path").is_some_and(|p| p.contains("Luna Player"))
+        get(blk, "Path").is_some_and(|p| p == luna_path())
     });
     if ok { Ok(()) } else { save(BTreeMap::new()) }
 }

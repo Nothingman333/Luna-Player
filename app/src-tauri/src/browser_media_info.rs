@@ -18,20 +18,34 @@ pub fn rendition_audio(text:&str,base:&Url)->std::collections::HashMap<String,St
  let groups=audio_groups(text,base);let re=regex::Regex::new(r#"AUDIO="([^"]*)""#).unwrap();let mut pending=None;let mut out=std::collections::HashMap::new();
  for line in text.lines().take(2000){let line=line.trim();if line.starts_with("#EXT-X-STREAM-INF:"){pending=re.captures(line).and_then(|c|groups.get(&c[1]).cloned());}else if !line.is_empty()&&!line.starts_with('#'){if let Some(audio)=pending.take(){if let Ok(url)=base.join(line){if checked_url(url.as_str()).is_ok(){out.insert(url.to_string(),audio);}}}}}out
 }
-async fn read(client:reqwest::Client,row:Value)->Option<(String,Vec<(String,u32,u32)>,std::collections::HashMap<String,String>,bool)>{
+/// variants whose CODECS list only video and that name no AUDIO group: playing one gives a silent picture
+pub fn silent_renditions(text:&str,base:&Url)->std::collections::HashSet<String>{
+ let codecs=regex::Regex::new(r#"CODECS="([^"]*)""#).unwrap();let mut pending=false;let mut out=std::collections::HashSet::new();
+ for line in text.lines().take(2000){let line=line.trim();if line.starts_with("#EXT-X-STREAM-INF:"){pending=!line.contains("AUDIO=\"")&&codecs.captures(line).is_some_and(|c|{let c=c[1].to_ascii_lowercase();!["mp4a","aac","opus","vorbis","ac-3","ec-3","flac","mp3"].iter().any(|a|c.contains(a))});}else if !line.is_empty()&&!line.starts_with('#'){if std::mem::take(&mut pending){if let Ok(u)=base.join(line){out.insert(u.to_string());}}}}out
+}
+async fn read(client:reqwest::Client,row:Value)->Option<(String,Vec<(String,u32,u32)>,std::collections::HashMap<String,String>,bool,std::collections::HashSet<String>)>{
  let original=row["url"].as_str()?.to_string();checked_url(&original).ok()?;let mut request=client.get(&original).header(reqwest::header::RANGE,"bytes=0-131071");
  if let Some(r)=row["referer"].as_str().filter(|v|!v.is_empty()){checked_url(r).ok()?;request=request.header(reqwest::header::REFERER,r);}
  if let Some(a)=row["agent"].as_str().filter(|v|!v.is_empty()&&v.len()<=1024){request=request.header(reqwest::header::USER_AGENT,a);}
- let mut response=request.send().await.ok()?.error_for_status().ok()?;if response.content_length().is_some_and(|n|n>MAX_BYTES as u64){return None}let base=checked_url(response.url().as_str()).ok()?;let mut bytes=Vec::new();while let Some(chunk)=response.chunk().await.ok()?{if bytes.len()+chunk.len()>MAX_BYTES{return None}bytes.extend_from_slice(&chunk);}let text=std::str::from_utf8(&bytes).ok()?;Some((original,renditions(text,&base),rendition_audio(text,&base),{let lines=text.lines().filter(|l|l.starts_with("#EXT-X-STREAM-INF:")).collect::<Vec<_>>();!lines.is_empty()&&lines.iter().all(|l|audio_only(l))}))
+ let mut response=request.send().await.ok()?.error_for_status().ok()?;if response.content_length().is_some_and(|n|n>MAX_BYTES as u64){return None}let base=checked_url(response.url().as_str()).ok()?;let mut bytes=Vec::new();while let Some(chunk)=response.chunk().await.ok()?{if bytes.len()+chunk.len()>MAX_BYTES{return None}bytes.extend_from_slice(&chunk);}let text=std::str::from_utf8(&bytes).ok()?;Some((original,renditions(text,&base),rendition_audio(text,&base),{let lines=text.lines().filter(|l|l.starts_with("#EXT-X-STREAM-INF:")).collect::<Vec<_>>();!lines.is_empty()&&lines.iter().all(|l|audio_only(l))},silent_renditions(text,&base)))
 }
 pub async fn enrich(mut rows:Vec<Value>)->Vec<Value>{
  let Ok(client)=reqwest::Client::builder().timeout(std::time::Duration::from_secs(2)).redirect(reqwest::redirect::Policy::custom(|a|{if a.previous().len()<3&&checked_url(a.url().as_str()).is_ok(){a.follow()}else{a.stop()}})).build()else{return rows};
  let mut jobs=tokio::task::JoinSet::new();for row in rows.iter().filter(|r|r["url"].as_str().and_then(|u|Url::parse(u).ok()).is_some_and(|u|{let p=u.path().to_ascii_lowercase();![".mp4",".webm",".mkv",".ts",".m4s",".mp3",".aac",".m4a"].iter().any(|ext|p.ends_with(ext))})).take(8){jobs.spawn(read(client.clone(),row.clone()));}
- while let Some(outcome)=jobs.join_next().await{let Ok(Some((parent,variants,audio,audio_only)))=outcome else{continue};if audio_only{if let Some(row)=rows.iter_mut().find(|r|r["url"]==parent){row["mediaKind"]=json!("audio");let _=row.as_object_mut().map(|r|{r.remove("height");r.remove("qualities");});}continue}if variants.is_empty(){continue}
+ while let Some(outcome)=jobs.join_next().await{let Ok(Some((parent,variants,audio,audio_only,silent)))=outcome else{continue};if audio_only{if let Some(row)=rows.iter_mut().find(|r|r["url"]==parent){row["mediaKind"]=json!("audio");let _=row.as_object_mut().map(|r|{r.remove("height");r.remove("qualities");});}continue}if variants.is_empty(){continue}
  for row in rows.iter_mut(){if audio.values().any(|u|row["url"]==u.as_str()){row["mediaKind"]=json!("audio");let _=row.as_object_mut().map(|r|{r.remove("height");r.remove("qualities");});}}let mut qualities=variants.iter().map(|(_,_,h)|*h).collect::<Vec<_>>();qualities.sort_unstable();qualities.dedup();let info=rows.iter().find(|r|r["url"]==parent).cloned().unwrap_or(Value::Null);
  if let Some(row)=rows.iter_mut().find(|r|r["url"]==parent){row["qualities"]=json!(qualities);row["master"]=json!(true);row["mediaKind"]=json!("video");}
- for(url,w,h)in variants{if let Some(row)=rows.iter_mut().find(|r|r["url"]==url){row["mediaKind"]=json!("video");row["master"]=json!(false);row["width"]=json!(w);row["height"]=json!(h);if let Some(a)=audio.get(&url){row["audioUrl"]=json!(a);}}else if rows.len()<24{let mut row=info.clone();row["url"]=json!(url);row["width"]=json!(w);row["height"]=json!(h);if let Some(a)=audio.get(&url){row["audioUrl"]=json!(a);}let _=row.as_object_mut().map(|r|r.remove("qualities"));rows.push(row);}}
+ for(url,w,h)in variants{let mute=silent.contains(&url);if let Some(row)=rows.iter_mut().find(|r|r["url"]==url){row["mediaKind"]=json!("video");if mute{row["silent"]=json!(true);}row["master"]=json!(false);row["width"]=json!(w);row["height"]=json!(h);if let Some(a)=audio.get(&url){row["audioUrl"]=json!(a);}}else if rows.len()<24{let mut row=info.clone();row["url"]=json!(url);row["width"]=json!(w);row["height"]=json!(h);if let Some(a)=audio.get(&url){row["audioUrl"]=json!(a);}let _=row.as_object_mut().map(|r|{r.remove("qualities");r.remove("silent");});if mute{row["silent"]=json!(true);}rows.push(row);}}
  }rows
 }
 #[cfg(test)]mod tests{use super::*;#[test]fn resolutions(){let base=Url::parse("https://video.test/path/master.txt").unwrap();let rows=renditions("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1,RESOLUTION=1280x720\nlow.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2,RESOLUTION=1920x1080\nhi.m3u8",&base);assert_eq!(rows.len(),2);assert_eq!(rows[0],("https://video.test/path/low.m3u8".into(),1280,720));assert_eq!(rows[1].2,1080);}
+ #[test]fn silent(){let base=Url::parse("https://v.test/m.m3u8").unwrap();let s=silent_renditions("#EXTM3U
+#EXT-X-STREAM-INF:CODECS=\"avc1.640028\",RESOLUTION=1920x1080
+mute.m3u8
+#EXT-X-STREAM-INF:CODECS=\"avc1.640028,mp4a.40.2\",RESOLUTION=1920x1080
+sound.m3u8
+#EXT-X-STREAM-INF:CODECS=\"avc1.640028\",AUDIO=\"a\",RESOLUTION=1280x720
+group.m3u8
+#EXT-X-STREAM-INF:RESOLUTION=640x360
+unknown.m3u8",&base);assert_eq!(s.len(),1);assert!(s.contains("https://v.test/mute.m3u8"));}
  #[test]fn reject(){let base=Url::parse("https://video.test/master.m3u8").unwrap();assert!(renditions("<html>1080p</html>",&base).is_empty());assert!(renditions("#EXTM3U\n#EXT-X-STREAM-INF:RESOLUTION=1920x1080\nfile:///secret",&base).is_empty());assert!(renditions("#EXTM3U\n#EXTINF:10,\nsegment.ts",&base).is_empty());}}

@@ -48,8 +48,11 @@ export async function replaceStorage(storage: StringStorage, data: Record<string
   finally { restoreDepth--; }
 }
 export const identityText = (value: string) => value.normalize("NFC").trim().toLowerCase();
-export type CollectionIdentity = { kind: string; title: string; by?: string; year?: string };
+export type CollectionIdentity = { kind: string; title: string; by?: string; year?: string; url?: string; webType?: string; note?: string };
 export function sameCollectionItem(a: CollectionIdentity, b: CollectionIdentity): boolean {
+  if (a.kind === "web" || b.kind === "web") return a.kind === b.kind && !!a.url && a.url === b.url
+    && (a.webType ?? "page") === (b.webType ?? "page")
+    && ((a.webType === "text" || !!a.note || !!b.note) ? (a.note ?? "").trim() === (b.note ?? "").trim() : true);
   return a.kind === b.kind && identityText(a.title) === identityText(b.title)
     && identityText(a.by ?? "") === identityText(b.by ?? "")
     && (a.kind !== "film" || (a.year ?? "").trim() === (b.year ?? "").trim());

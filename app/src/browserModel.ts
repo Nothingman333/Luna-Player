@@ -112,6 +112,7 @@ export function browserRequest(body: Record<string, any>, page: BrowserPage, que
 
 /** Only a public YouTube video address is eligible for video input. */
 export function youtubeVideoUrl(raw:string):string|null{try{const u=new URL(raw);if(u.protocol!=="https:"||u.username||u.password)return null;const host=u.hostname.toLowerCase();const id=host==="youtu.be"?u.pathname.slice(1).split("/")[0]:["youtube.com","www.youtube.com","m.youtube.com"].includes(host)?u.pathname==="/watch"?u.searchParams.get("v"):u.pathname.match(/^\/(?:shorts|live)\/([^/]+)/)?.[1]:null;return id&&/^[A-Za-z0-9_-]{11}$/.test(id)?"https://www.youtube.com/watch?v="+id:null;}catch{return null;}}
+export const appCommandIntent=(text:string)=>/(?:^|\s)(?:çal|cal|çalsana|calsana|dinlet|play)(?:\s|[.!?]*$)|(?:listeme|listeye)\s+ekle|sonra\s+izle|izledim\s+olarak|hatırla|hatirla/i.test(text);
 export const videoSummaryIntent=(question:string)=>/videoyu\s+özetle|video(?:yu)?\s+ozetle|summarize\s+(?:this\s+)?video/i.test(question);
 export function youtubeSummaryRequest(body:Record<string,any>,page:BrowserPage,provider:string,language:string){
  const url=youtubeVideoUrl(page.url);if(!url)throw Error(language==="en"?"Open a YouTube video first.":"Önce bir YouTube videosu aç.");

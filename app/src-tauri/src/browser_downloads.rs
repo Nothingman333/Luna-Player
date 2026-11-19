@@ -7,7 +7,32 @@ static NEXT:AtomicU64=AtomicU64::new(1);
 #[serde(rename_all="camelCase")]
 pub struct Download{pub id:u64,pub tab:u32,pub url:String,pub path:String,pub name:String,pub state:String,pub bytes:Option<u64>,pub total:Option<u64>,pub can_resume:bool,#[serde(skip)]last_event:Option<std::time::Instant>}
 #[derive(Default)]pub struct Downloads(pub Mutex<Vec<Download>>);
+/// A Chrome Web Store package download: Some(extension id), or Some("") when only the page knows the id.
+fn store_crx(url:&str)->Option<String>{
+ let u=tauri::Url::parse(url).ok()?;if u.scheme()!="https"{return None;}
+ match u.host_str()?{
+  "clients2.google.com"|"update.googleapis.com" if u.path().contains("/crx")=>{
+   let x=u.query_pairs().find(|(k,_)|k=="x")?.1.into_owned();
+   let id=x.split('&').find_map(|p|p.strip_prefix("id=")).unwrap_or("");
+   Some(if id.len()==32&&id.bytes().all(|c|(b'a'..=b'p').contains(&c)){id.to_string()}else{String::new()})
+  }
+  "clients2.googleusercontent.com" if u.path().starts_with("/crx/")=>Some(String::new()),
+  _=>None,
+ }
+}
 fn changed(app:&AppHandle){let _=app.emit_to("main","luna-downloads-changed",());}
+/// Tabs the user closed while they were still downloading: hidden, and closed when their last download ends.
+static PARKED:Mutex<Vec<u32>>=Mutex::new(Vec::new());
+fn live(r:&Download)->bool{matches!(r.state.as_str(),"running"|"paused")||r.can_resume}
+pub fn has_active(app:&AppHandle,tab:u32)->bool{app.state::<Downloads>().0.lock().map(|rows|rows.iter().any(|r|r.tab==tab&&live(r))).unwrap_or(false)}
+pub fn park(tab:u32){if let Ok(mut p)=PARKED.lock(){if !p.contains(&tab){p.push(tab);}}}
+fn release_parked(app:&AppHandle,tab:u32){
+ let parked=PARKED.lock().map(|p|p.contains(&tab)).unwrap_or(false);
+ if !parked||has_active(app,tab){return;}
+ if let Ok(mut p)=PARKED.lock(){p.retain(|t|*t!=tab);}
+ // Not from inside this webview's own download callback: close it on the next turn of the main thread.
+ let later=app.clone();let _=app.run_on_main_thread(move||crate::browser::close_parked(&later,tab));
+}
 pub fn start(app:&AppHandle,tab:u32,url:&str,destination:&mut PathBuf)->Result<u64,String>{
  let state=app.state::<Downloads>();let mut rows=state.0.lock().map_err(|e|e.to_string())?;
  if rows.iter().filter(|r|(matches!(r.state.as_str(),"running"|"paused")||r.can_resume)).count()>=32{return Err("Aynı anda en fazla 32 indirme".into());}
@@ -30,12 +55,14 @@ fn update(app:&AppHandle,id:u64,operation:&ICoreWebView2DownloadOperation,force:
  let(mut received,mut total,mut state,mut reason,mut resume)=(0,0,COREWEBVIEW2_DOWNLOAD_STATE::default(),COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON::default(),windows_core::BOOL::default());
  unsafe{operation.BytesReceived(&mut received)?;operation.TotalBytesToReceive(&mut total)?;operation.State(&mut state)?;let _=operation.InterruptReason(&mut reason);let _=operation.CanResume(&mut resume);}
  let terminal=state==COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED||(state==COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED&&!resume.as_bool());
- let store=app.state::<Downloads>();if let Ok(mut rows)=store.0.lock(){if let Some(row)=rows.iter_mut().find(|r|r.id==id){
+ let mut tab=None;
+ let store=app.state::<Downloads>();if let Ok(mut rows)=store.0.lock(){if let Some(row)=rows.iter_mut().find(|r|r.id==id){tab=Some(row.tab);
   row.bytes=Some(received.max(0) as u64);row.total=if total>0{Some(total as u64)}else{None};row.can_resume=resume.as_bool();
   row.state=if state==COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED{"done"}else if state==COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS{"running"}else if reason==COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_PAUSED{"paused"}else if reason==COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED{"cancelled"}else{"failed"}.into();
   if force||row.last_event.is_none_or(|at|at.elapsed()>=std::time::Duration::from_millis(250)){row.last_event=Some(std::time::Instant::now());changed(app);}
  }}
  if terminal{if let Some(native)=OPERATIONS.with(|ops|ops.borrow_mut().remove(&id)){unsafe{let _=native.operation.remove_BytesReceivedChanged(native.bytes_token);let _=native.operation.remove_StateChanged(native.state_token);}}}
+ if let Some(tab)=tab{release_parked(app,tab);}
  Ok(())
 }
 pub fn watch(view:&Webview,app:AppHandle,tab:u32)->Result<(),String>{
@@ -44,10 +71,17 @@ pub fn watch(view:&Webview,app:AppHandle,tab:u32)->Result<(),String>{
   use windows_core::Interface;
   let result=(||->windows_core::Result<()>{unsafe{
    let core=platform.controller().CoreWebView2()?.cast::<ICoreWebView2_4>()?;
-   let callback=webview2_com::DownloadStartingEventHandler::create(Box::new(move|_,args|{
+   let callback=webview2_com::DownloadStartingEventHandler::create(Box::new(move|sender,args|{
     let Some(args)=args else{return Ok(())};let op=args.DownloadOperation()?;
     let(mut uri,mut dest)=(windows_core::PWSTR::null(),windows_core::PWSTR::null());op.Uri(&mut uri)?;args.ResultFilePath(&mut dest)?;
     let url=webview2_com::take_pwstr(uri);let mut destination=PathBuf::from(webview2_com::take_pwstr(dest));
+    // The store's own "Add to Chrome" downloads the CRX: install it like a browser instead of a file download.
+    // Read the page from the sender itself: Tauri's url() waits on this same UI thread.
+    let page=sender.as_ref().and_then(|v|{let mut s=windows_core::PWSTR::null();v.Source(&mut s).ok()?;Some(webview2_com::take_pwstr(s))}).unwrap_or_default();
+    let on_store=tauri::Url::parse(&page).is_ok_and(|u|matches!(u.host_str(),Some("chromewebstore.google.com"|"chrome.google.com")));
+    let crx_file=on_store&&destination.extension().is_some_and(|e|e.eq_ignore_ascii_case("crx"));
+    if let Ok(u)=tauri::Url::parse(&url){crate::browser::dlog(&app,&format!("download-starting {}{} crx={crx_file}",u.host_str().unwrap_or(""),u.path()));}
+    if let Some(ext)=store_crx(&url).or_else(||crx_file.then(String::new)){args.SetCancel(true)?;crate::browser::event(&app,tab,"store-install",ext);return Ok(())}
     let id=match start(&app,tab,&url,&mut destination){Ok(id)=>id,Err(e)=>{args.SetCancel(true)?;crate::browser::event(&app,tab,"download-rejected",e);return Ok(())}};
     if let Err(e)=args.SetResultFilePath(&windows_core::HSTRING::from(destination.as_path())).and_then(|_|args.SetHandled(true)){
      let _=args.SetCancel(true);if let Ok(mut rows)=app.state::<Downloads>().0.lock(){if let Some(row)=rows.iter_mut().find(|r|r.id==id){row.state="failed".into();}}changed(&app);return Err(e);

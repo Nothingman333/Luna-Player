@@ -1,10 +1,11 @@
 import { applyMusicIdentities } from "./Music";
 // UI-only closure; playback/data helpers remain in Music.tsx.
 import { ExtraModal,extraText } from "./Extras";
-import { Album,albumKey,ASK,changed,copy,Cover,Episode,episodes,epItem,getJson,goMusicPage,groupAlbums,Heard,hoverSong,libCache,libSubs,loadHistory,loadLikes,loadMusicFolders,loadMusicPlaylists,loadPodRecent,loadSubs,MIC,mostPlayed,MPlaylist,MusicView,NOTE,openPlaylist,P,pendingPl,pendingShow,playedMenu,playEpisodeInShow,PlaylistArt,playQueue,podMenu,prefetch,QItem,RADIO_ICON,saveMusicPlaylists,searchShows,setShuffle,setSplit_goMusicPage,setSplit_libCache,setSplit_openPlaylist,setSplit_pendingPl,setSplit_pendingShow,Show,SHUFFLE,songActions,SongVote,Station,stationItem,stations,toggleMusicPause,Track,trackItem,useMusic,useMusicPlaylists } from "./Music";
+import { DlBadge,downloadedSongs,newEpisodeCount,markEpisodesSeen,Album,albumKey,ASK,changed,copy,Cover,Episode,episodes,epItem,getJson,groupAlbums,Heard,hoverSong,libCache,libSubs,loadHistory,loadLikes,loadMusicFolders,loadMusicPlaylists,loadPodRecent,loadSubs,MIC,mostPlayed,MPlaylist,MusicView,NOTE,openPlaylist,P,pendingPl,pendingShow,playedMenu,playEpisodeInShow,PlaylistArt,playQueue,podMenu,prefetch,QItem,RADIO_ICON,saveMusicPlaylists,searchShows,setShuffle,setSplit_goMusicPage,setSplit_libCache,setSplit_openPlaylist,setSplit_pendingPl,setSplit_pendingShow,Show,SHUFFLE,songActions,SongVote,Station,stationItem,stations,toggleMusicPause,Track,trackItem,useMusic,useMusicPlaylists } from "./Music";
 import { MusicPlaylistTools,PlaylistUtilities } from "./MusicPlaylistTools";
 import { reorderPlaylist,uniquePlaylistName } from "./musicWorkspaceModel";
 import "./QueueTools.css";
+import { isSpecialList, SpecialListPage } from "./MusicSpecialList";
 // Müzik modu: the user's own music folders (albums, artists, songs), live radio, a mini player
 // and a "now playing" screen with synced lyrics. Playback goes through the same mpv as video,
 // with the picture track off.
@@ -103,11 +104,8 @@ export function MusicPage({ view, setView: setPage, query }: { view: MusicView; 
   const [album, setAlbum] = useState<Album | null>(null);
   const [pl, setPl] = useState<string | null>(() => { const p = pendingPl; setSplit_pendingPl(null); return p; });
   useEffect(() => {
-    setSplit_openPlaylist((id) => {
-      store.set("musicLibTab", "lists");
-      if (view === "library") setPl(id);
-      else { setSplit_pendingPl(id); setPage("library"); }
-    });
+    // the list opens over the page you are on (home stays home); it is a sheet, not a library page
+    setSplit_openPlaylist((id) => setPl(id));
     return () => { setSplit_openPlaylist(null); };
   }, [view]);
   const addFolder = async () => {
@@ -127,7 +125,7 @@ export function MusicPage({ view, setView: setPage, query }: { view: MusicView; 
       {view === "podcast" && <Podcasts query={query} />}
       {view === "discover" && <MusicDiscover query={query} />}
       {album && <AlbumSheet a={album} onClose={() => setAlbum(null)} />}
-      {pl && <PlaylistPage id={pl} onClose={() => setPl(null)} />}
+      {pl && (isSpecialList(pl) ? <SpecialListPage id={pl} onClose={() => setPl(null)} /> : <PlaylistPage id={pl} onClose={() => setPl(null)} />)}
     </div>
   );
 }
@@ -154,12 +152,28 @@ const albumMenu = (a: Album, onOpen?: () => void): MenuEntry[] => [
   { label: tt("Karışık çal"), act: () => playQueue(a.tracks.map(trackItem), 0, true) },
   ...(onOpen ? [{ label: tt("Şarkıları göster"), act: onOpen }] : []),
 ];
-const showMenu = (s: { title: string; author: string }, open: () => void): MenuEntry[] => [
-  { label: ASK + tt("Bu podcast hakkında"), act: () => askAssistant(tt("“{0}” ({1}) podcasti hakkında bilgi ver; hangi bölümlerden başlamalıyım?", s.title, s.author)) },
-  { label: ASK + tt("Buna benzer podcastler"), act: () => askAssistant(tt("“{0}” podcastine benzer podcastler öner", s.title)) },
-  "sep",
-  { label: tt("Bölümleri göster"), act: open },
-];
+const showMenu = (s: { title: string; author: string; feed?: string; page?: string }, open: () => void, gone?: () => void): MenuEntry[] => {
+  const followed = !!s.feed && loadSubs().some((x) => x.feed === s.feed);
+  const link = s.page ?? (s.feed && /^https?:/i.test(s.feed) ? s.feed : undefined);
+  const newest = async () => {
+    const d = await episodes(s.feed!).catch(() => null);
+    if (d?.eps.length) playQueue(d.eps.map((e) => epItem(e, { title: s.title, feed: s.feed! }, (s as Show).art ?? d.show.art)));
+  };
+  return [
+    ...(s.feed ? [{ label: tt("En yeni bölümü çal"), act: () => void newest() }] : []),
+    { label: tt("Bölümleri göster"), act: open },
+    "sep",
+    { label: ASK + tt("Bu podcast hakkında"), act: () => askAssistant(tt("“{0}” ({1}) podcasti hakkında bilgi ver; hangi bölümlerden başlamalıyım?", s.title, s.author)) },
+    { label: ASK + tt("Buna benzer podcastler"), act: () => askAssistant(tt("“{0}” podcastine benzer podcastler öner", s.title)) },
+    ...(link ? ["sep" as const,
+      ...(s.page ? [{ label: tt("Sitesini aç"), act: () => openUrl(s.page!) }] : []),
+      { label: tt("Bağlantıyı kopyala"), act: () => copy(link) }] : []),
+    ...(followed ? ["sep" as const, { label: tt("Abonelikten çık"), danger: true, act: () => {
+      store.set("podcasts", JSON.stringify(loadSubs().filter((x) => x.feed !== s.feed)));
+      changed(); gone?.();
+    } }] : []),
+  ];
+};
 
 function AlbumCard({ a, onOpen }: { a: Album; onOpen: () => void }) {
   return (
@@ -299,7 +313,7 @@ function PlaylistPage({ id, onClose }: { id: string; onClose: () => void }) {
                 </button>
                 <span className="pl-title">
                   <Cover src={t.cover} name={t.title} size={42} radius={6} icon={NOTE} />
-                  <span className="mu-song-t"><b className="ellipsis">{t.title}</b><span className="muted small ellipsis">{t.artist}</span></span>
+                  <span className="mu-song-t"><b className="ellipsis">{t.title}</b><span className="muted small ellipsis"><DlBadge q={t} />{t.artist}</span></span>
                 </span>
                 <span className="pl-alb muted small ellipsis">{t.album ?? ""}</span>
                 <SongVote q={t} />
@@ -325,7 +339,7 @@ function SongTile({ q, n, onPlay }: { q: QItem; n: number; onPlay: () => void })
         <span className="mu-album-play" aria-hidden="true"><Icon d={I.play} fill size={18} /></span>
       </div>
       <b className="ellipsis">{q.title}</b>
-      <span className="muted small ellipsis">{[q.artist, tt("{0} kez", n)].filter(Boolean).join(" · ")}</span>
+      <span className="muted small ellipsis"><DlBadge q={q} />{[q.artist, tt("{0} kez", n)].filter(Boolean).join(" · ")}</span>
     </button>
   );
 }
@@ -340,17 +354,54 @@ function LikedCard({ onOpen }: { onOpen: () => void }) {
     </button>
   );
 }
+/** "İndirilenler": the songs saved from the web with the add-on, a list of its own beside "Beğendiklerim". */
+function DownloadedCard({ onOpen }: { onOpen: () => void }) {
+  const [n, setN] = useState<number | null>(null);
+  useEffect(() => { let on = true; void downloadedSongs().then((s) => { if (on) setN(s.length); }); return () => { on = false; }; }, []);
+  return (
+    <button className="mu-album" onClick={onOpen} title={tt("İndirilenler")}>
+      <div className="mu-album-art mu-liked-card mu-dl-card"><Icon d={I.down} size={44} /></div>
+      <b className="ellipsis">{tt("İndirilenler")}</b>
+      <span className="muted small ellipsis">{n == null ? " " : tt("{0} şarkı", n)}</span>
+    </button>
+  );
+}
+/** The "İndirilenler" list page: play, shuffle and the songs as rows. */
+function DownloadedView() {
+  useMusic();
+  const [songs, setSongs] = useState<QItem[] | null>(null);
+  useEffect(() => { let on = true; void downloadedSongs().then((s) => { if (on) setSongs(s); }); return () => { on = false; }; }, []);
+  const list = songs ?? [];
+  return (
+    <>
+      <section className="mu-liked-head">
+        <div className="mu-liked-art mu-dl-card"><Icon d={I.down} size={54} /></div>
+        <div className="mu-liked-txt">
+          <span className="eyebrow">{tt("LİSTE")}</span>
+          <h1>{tt("İndirilenler")}</h1>
+          <span className="muted">{tt("{0} şarkı", list.length)}</span>
+          <div className="seg-row">
+            <button className="primary" disabled={!list.length} onClick={() => playQueue(list)}><Icon d={I.play} fill size={16} />  {tt("Çal")}</button>
+            <button className="chip" disabled={!list.length} onClick={() => playQueue(list, 0, true)}><Icon d={SHUFFLE} size={14} />  {tt("Karışık")}</button>
+          </div>
+        </div>
+      </section>
+      {songs == null ? null : list.length ? <QRows items={list} />
+        : <div className="muted empty-note">{tt("Henüz indirilen şarkı yok. YouTube'da Luna düğmesi › İndir › Müzik ile şarkı indirebilirsin.")}</div>}
+    </>
+  );
+}
 function HomeLists() {
   const lists = useMusicPlaylists();
   useMusic(); // the counts change as songs play
   const most = mostPlayed();
-  const liked = loadLikes().length > 0;
+  const liked = true;
   return (
     <>
       {/* "Beğendiklerim" always heads the lists, even while it is empty */}
       {(lists.length > 0 || liked) && (
         <section className="row"><h2>{tt("Listelerin")}</h2>
-          <div className="mu-grid"><LikedCard onOpen={() => { store.set("musicLibTab", "liked"); goMusicPage?.("library"); }} />{lists.slice(0, 11).map((p) => <PlaylistCard key={p.id} p={p} />)}</div>
+          <div className="mu-grid"><LikedCard onOpen={() => openPlaylist?.("__liked")} /><DownloadedCard onOpen={() => openPlaylist?.("__downloaded")} />{lists.slice(0, 11).map((p) => <PlaylistCard key={p.id} p={p} />)}</div>
         </section>
       )}
       {most.length > 0 && (
@@ -482,7 +533,7 @@ function StationCard({ s, on }: { s: QItem; on: boolean }) {
   );
 }
 
-type LibTab = "albums" | "artists" | "songs" | "lists" | "liked" | "history";
+type LibTab = "albums" | "artists" | "songs" | "lists" | "liked" | "downloaded" | "history";
 function MusicLibrary({ lib, query, onAlbum, onAddFolder }: { lib: Lib; query: string; onAlbum: (a: Album) => void; onAddFolder: () => void }) {
   const [tab, setTab] = useState<LibTab>(() => (store.get("musicLibTab") as LibTab) || "albums");
   const pick = (t: LibTab) => { setTab(t); store.set("musicLibTab", t); };
@@ -506,12 +557,12 @@ function MusicLibrary({ lib, query, onAlbum, onAddFolder }: { lib: Lib; query: s
   const songMatches = allTracks.filter((t) => hit(t.title, t.artist, t.album) && (!artist || (t.albumArtist || t.artist) === artist));
   const songs = songMatches.slice(0, 500);
   const lists = allLists.filter((p) => hit(p.name));
-  if (lib.tracks && !lib.tracks.length && !lib.folders.length && tab !== "lists" && tab !== "liked" && tab !== "history" && !lists.length && !online.length) return <NoMusic onAddFolder={onAddFolder} scanning={lib.scanning} />;
+  if (lib.tracks && !lib.tracks.length && !lib.folders.length && tab !== "lists" && tab !== "liked" && tab !== "downloaded" && tab !== "history" && !lists.length && !online.length) return <NoMusic onAddFolder={onAddFolder} scanning={lib.scanning} />;
   return (
     <>
       <div className="row-head mu-lib-head">
         <div className="seg-row">
-          {([["liked", tt("Beğendiklerim")], ["lists", tt("Listeler")], ["albums", tt("Albümler")], ["artists", tt("Sanatçılar")], ["songs", tt("Şarkılar")], ["history", tt("Geçmiş")]] as const).map(([k, l]) => (
+          {([["liked", tt("Beğendiklerim")], ["downloaded", tt("İndirilenler")], ["lists", tt("Listeler")], ["albums", tt("Albümler")], ["artists", tt("Sanatçılar")], ["songs", tt("Şarkılar")], ["history", tt("Geçmiş")]] as const).map(([k, l]) => (
             <button key={k} className={"seg sm" + (tab === k ? " on" : "")} onClick={() => { pick(k); setArtist(null); }}>{l}</button>
           ))}
         </div>
@@ -561,10 +612,11 @@ function MusicLibrary({ lib, query, onAlbum, onAddFolder }: { lib: Lib; query: s
         </>
       )}
       {tab === "liked" && <LikedView />}
+      {tab === "downloaded" && <DownloadedView />}
       {tab === "history" && <HistoryView />}
       {tab === "lists"&&<MusicPlaylistTools lists={allLists} save={saveMusicPlaylists} open={id=>openPlaylist?.(id)}/>}
       {tab === "lists" && (lists.length || loadLikes().length
-        ? <div className="mu-grid"><LikedCard onOpen={() => pick("liked")} />{lists.map((p) => <PlaylistCard key={p.id} p={p} />)}</div>
+        ? <div className="mu-grid"><LikedCard onOpen={() => openPlaylist?.("__liked")} /><DownloadedCard onOpen={() => openPlaylist?.("__downloaded")} />{lists.map((p) => <PlaylistCard key={p.id} p={p} />)}</div>
         : <div className="muted empty-note">{tt("Henüz listen yok. Üstteki bağlantı düğmesine bir Spotify liste linki yapıştır: şarkıların YouTube karşılıkları bulunur ve aynı sırayla buraya liste olarak eklenir.")}</div>)}
     </>
   );
@@ -668,7 +720,7 @@ function SongTiles({ items }: { items: QItem[] | null }) {
           onContextMenu={(e) => openMenu(e, songActions(t, () => playQueue(items, i), [{ label: tt("Listeye ekle: Luna'ya eklenenler"), act: () => addToAdded(t) }]))}>
           <span className="mu-tile-n">{m.now?.src === t.src && m.loading ? <span className="mu-spin sm" aria-label={tt("Yükleniyor…")} /> : i + 1}</span>
           <Cover src={t.cover} name={t.title} size={48} radius={8} />
-          <span className="mu-song-t"><b className="ellipsis">{t.title}</b><span className="muted small ellipsis">{t.artist}</span></span>
+          <span className="mu-song-t"><b className="ellipsis">{t.title}</b><span className="muted small ellipsis"><DlBadge q={t} />{t.artist}</span></span>
         </button>
       ))}
     </div>
@@ -747,7 +799,7 @@ function MusicDiscover({ query }: { query: string }) {
             <button key={k} className={"seg sm" + (k === cc ? " on" : "")} onClick={() => { setCc(k); store.set("muChartLand", k); }}>{tt(name)}</button>
           ))}
         </div>
-        {chart == null && !err && <div className="muted small mu-loading-row"><span className="mu-spin sm" /> {tt("{0} listesi yükleniyor…", tt(land))}</div>}
+        {chart == null && !err && <div className="muted small mu-loading-row" role="status">{tt("{0} listesi yükleniyor…", tt(land))}</div>}
         {err && <div className="muted">{tt("Liste alınamadı; internet bağlantını kontrol et.")}</div>}
         {chart && !chart.length && !err && <div className="muted">{tt("Bu ülke için liste yok.")}</div>}
         <SongTiles items={chart} />
@@ -900,10 +952,12 @@ async function feedOf(t: Top): Promise<Show | null> {
   return x?.feedUrl ? { feed: x.feedUrl, title: t.title, author: t.author, art: x.artworkUrl600 ?? t.art } : null;
 }
 
-function ShowCard({ s, onOpen }: { s: { title: string; author: string; art?: string }; onOpen: () => void }) {
+function ShowCard({ s, onOpen, onGone }: { s: { title: string; author: string; art?: string; feed?: string; page?: string }; onOpen: () => void; onGone?: () => void }) {
+  const fresh = s.feed ? newEpisodeCount(s.feed) : 0;
   return (
-    <button className="mu-album" onClick={onOpen} title={s.title} onContextMenu={(e) => openMenu(e, showMenu(s, onOpen))}>
-      <div className="mu-album-art"><Cover src={s.art} name={s.title} size="100%" icon={MIC} /></div>
+    <button className="mu-album" onClick={onOpen} title={s.title} onContextMenu={(e) => openMenu(e, showMenu(s, onOpen, onGone))}>
+      <div className="mu-album-art"><Cover src={s.art} name={s.title} size="100%" icon={MIC} />
+        {fresh > 0 && <span className="pod-new">{tt("Yeni")}{fresh > 1 ? " · " + fresh : ""}</span>}</div>
       <b className="ellipsis">{s.title}</b>
       <span className="muted small ellipsis">{s.author}</span>
     </button>
@@ -957,7 +1011,7 @@ function Podcasts({ query }: { query: string }) {
       {!deb && <PodcastRecent onShow={setShow} title={tt("Son dinlediklerin")} />}
       {!deb && subs.length > 0 && (
         <section className="row"><h2>{tt("Abone olduklarım")}</h2>
-          <div className="mu-grid">{subs.map((x) => <ShowCard key={x.feed} s={x} onOpen={() => setShow(x)} />)}</div></section>
+          <div className="mu-grid">{subs.map((x) => <ShowCard key={x.feed} s={x} onOpen={() => setShow(x)} onGone={() => setSubs(loadSubs())} />)}</div></section>
       )}
       <section className="row">
         <h2>{deb ? tt("“{0}” için podcastler", deb) : tt("Öne çıkan podcastler")}</h2>
@@ -983,7 +1037,7 @@ function ShowPage({ s, onBack }: { s: Show; onBack: () => void }) {
   const [n, setN] = useState(30);
   useEffect(() => {
     let alive = true;
-    episodes(s.feed).then((d) => alive && setData(d)).catch((e) => alive && setErr(String(e)));
+    episodes(s.feed).then((d) => { if (!alive) return; setData(d); if (loadSubs().some((x) => x.feed === s.feed)) markEpisodesSeen(s.feed, d.eps); }).catch((e) => alive && setErr(String(e)));
     return () => { alive = false; };
   }, [s.feed]);
   const art = s.art ?? data?.show.art;
@@ -995,42 +1049,76 @@ function ShowPage({ s, onBack }: { s: Show; onBack: () => void }) {
   const item = (e: Episode): QItem => epItem(e, s, art);
   const play = (i: number) => data && playQueue(data.eps.slice(i).map(item));
   const fmtDate = (t?: number) => (t ? new Date(t).toLocaleDateString(lang() === "tr" ? "tr-TR" : "en-US", { day: "numeric", month: "short", year: "numeric" }) : "");
-  return (
+  // the same full page as a playlist: big cover, play / shuffle, search and a table of episodes
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    document.body.classList.add("pl-open");
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape" && !(e.target instanceof HTMLInputElement)) { e.stopPropagation(); onBack(); } };
+    window.addEventListener("keydown", k, true);
+    return () => { document.body.classList.remove("pl-open"); window.removeEventListener("keydown", k, true); };
+  }, []);
+  const eps = data?.eps ?? [];
+  const needle = searchFold(q);
+  const shown = eps.map((e, i) => ({ e, i })).filter(({ e }) => matchesSearch(needle, e.title, e.about)).slice(0, needle ? undefined : n);
+  const total = eps.reduce((t, e) => t + (e.duration || 0), 0);
+  const hours = Math.floor(total / 3600), mins = Math.round((total % 3600) / 60);
+  const ours = !!m.now && m.now.podcast === s.feed;
+  const playing = ours && !m.paused;
+  return createPortal(
     <>
-      <div className="row-head mu-lib-head"><button className="chip" onClick={onBack}>← {tt("Podcastler")}</button></div>
-      <div className="mu-sheet-head pod-head">
-        <Cover src={art} name={s.title} size={168} icon={MIC} />
-        <div className="mu-sheet-txt">
-          <span className="eyebrow">{tt("PODCAST")}</span>
-          <h2>{data?.show.title ?? s.title}</h2>
-          <span className="muted">{s.author || data?.show.author}{data ? ` · ${tt("{0} bölüm", data.eps.length)}` : ""}</span>
-          <div className="seg-row">
-            <button className="primary" disabled={!data?.eps.length} onClick={() => play(0)}><Icon d={I.play} fill size={16} />  {tt("En yeni bölümü çal")}</button>
-            <button className={"chip" + (subbed ? " on" : "")} onClick={toggleSub}>{subbed ? tt("✓ Abonesin") : tt("+ Abone ol")}</button>
+      <div className="chat-scrim" onMouseDown={onBack} />
+      <div className="pl-page pl-card glass page-anim" role="dialog" aria-modal="true" aria-label={s.title}>
+        <div className="pl-bg-clip"><div className="pl-bg" style={art ? { backgroundImage: `url(${art})` } : undefined} /></div>
+        <header className="pl-top">
+          <button className="round" aria-label={tt("Geri")} onClick={onBack}><Icon d={I.left} /></button>
+        </header>
+        <section className="pl-head">
+          <Cover src={art} name={s.title} size={224} radius={16} icon={MIC} />
+          <div className="pl-head-txt">
+            <span className="eyebrow">{tt("PODCAST")}</span>
+            <h1>{data?.show.title ?? s.title}</h1>
+            <span className="muted pl-meta">{[s.author || data?.show.author, data ? tt("{0} bölüm", eps.length) : "",
+              total ? (hours ? tt("{0} sa {1} dk", hours, mins) : tt("{0} dk", mins)) : ""].filter(Boolean).join(" · ")}</span>
           </div>
+        </section>
+        <div className="pl-bar">
+          <button className="pl-big" aria-label={playing ? tt("Duraklat") : tt("En yeni bölümü çal")} disabled={!eps.length} onClick={() => (ours ? toggleMusicPause() : play(0))}>
+            <Icon d={playing ? I.pause : I.play} fill size={26} /></button>
+          <button className={"chip" + (subbed ? " on" : "")} onClick={toggleSub}>{subbed ? tt("✓ Abonesin") : tt("+ Abone ol")}</button>
+          <span className="grow" />
+          <label className="pl-search"><Icon d={I.search} size={15} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tt("Bölümlerde ara")} /></label>
+        </div>
+        {err && <div className="muted empty-note">{tt("Podcast okunamadı: ") + err}</div>}
+        {!data && !err && <div className="muted pulse empty-note">{tt("Bölümler getiriliyor…")}</div>}
+        <div className="pl-table">
+          <div className="pl-row pl-th"><span>#</span><span>{tt("Başlık")}</span><span className="pl-alb">{tt("Tarih")}</span><span /><span className="pl-dur"><Icon d="M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" size={15} /></span><span /></div>
+          {shown.map(({ e, i }) => {
+            const pos = Number(store.get("podPos:" + e.src) ?? 0);
+            const cur = m.now?.src === e.src;
+            return (
+              <div key={e.src} aria-current={cur ? "true" : undefined} className={"pl-row" + (cur ? " cur" : "") + (pos === -1 ? " heard" : "")}
+                onClick={(ev) => { if ((ev.target as HTMLElement).closest("button")) return; cur ? toggleMusicPause() : play(i); }}>
+                <button className="pl-n" aria-label={cur && !m.paused ? tt("Duraklat") : tt("Çal")} onClick={() => (cur ? toggleMusicPause() : play(i))}>
+                  <span className="pl-num">{cur && m.loading ? <span className="mu-spin sm" /> : i + 1}</span>
+                  <span className="pl-hover"><Icon d={cur && !m.paused ? I.pause : I.play} fill size={14} /></span>
+                </button>
+                <span className="pl-title">
+                  <Cover src={art} name={s.title} size={42} radius={6} icon={MIC} />
+                  <span className="mu-song-t"><b className="ellipsis">{e.title}</b><span className="muted small ellipsis">{pos > 0 ? tt("Kaldığın bölüm") : pos === -1 ? tt("dinlendi") : e.about || s.title}</span></span>
+                </span>
+                <span className="pl-alb muted small ellipsis">{fmtDate(e.date)}</span>
+                <span />
+                <span className="pl-dur muted small">{pos > 0 && e.duration ? tt("{0} kaldı", fmtTime(e.duration - pos)) : e.duration ? fmtTime(e.duration) : ""}</span>
+                <span />
+              </div>
+            );
+          })}
+          {data && !needle && eps.length > n && <button className="chip bk-more" onClick={() => setN(n + 30)}>{tt("Daha fazla bölüm")}</button>}
+          {data && !shown.length && <div className="muted empty-note">{needle ? tt("Bu aramayla bölüm yok") : tt("Bu podcastte bölüm yok")}</div>}
         </div>
       </div>
-      {err && <div className="muted">{tt("Podcast okunamadı: ") + err}</div>}
-      {!data && !err && <div className="muted pulse">{tt("Bölümler getiriliyor…")}</div>}
-      <div className="mu-songs pod-eps">
-        {data?.eps.slice(0, n).map((e, i) => {
-          const pos = Number(store.get("podPos:" + e.src) ?? 0);
-          const on = m.now?.src === e.src;
-          return (
-            <button key={e.src} className={"mu-song pod-ep" + (on ? " on" : "") + (pos === -1 ? " heard" : "")} onClick={() => play(i)}>
-              <span className="mu-n">{on ? <Icon d={NOTE} size={14} /> : <Icon d={I.play} fill size={12} />}</span>
-              {pos > 0 && <span className="pod-ep-dot" title={tt("Kaldığın bölüm")} />}
-              <span className="mu-song-t">
-                <b className="ellipsis">{e.title}</b>
-                <span className="muted small ellipsis">{[fmtDate(e.date), e.about].filter(Boolean).join(" · ")}</span>
-              </span>
-              <span className="muted small pod-dur">{pos === -1 ? tt("dinlendi") : pos > 0 && e.duration ? tt("{0} kaldı", fmtTime(e.duration - pos)) : e.duration ? fmtTime(e.duration) : ""}</span>
-            </button>
-          );
-        })}
-      </div>
-      {data && data.eps.length > n && <button className="chip bk-more" onClick={() => setN(n + 30)}>{tt("Daha fazla bölüm")}</button>}
-    </>
+    </>,
+    document.querySelector(".root") ?? document.body,
   );
 }
 

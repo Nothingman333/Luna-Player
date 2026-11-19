@@ -1,4 +1,8 @@
+mod yt_download;
+mod site_media;
+mod luna_link;
 mod video_host;
+mod voice_engine;
 mod dock_layout;
 mod dev_tools;
 mod cache_tools;
@@ -17,6 +21,12 @@ static UI_TR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new
 pub fn is_tr() -> bool {
     UI_TR.load(std::sync::atomic::Ordering::Relaxed)
 }
+/// Luna's main window. Once a browser tab adds child webviews, get_webview_window("main") returns None,
+/// so reach the window through the main webview instead.
+pub fn main_window(app: &tauri::AppHandle) -> Option<tauri::Window> {
+    use tauri::Manager;
+    app.get_webview("main").map(|v| v.window())
+}
 #[tauri::command]
 fn set_lang(lang: String) {
     UI_TR.store(lang == "tr", std::sync::atomic::Ordering::Relaxed);
@@ -26,6 +36,7 @@ mod browser;
 mod adblocking;
 mod browser_extensions;
 mod browser_downloads;
+mod web_translate;
 mod extension_package;
 mod extension_signature;
 mod clipboard;
@@ -34,6 +45,7 @@ mod nfo;
 mod ocr;
 mod anki;
 mod syncplay;
+mod watch_party;
 mod media_sources;
 mod live_captions;
 mod audio_analysis;
@@ -43,6 +55,7 @@ mod media_probe;
 mod fonts;
 mod indexers;
 mod letterboxd;
+mod webfetch;
 mod kitap;
 mod books;
 mod mpv;
@@ -168,7 +181,13 @@ async fn mpv_command(args: Value) -> Result<Value, String> {
 /// File passed on the command line ("Open with…" / double click).
 #[tauri::command]
 fn startup_file() -> Option<String> {
-    std::env::args().skip(1).find(|a| !a.starts_with('-'))
+    std::env::args().skip(1).find(|a| !a.starts_with('-') && !a.to_ascii_lowercase().starts_with("luna:"))
+}
+
+/// The `luna://` link Luna was started with (Luna was closed when the browser opened it).
+#[tauri::command]
+fn startup_link() -> Option<luna_link::LunaLink> {
+    luna_link::from_args(std::env::args().skip(1))
 }
 
 fn sub_cache(app: &AppHandle) -> Result<PathBuf, String> {
@@ -254,6 +273,20 @@ async fn yt_search(app: AppHandle, query: String, n: Option<u32>) -> Result<Vec<
     blocking(move || yt::search(&ytdlp, &query, n)).await
 }
 
+/// Saves a YouTube video ("video", up to `height`) or its sound ("audio") into `dir`; progress comes as "yt-download" events.
+#[tauri::command]
+fn yt_download(app: AppHandle, url: String, kind: String, height: u32, dir: String, title: String, playlist: Option<bool>) -> Result<String, String> {
+    let ytdlp = mpv::ytdlp_exe(&mpv_exe(&app));
+    let kind = if kind == "audio" { "audio" } else { "video" }.to_string();
+    yt_download::start(app, ytdlp, url, kind, height, std::path::PathBuf::from(dir), title.chars().take(200).collect(), playlist.unwrap_or(false))
+}
+
+/// Whether HD video can be saved (needs ffmpeg beside yt-dlp to join picture and sound).
+#[tauri::command]
+fn yt_download_hd(app: AppHandle) -> bool {
+    yt_download::ffmpeg_next_to(&mpv::ytdlp_exe(&mpv_exe(&app))).is_some()
+}
+
 /// What a YouTube (or other supported) link is: a video or a playlist's videos.
 #[tauri::command]
 async fn yt_info(app: AppHandle, url: String) -> Result<Vec<yt::Hit>, String> {
@@ -293,6 +326,50 @@ async fn tts_speak(text: String, voice: String, rate: Option<i32>) -> Result<tau
     Ok(tauri::ipc::Response::new(out))
 }
 
+/// The voice assistant's reply read by ElevenLabs with the user's own key: MP3 bytes.
+#[tauri::command]
+async fn elevenlabs_speak(key: String, voice: String, model: String, text: String) -> Result<tauri::ipc::Response, String> {
+    let key = key.trim();
+    if key.is_empty() || voice.is_empty() || voice.len() > 64 || !voice.chars().all(|c| c.is_ascii_alphanumeric()) || text.is_empty() || text.chars().count() > 600 {
+        return Err("bad request".into());
+    }
+    let model = if model == "eleven_multilingual_v2" { "eleven_multilingual_v2" } else { "eleven_flash_v2_5" };
+    let res = reqwest::Client::new()
+        .post(format!("https://api.elevenlabs.io/v1/text-to-speech/{voice}?output_format=mp3_44100_128"))
+        .header("xi-api-key", key)
+        .json(&serde_json::json!({ "text": text, "model_id": model }))
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !res.status().is_success() {
+        let code = res.status().as_u16();
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("ElevenLabs {code}: {}", body.chars().take(200).collect::<String>()));
+    }
+    let audio = res.bytes().await.map_err(|e| e.to_string())?;
+    if audio.len() > 10_000_000 {
+        return Err("ElevenLabs answer too large".into());
+    }
+    Ok(tauri::ipc::Response::new(audio.to_vec()))
+}
+/// The voices of the user's ElevenLabs account: (id, name).
+#[tauri::command]
+async fn elevenlabs_voices(key: String) -> Result<Vec<(String, String)>, String> {
+    let res = reqwest::Client::new()
+        .get("https://api.elevenlabs.io/v1/voices")
+        .header("xi-api-key", key.trim())
+        .timeout(std::time::Duration::from_secs(20))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !res.status().is_success() {
+        return Err(format!("ElevenLabs {}", res.status().as_u16()));
+    }
+    let v: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+    Ok(v["voices"].as_array().map(|l| l.iter().filter_map(|x| Some((x["voice_id"].as_str()?.to_string(), x["name"].as_str()?.chars().take(80).collect()))).take(300).collect()).unwrap_or_default())
+}
+
 /// Vikikaynak (Wikisource): works matching `q`, or its novels and books shelves.
 #[tauri::command]
 async fn ws_search(lang: String, q: String) -> Result<Vec<wikisource::Hit>, String> {
@@ -311,13 +388,70 @@ async fn update_check(app: tauri::AppHandle, beta: bool) -> Result<Option<update
 async fn update_install(app: tauri::AppHandle) -> Result<(), String> {
     update::install(app).await
 }
+/// The voice assistant's recording, kept in the temp folder only until Whisper has read it.
+#[tauri::command]
+fn voice_clip(audio: Vec<u8>) -> Result<String, String> {
+    if audio.is_empty() || audio.len() > 25_000_000 {
+        return Err("empty or too long recording".into());
+    }
+    let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let path = std::env::temp_dir().join(format!("luna-voice-{ms}.wav"));
+    std::fs::write(&path, audio).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+/// Removes a recording made by voice_clip (nothing else).
+#[tauri::command]
+fn voice_clip_done(path: String) {
+    let p = std::path::PathBuf::from(&path);
+    let ours = p.parent() == Some(std::env::temp_dir().as_path())
+        && p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("luna-voice-") && (n.ends_with(".wav") || n.ends_with(".webm")));
+    if ours {
+        let _ = std::fs::remove_file(p);
+    }
+}
 #[tauri::command]
 async fn tts_voices() -> Result<Vec<tts::Voice>, String> {
     tts::voices().await
 }
 
+/// A show page of a site yt-dlp doesn't know (Podbee): its episodes, to add as a podcast.
+#[tauri::command]
+async fn site_list(url: String) -> Result<Option<site_media::Show>, String> {
+    if !site_media::is_podbee(&url) {
+        return Ok(None);
+    }
+    Ok(site_media::podbee_show(&get_text(url, None).await?.1))
+}
+
+/// "Luna'da oynat" from any site: whether the page plays sound only, and how long (long sound goes to podcasts).
+#[tauri::command]
+async fn media_probe(app: AppHandle, url: String) -> Result<yt::Probe, String> {
+    // Podbee: yt-dlp doesn't know it; the episode page names its public stream
+    if site_media::is_podbee(&url) && url.contains("/v/") {
+        let html = get_text(url, None).await?.1;
+        let (stream, title, thumb) = site_media::podbee_episode(&html).ok_or(tr!("Bölüm okunamadı", "Couldn't read the episode"))?;
+        return Ok(yt::Probe { audio: true, duration: None, title, channel: site_media::podbee_show_name(&html), site: "Podbee".into(), thumb, podcast: true, direct: Some(stream) });
+    }
+    let ytdlp = mpv::ytdlp_exe(&mpv_exe(&app));
+    let mut p = blocking(move || yt::probe(&ytdlp, &url)).await?;
+    // a sound file that doesn't say how long it is: its size gives a fair guess (about 128 kbit/s)
+    if p.audio && p.duration.is_none() {
+        if let Some(d) = p.direct.clone() {
+            let size = reqwest::Client::new().head(&d).timeout(std::time::Duration::from_secs(8)).send().await.ok()
+                .and_then(|r| r.headers().get(reqwest::header::CONTENT_LENGTH)?.to_str().ok()?.parse::<f64>().ok());
+            p.duration = size.map(|b| b / 16_000.0);
+        }
+    }
+    Ok(p)
+}
+
 #[tauri::command]
 async fn yt_stream(app: AppHandle, url: String) -> Result<yt::Stream, String> {
+    if site_media::is_podbee(&url) && url.contains("/v/") {
+        let html = get_text(url, None).await?.1;
+        let (stream, ..) = site_media::podbee_episode(&html).ok_or(tr!("Bölüm okunamadı", "Couldn't read the episode"))?;
+        return Ok(yt::Stream { url: stream, ua: None });
+    }
     let ytdlp = mpv::ytdlp_exe(&mpv_exe(&app));
     // a song to be found ("ytsearch1:Artist Title"): YouTube's own search is quicker than yt-dlp's
     let url = match url.strip_prefix("ytsearch1:") {
@@ -325,6 +459,21 @@ async fn yt_stream(app: AppHandle, url: String) -> Result<yt::Stream, String> {
         None => url,
     };
     blocking(move || yt::stream(&ytdlp, &url)).await
+}
+
+/// A YouTube song's picture, found while its sound plays, so the video button shows it at once.
+#[tauri::command]
+async fn yt_video_stream(app: AppHandle, url: String) -> Result<yt::Stream, String> {
+    // a song to be found ("ytsearch1:Artist Title") is found the same way as its sound
+    let url = match url.strip_prefix("ytsearch1:") {
+        Some(q) => yt::search_api(q, 1).await.ok().and_then(|h| h.into_iter().next()).map(|h| h.url).unwrap_or_default(),
+        None => url,
+    };
+    if !(url.starts_with("https://www.youtube.com/") || url.starts_with("https://youtube.com/") || url.starts_with("https://m.youtube.com/") || url.starts_with("https://youtu.be/") || url.starts_with("https://music.youtube.com/")) {
+        return Err(tr!("Yalnız YouTube adresi", "YouTube addresses only"));
+    }
+    let ytdlp = mpv::ytdlp_exe(&mpv_exe(&app));
+    blocking(move || yt::video_stream(&ytdlp, &url)).await
 }
 
 /// Every book (EPUB, PDF, CBZ) under the book folders.
@@ -384,6 +533,11 @@ async fn scan_folders(folders: Vec<String>) -> Vec<String> {
 }
 
 #[tauri::command]
+async fn move_download(file: String, dir: String) -> Result<String, String> {
+    blocking(move || files::move_into(&file, &dir)).await
+}
+
+#[tauri::command]
 async fn probe_video(app: AppHandle, path: String) -> Result<files::MediaInfo, String> {
     let exe = mpv_exe(&app);
     blocking(move || files::probe(&exe, &path)).await
@@ -401,6 +555,68 @@ async fn seek_preview(app: AppHandle, path: String, secs: u32,referrer:Option<St
     let exe = mpv_exe(&app);
     let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("previews");
     blocking(move || files::frame_at_with_headers(&exe, &path, secs, &cache,referrer.as_deref(),agent.as_deref())).await
+}
+
+/// An audiobook/podcast file's own .srt/.vtt beside it, as text (None when there is none), for the lyrics-style view.
+#[tauri::command]
+async fn audio_subtitle_text(path: String, lang: String) -> Result<Option<String>, String> {
+    blocking(move || {
+        let Some(sub) = files::best_subs(&[path], &lang).into_iter().next().flatten() else { return Ok(None) };
+        if !matches!(std::path::Path::new(&sub).extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).as_deref(), Some("srt" | "vtt")) { return Ok(None); }
+        if std::fs::metadata(&sub).map(|m| m.len()).unwrap_or(0) > 20_000_000 { return Ok(None); }
+        let bytes = std::fs::read(&sub).map_err(|e| e.to_string())?;
+        Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
+    }).await
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AudioSub { file: String, exists: bool, cached: bool }
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AudioSubScan { entries: Vec<AudioSub>, best: Option<String> }
+
+fn inside_dir(file: &std::path::Path, dir: &std::path::Path) -> bool {
+    match (file.canonicalize(), dir.canonicalize()) { (Ok(f), Ok(d)) => f.starts_with(d), _ => false }
+}
+
+/// Every subtitle of an audiobook/podcast item: the files beside a local audio file plus the `known` ones Luna made for it
+/// (whether each still exists and whether it lives in Luna's cache), and the best one beside the file in the wanted language.
+#[tauri::command]
+async fn audio_subs_scan(app: AppHandle, path: String, known: Vec<String>, lang: String) -> Result<AudioSubScan, String> {
+    let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    blocking(move || {
+        let mut seen: Vec<String> = Vec::new();
+        let mut entries = Vec::new();
+        let best = files::best_subs(&[path.clone()], &lang).into_iter().next().flatten()
+            .filter(|s| matches!(std::path::Path::new(s).extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).as_deref(), Some("srt" | "vtt")));
+        for f in known.into_iter().take(64).chain(files::beside_text_subs(&path)) {
+            let key = f.to_lowercase();
+            if seen.contains(&key) { continue; }
+            seen.push(key);
+            let p = std::path::Path::new(&f);
+            let exists = p.is_file();
+            let cached = exists && inside_dir(p, &cache);
+            entries.push(AudioSub { file: f, exists, cached });
+        }
+        Ok(AudioSubScan { entries, best })
+    }).await
+}
+
+/// Deletes a subtitle (.srt/.vtt) the audio screen lists. A file in Luna's cache goes without asking; any other file (beside the
+/// user's audio) only with `force`, which the page sets after the user confirmed.
+#[tauri::command]
+async fn audio_sub_delete(app: AppHandle, file: String, force: bool) -> Result<(), String> {
+    let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    blocking(move || {
+        let p = std::path::Path::new(&file);
+        if !matches!(p.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).as_deref(), Some("srt" | "vtt")) {
+            return Err(tr!("Yalnız SRT ve VTT dosyaları silinebilir", "Only SRT and VTT files can be deleted"));
+        }
+        if !p.is_file() { return Ok(()); }
+        if !force && !inside_dir(p, &cache) { return Err("outside".into()); }
+        std::fs::remove_file(p).map_err(|e| e.to_string())
+    }).await
 }
 
 /// The subtitle file to read for each film (see `files::best_subs`); used by the line search.
@@ -572,6 +788,34 @@ async fn llm_post(kind: String, url: String, key: String, body: Value) -> Result
     Ok(v)
 }
 
+/// Brave web search for assistants without a search of their own (local models, OpenAI-compatible servers…):
+/// the top results' title, address and snippet. The key comes from Windows' credential store through the UI.
+#[tauri::command]
+async fn brave_search(key: String, query: String, count: Option<u32>) -> Result<Vec<Value>, String> {
+    let query = query.trim();
+    if key.trim().is_empty() { return Err(tr!("Brave Search anahtarı girilmemiş", "No Brave Search key")); }
+    if query.is_empty() || query.chars().count() > 400 { return Err(tr!("Geçersiz arama", "Invalid search")); }
+    let count = count.unwrap_or(6).clamp(1, 10).to_string();
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(20)).build().map_err(|e| e.to_string())?;
+    let res = client.get("https://api.search.brave.com/res/v1/web/search")
+        .query(&[("q", query), ("count", count.as_str())])
+        .header("Accept", "application/json").header("X-Subscription-Token", key.trim())
+        .send().await.map_err(|e| err_chain(&e))?;
+    let status = res.status();
+    let v: Value = serde_json::from_slice(&read_capped(res, 4 * 1024 * 1024).await?).unwrap_or(Value::Null);
+    if !status.is_success() {
+        let msg = v["error"]["detail"].as_str().or_else(|| v["error"]["code"].as_str()).or_else(|| v["message"].as_str()).unwrap_or("");
+        return Err(tr!("Brave Search hatası ({}): {}", "Brave Search error ({}): {}", status, msg));
+    }
+    let strip = |s: &str| regex::Regex::new(r"<[^>]+>").map(|re| re.replace_all(s, "").into_owned()).unwrap_or_else(|_| s.to_string());
+    Ok(v["web"]["results"].as_array().cloned().unwrap_or_default().iter().take(10).map(|r| serde_json::json!({
+        "title": strip(r["title"].as_str().unwrap_or("")).chars().take(200).collect::<String>(),
+        "url": r["url"].as_str().unwrap_or(""),
+        "snippet": strip(r["description"].as_str().unwrap_or("")).chars().take(500).collect::<String>(),
+        "age": r["age"].as_str().unwrap_or(""),
+    })).filter(|r| r["url"].as_str().is_some_and(|u| u.starts_with("https://") || u.starts_with("http://"))).collect())
+}
+
 /// The models a provider offers (GET …/models): ids.
 #[tauri::command]
 async fn llm_models(kind: String, url: String, key: String) -> Result<Vec<String>, String> {
@@ -675,6 +919,11 @@ async fn upscaler_save(values: std::collections::BTreeMap<String, String>) -> Re
 }
 
 #[tauri::command]
+async fn upscaler_import(from: String) -> Result<(), String> {
+    blocking(move || upscaler::import(from)).await
+}
+
+#[tauri::command]
 async fn upscaler_scale(on: bool) -> Result<bool, String> {
     blocking(move || upscaler::set_scaling(on)).await
 }
@@ -698,7 +947,7 @@ static SUBS_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 #[tauri::command]
 async fn subs_window(app: AppHandle, show: bool) -> Result<(), String> {
     use std::sync::atomic::Ordering;
-    let main = app.get_webview_window("main").ok_or("ana pencere yok")?;
+    let main = main_window(&app).ok_or("ana pencere yok")?;
     let w = match app.get_webview_window("subs") {
         Some(w) => w,
         None => {
@@ -952,7 +1201,7 @@ async fn http_text(url: String, bearer: Option<String>) -> Result<String, String
 async fn http_text_at(url: String) -> Result<(String, String), String> {
     get_text(url, None).await
 }
-async fn get_text(url: String, bearer: Option<String>) -> Result<(String, String), String> {
+pub(crate) async fn get_text(url: String, bearer: Option<String>) -> Result<(String, String), String> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err(tr!("Geçersiz adres", "Invalid address"));
     }
@@ -1161,6 +1410,37 @@ async fn addon_get(url: String) -> Result<Value, String> {
         .map_err(|e| tr!("Eklentinin yanıtı okunamadı: {}", "Couldn't read the addon's answer: {}", e))
 }
 
+/// Text search on Knaben (a free index of public torrent sites): the query goes as typed, to a fixed address.
+/// Returns its hits as they come (name, size, seeders, magnet); the sources list turns them into streams.
+#[tauri::command]
+async fn knaben_search(query: String) -> Result<Value, String> {
+    let q = query.trim();
+    if q.is_empty() || q.chars().count() > 200 {
+        return Err(tr!("Geçersiz arama", "Not a valid search"));
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let body = serde_json::json!({
+        "search_type": "100%", "search_field": "title", "query": q,
+        "order_by": "seeders", "order_direction": "desc", "size": 40, "hide_unsafe": true, "hide_xxx": true,
+    });
+    let res = client
+        .post("https://api.knaben.org/v1")
+        .header("Accept", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| tr!("Knaben'e ulaşılamadı: {}", "Couldn't reach Knaben: {}", e))?;
+    if !res.status().is_success() {
+        return Err(tr!("Knaben hata verdi ({})", "Knaben returned an error ({})", res.status()));
+    }
+    let bytes = read_capped(res, 4 * 1024 * 1024).await?;
+    serde_json::from_slice::<Value>(&bytes)
+        .map_err(|e| tr!("Knaben'in yanıtı okunamadı: {}", "Couldn't read Knaben's answer: {}", e))
+}
+
 /// Downloads a web page (e.g. a Letterboxd / IMDb list) and returns its readable text, including the
 /// film names that only live in poster alt texts. Letterboxd lists: the first pages are followed too.
 fn is_private_url(u: &str) -> bool {
@@ -1353,6 +1633,54 @@ fn downloads_dir(app: AppHandle) -> Option<String> {
     app.path().download_dir().ok().map(|p| p.to_string_lossy().into_owned())
 }
 
+/// One file Luna downloaded, as the Downloads page lists it.
+#[derive(serde::Serialize)]
+struct InventoryItem { path: String, name: String, size: u64, modified: u64 }
+
+/// Everything inside Luna's own download folders ("Luna Video", "Luna Müzik", "Luna Books"…): files only, at most
+/// five folders deep and 4000 files, unfinished downloads (.part, .ytdl, .tmp) left out. Missing folders are skipped.
+#[tauri::command]
+async fn downloads_inventory(dirs: Vec<String>, files: Option<Vec<String>>) -> Result<Vec<InventoryItem>, String> {
+    blocking(move || {
+        fn walk(dir: &std::path::Path, depth: u32, out: &mut Vec<InventoryItem>) {
+            if depth > 5 || out.len() >= 4000 { return; }
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                if out.len() >= 4000 { return; }
+                let Ok(meta) = e.metadata() else { continue };
+                let p = e.path();
+                let name = e.file_name().to_string_lossy().into_owned();
+                if name.starts_with('.') { continue; }
+                if meta.is_dir() { walk(&p, depth + 1, out); continue; }
+                let low = name.to_lowercase();
+                if [".part", ".ytdl", ".tmp", ".crdownload", ".ini"].iter().any(|x| low.ends_with(x)) { continue; }
+                let modified = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
+                out.push(InventoryItem { path: p.to_string_lossy().into_owned(), name, size: meta.len(), modified });
+            }
+        }
+        let mut out = Vec::new();
+        for d in dirs.iter().take(16) {
+            let p = std::path::Path::new(d);
+            if d.trim().is_empty() || !p.is_absolute() { continue; }
+            walk(p, 0, &mut out);
+        }
+        // single files outside those folders (a torrent saved straight into Downloads)
+        for f in files.unwrap_or_default().iter().take(500) {
+            let p = std::path::Path::new(f);
+            if !p.is_absolute() || out.iter().any(|x| x.path.eq_ignore_ascii_case(f)) { continue; }
+            let Ok(meta) = std::fs::metadata(p) else { continue };
+            if !meta.is_file() { continue; }
+            let modified = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
+            let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            out.push(InventoryItem { path: f.clone(), name, size: meta.len(), modified });
+        }
+        // a folder scanned twice (a torrent folder inside a scanned one) lists its files once
+        let mut seen = std::collections::HashSet::new();
+        out.retain(|x| seen.insert(x.path.to_lowercase()));
+        Ok(out)
+    }).await
+}
+
 #[tauri::command]
 fn reveal_file(path: String) -> Result<(), String> {
     files::reveal(&path)
@@ -1466,7 +1794,13 @@ pub fn run() {
     let app = tauri::Builder::default()
         // Double-clicking another video while Luna is open plays it in the same window.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            if let Some(f) = argv.iter().skip(1).find(|a| !a.starts_with('-')) {
+            // a luna:// link (browser / Chrome add-on) goes to its own checked handler, never to the file opener
+            if let Some(party) = watch_party::from_args(argv.iter().skip(1).cloned()) {
+                // a watch-party invite: the window asks before connecting anywhere
+                let _ = app.emit("party-link", party);
+            } else if let Some(link) = luna_link::from_args(argv.iter().skip(1).cloned()) {
+                let _ = app.emit("luna-link", link);
+            } else if let Some(f) = argv.iter().skip(1).find(|a| !a.starts_with('-') && !a.to_ascii_lowercase().starts_with("luna:")) {
                 let _ = app.emit("open-file", f.clone());
             }
             if let Some(w) = app.get_webview_window("main") {
@@ -1494,11 +1828,15 @@ pub fn run() {
         })
         .manage(update::Pending::default())
         .manage(browser::BrowserState::default())
+        .manage(voice_engine::VoiceEngine::default())
         .manage(browser_downloads::Downloads::default())
         .manage(browser_extensions::Extensions::default())
         .manage(media_controls::Controls::default())
         .setup(|app| {
+            std::thread::spawn(luna_link::register);
+            { let handle = app.handle().clone(); std::thread::spawn(move || studio::startup_cleanup(&handle)); }
             let win = app.get_webview_window("main").expect("main window");
+            webfetch::init(app.handle());
             let hwnd = win.hwnd()?.0 as isize;
             let exe = mpv_exe(app.handle());
             // Bundled Inter sits next to the mpv folder; user fonts join it in Luna's data folder.
@@ -1547,13 +1885,28 @@ pub fn run() {
             browser_downloads::browser_downloads,
             browser_extensions::browser_extension_prepare,
             browser_extensions::browser_extension_manage,
+            browser_extensions::browser_extension_popup,
+            browser_extensions::browser_extension_popup_close,
+            browser_extensions::browser_extension_details,
+            web_translate::web_translate,
+            browser_extensions::browser_extension_open,
             browser::browser_action,
             browser::browser_bounds,
             browser::browser_bubble,
             browser::browser_read,
+            browser::browser_collection_target,
+            browser::browser_snapshot,
             browser::browser_media,
+            browser::browser_mini,
+            voice_clip,
+            voice_clip_done,
+            voice_engine::voice_engine_warm,
+            voice_engine::voice_engine_transcribe,
+            voice_engine::voice_engine_stop,
+            brave_search,
             browser::browser_position,
             browser::browser_translation,
+            browser::browser_translation_model,
             browser::browser_find,
             set_lang,
             system_check,
@@ -1561,6 +1914,18 @@ pub fn run() {
             mpv_dock,
             music_queue_prepare,
             startup_file,
+            startup_link,
+            watch_party::party_status,
+            watch_party::party_startup_link,
+            watch_party::party_host,
+            watch_party::party_join,
+            watch_party::party_answer,
+            watch_party::party_kick,
+            watch_party::party_mode,
+            watch_party::party_send,
+            watch_party::party_close,
+            yt_download,
+            yt_download_hd,
             find_subtitles,
             search_subtitles,
             download_subtitle,
@@ -1572,6 +1937,9 @@ pub fn run() {
             yt_info,
             yt_transcript,
             yt_stream,
+            yt_video_stream,
+            media_probe,
+            site_list,
             tts_speak,
             tts_voices,
             update_check,
@@ -1586,8 +1954,12 @@ pub fn run() {
             books_default_dir,
             book_download,
             probe_video,
+            move_download,
             video_thumbnail,
             seek_preview,
+            audio_subtitle_text,
+            audio_subs_scan,
+            audio_sub_delete,
             paths_exist,
             preview_release,
             torrent_haves,
@@ -1603,6 +1975,7 @@ pub fn run() {
             mcp_client::mcp_disconnect,
             upscaler_status,
             upscaler_save,
+            upscaler_import,
             upscaler_scale,
             subs_window,
             subs_style,
@@ -1612,6 +1985,7 @@ pub fn run() {
             upscaler_note,
             fetch_page_text,
             addon_get,
+            knaben_search,
             http_text,
             http_text_at,
             http_send,
@@ -1619,6 +1993,8 @@ pub fn run() {
             read_export,
             letterboxd_read,
             letterboxd_reviews,
+            elevenlabs_speak,
+            elevenlabs_voices,
             book_reviews,
             plugins_list,
             plugins_add,
@@ -1634,6 +2010,7 @@ pub fn run() {
             torrent_pause,
             torrent_remove,
             downloads_dir,
+            downloads_inventory,
             fonts_add,
             fonts_list,
             fonts_remove,

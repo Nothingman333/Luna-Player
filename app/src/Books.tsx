@@ -8,7 +8,7 @@ import "./BookMusic.css";
 import { open } from "@tauri-apps/plugin-dialog";
 import "./FilmDecision.css";
 import { tt } from "./i18n";
-import { store } from "./library";
+import { store, autoAddOpened } from "./library";
 import { QItem } from "./Music";
 import { invoke } from "./nativeCore";
 import { OEntry } from "./Opds";
@@ -20,14 +20,27 @@ export let libCache: { sig: string; books: Book[] } | null = null;
 export const libSubs = new Set<() => void>();
 export const libChanged = () => { libCache = null; libSubs.forEach((f) => f()); };
 /** The book library (scanned once; the index keeps it quick). */
+/** Books opened from anywhere (Dosya aç, a download) belong to the library too: the assistant sees them. */
+/** A book opened from outside the book folders joins the library only when it was added ("Kitaplığa ekle" in the
+ *  reader) or with Settings › "add opened media by itself". Books opened before this rule stay where they were. */
+const keptBooks = (): string[] => {
+  if (store.get("bookKeptInit") !== "1") { store.set("bookKept", JSON.stringify(Object.keys(store.json<Record<string, unknown>>("bookOpened", {})))); store.set("bookKeptInit", "1"); }
+  return store.json<string[]>("bookKept", []);
+};
+export const keptOpenedBook = (path: string) => autoAddOpened() || keptBooks().includes(path);
+export function keepBook(path: string) {
+  const l = keptBooks(); if (!l.includes(path)) store.set("bookKept", JSON.stringify([...l, path]));
+  libChanged(); window.dispatchEvent(new Event("luna-book-kept"));
+}
+const withOpened = (books: Book[]) => [...books, ...mergeBookSources<Book>(store.json("bookOpened", {})).filter((o) => !books.some((b) => b.path === o.path) && keptOpenedBook(o.path))];
 export async function loadBookLibrary(): Promise<Book[]> {
   const f = loadBookFolders();
-  if (libCache?.sig === f.join("|")) return libCache.books.map(withBookInfo);
+  if (libCache?.sig === f.join("|")) return withOpened(libCache.books).map(withBookInfo);
   // a failed scan isn't kept as an empty library: the next ask scans again
   let ok = true;
   const books = f.length ? await invoke<Book[]>("books_scan", { folders: f }).catch(() => { ok = false; return [] as Book[]; }) : [];
   if (ok) libCache = { sig: f.join("|"), books };
-  return books.map(withBookInfo);
+  return withOpened(books).map(withBookInfo);
 }
 
 // opening a book from anywhere (the assistant): the books page opens it when it's on screen
@@ -40,7 +53,8 @@ export function requestOpenBook(b: Book) {
   // what the book is, also when it lives outside the book folders (opened with "Open file")
   const known = Object.fromEntries(mergeBookSources<Book>(store.json("bookOpened", {})).map(x=>[x.path,x]));
   known[b.path] = b;
-  store.set("bookOpened", JSON.stringify(Object.fromEntries(recent.filter((p) => known[p]).map((p) => [p, known[p]]))));
+  // every book ever opened stays in the library, wherever its file is (not only the last 20 read)
+  store.set("bookOpened", JSON.stringify(known));
   if (openHandler) openHandler(b); else pendingOpen = b;
   // a page over the app (the collections) steps aside for the reader
   window.dispatchEvent(new Event("luna-book-open"));
@@ -139,9 +153,18 @@ export async function abChapters(a: Ab): Promise<QItem[]> {
 
 // ---------- "Dosya aç" and "Bağlantı" in the books part ----------
 export async function openBookFile() {
-  const f = await open({ multiple: false, filters: [{ name: tt("Kitap"), extensions: ["epub", "pdf", "cbz", "mobi", "azw3", "fb2"] }] });
+  const AUDIO = ["mp3", "m4a", "m4b", "aac", "flac", "ogg", "opus", "wav"];
+  const f = await open({ multiple: false, filters: [{ name: tt("Kitap"), extensions: ["epub", "pdf", "cbz", "mobi", "azw3", "fb2", ...AUDIO] }] });
   if (typeof f !== "string") return;
   const ext = f.split(".").pop()!.toLowerCase();
+  if (AUDIO.includes(ext)) {
+    // an audiobook file: into "Sesli kitaplar" and play it
+    const { addWebEpisode, playQueue } = await import("./Music");
+    const q = addWebEpisode(tt("Sesli kitaplar"), "", { src: f, title: (f.split(/[\\/]/).pop() ?? f).replace(/\.[^.]+$/, "").replace(/_/g, " "), date: Date.now() });
+    playQueue([q], 0, false, q.podcast);
+    window.dispatchEvent(new Event("luna-my-ab"));
+    return;
+  }
   const stem = f.split(/[\\/]/).pop()!.replace(/\.[^.]+$/, "");
   // "Author - Title - Subtitle": only the first dash parts the author; the rest stays the title
   const cut = stem.indexOf(" - ");
@@ -154,7 +177,7 @@ export let onScreen: { b: Book; reading: boolean } | null = null;
 export const bookOnScreen = () => onScreen;
 
 // ---------- pages ----------
-export type BooksView = "home" | "library" | "taste" | "discover" | "audio";
+export type BooksView = "home" | "library" | "taste" | "discover" | "audio" | "downloads";
 
 /** Vikikaynak's works as catalog entries (downloaded as an EPUB Luna makes). */
 export async function wikisourceBooks(lang: string, q: string): Promise<OEntry[]> {

@@ -20,6 +20,18 @@ struct Engine {
     port: u16,
 }
 
+/// Well-known open trackers, used alongside a torrent's own.
+const PUBLIC_TRACKERS: [&str; 8] = [
+    "udp://tracker.opentrackr.org:1337/announce",
+    "udp://open.stealth.si:80/announce",
+    "udp://open.demonii.com:1337/announce",
+    "udp://tracker.torrent.eu.org:451/announce",
+    "udp://explodie.org:6969/announce",
+    "udp://tracker.dler.org:6969/announce",
+    "udp://exodus.desync.com:6969/announce",
+    "https://tracker.opentrackr.org:443/announce",
+];
+
 static ENGINE: OnceCell<Engine> = OnceCell::const_new();
 /// Where the engine remembers its torrents (in Luna's data folder), so downloads carry on after a restart.
 static SESSION_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
@@ -31,6 +43,8 @@ async fn engine(default_dir: PathBuf) -> Result<&'static Engine, String> {
             let opts = SessionOptions {
                 fastresume: SESSION_DIR.get().is_some(),
                 persistence: SESSION_DIR.get().map(|d| SessionPersistenceConfig::Json { folder: Some(d.clone()) }),
+                // Magnets from addons often carry no trackers; DHT alone can take minutes to find the file list.
+                trackers: PUBLIC_TRACKERS.iter().filter_map(|t| url::Url::parse(t).ok()).collect(),
                 ..Default::default()
             };
             let session = Session::new_with_opts(default_dir, opts).await.map_err(|e| e.to_string())?;
@@ -47,6 +61,48 @@ async fn engine(default_dir: PathBuf) -> Result<&'static Engine, String> {
         .await
 }
 
+// ---------- one download at a time ----------
+// The newest torrent (the one just opened or resumed) gets the whole connection: the unfinished ones before it
+// are paused and parked. When it finishes or is removed, the last parked one carries on, and so on down the line.
+static PARKED: std::sync::Mutex<Vec<usize>> = std::sync::Mutex::new(Vec::new());
+static FOCUS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn parked() -> std::sync::MutexGuard<'static, Vec<usize>> { PARKED.lock().unwrap_or_else(|e| e.into_inner()) }
+
+/// Makes `id` the only torrent downloading; the others wait their turn.
+// (boxed: it starts itself again for the next in line)
+fn focus(eng: &'static Engine, id: usize) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> { Box::pin(async move {
+    let generation = FOCUS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    parked().retain(|&p| p != id);
+    let others: Vec<(usize, _)> = eng.session.with_torrents(|it| {
+        it.filter(|(i, h)| *i != id && !h.is_paused() && !h.stats().finished).map(|(i, h)| (i, h.clone())).collect()
+    });
+    for (i, h) in others {
+        if eng.session.pause(&h).await.is_ok() { parked().push(i); }
+    }
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            // a newer torrent took over: it carries the line on
+            if FOCUS.load(std::sync::atomic::Ordering::SeqCst) != generation { return; }
+            match eng.session.get(id.into()) {
+                Some(h) if !h.stats().finished => continue,
+                _ => break,
+            }
+        }
+        // the next in line: the last one parked that still waits
+        loop {
+            let Some(next) = parked().pop() else { return };
+            if let Some(h) = eng.session.get(next.into()) {
+                if h.is_paused() && !h.stats().finished && eng.session.unpause(&h).await.is_ok() {
+                    focus(eng, next).await;
+                    return;
+                }
+            }
+        }
+    });
+}) }
+
 /// At start: the remembered torrents (if any) are loaded and carry on downloading.
 pub fn resume(session_dir: PathBuf, default_dir: PathBuf) {
     let _ = SESSION_DIR.set(session_dir.clone());
@@ -55,7 +111,11 @@ pub fn resume(session_dir: PathBuf, default_dir: PathBuf) {
         .is_some_and(|v| v["torrents"].as_object().is_some_and(|t| !t.is_empty()));
     if saved {
         tauri::async_runtime::spawn(async move {
-            let _ = engine(default_dir).await;
+            let Ok(eng) = engine(default_dir).await else { return };
+            // restored torrents all start at once: only the newest unfinished one keeps going
+            tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+            let newest = eng.session.with_torrents(|it| it.filter(|(_, h)| !h.is_paused() && !h.stats().finished).map(|(i, _)| i).max());
+            if let Some(id) = newest { focus(eng, id).await; }
         });
     }
 }
@@ -103,14 +163,34 @@ pub async fn add(source: String, out_dir: String) -> Result<Added, String> {
     } else {
         AddTorrent::from_bytes(std::fs::read(&source).map_err(|e| tr!("Torrent dosyası okunamadı: {}", "Couldn't read the torrent file: {}", e))?)
     };
-    let opts = AddTorrentOptions { overwrite: true, output_folder: Some(out_dir.clone()), ..Default::default() };
-    let handle = eng
-        .session
-        .add_torrent(add, Some(opts))
+    // Only videos and their subtitles are downloaded: a fake source's .exe (or any other file) never reaches the disk.
+    let opts = AddTorrentOptions {
+        overwrite: true,
+        output_folder: Some(out_dir.clone()),
+        // librqbit refuses the regex next to a magnet's own file choice ("so="), which already names one file
+        only_files_regex: if source.contains("&so=") || source.contains("?so=") { None } else {
+            Some(r"(?i)\.(mkv|mp4|avi|mov|wmv|webm|m4v|ts|m2ts|mpg|mpeg|srt|ass|ssa|sub|idx|vtt|sup)$".into())
+        },
+        ..Default::default()
+    };
+    // A magnet first fetches its file list from peers; give up instead of waiting forever when nobody answers.
+    let handle = tokio::time::timeout(std::time::Duration::from_secs(120), eng.session.add_torrent(add, Some(opts)))
         .await
-        .map_err(|e| tr!("Torrent eklenemedi: {:#}", "Couldn't add the torrent: {:#}", e))?
+        .map_err(|_| tr!("Torrent bilgisi 2 dakikada gelmedi: bu kaynakta paylaşan yok gibi. Başka bir kaynak dene.", "The torrent's details didn't arrive in 2 minutes: nobody seems to be sharing this source. Try another one."))?
+        .map_err(|e| {
+            if format!("{e:#}").contains("none of the filenames match") {
+                tr!("Bu kaynakta video yok (program ya da başka dosyalar var): sahte olabilir, indirilmedi. Başka bir kaynak seç.", "This source has no video (programs or other files instead): it may be fake, nothing was downloaded. Pick another source.")
+            } else {
+                tr!("Torrent eklenemedi: {:#}", "Couldn't add the torrent: {:#}", e)
+            }
+        })?
         .into_handle()
         .ok_or(tr!("Torrent eklenemedi", "Couldn't add the torrent"))?;
+    // opened again while it waited its turn (or was paused by hand): it goes on now, and the others wait
+    if handle.is_paused() {
+        eng.session.unpause(&handle).await.map_err(|e| tr!("Torrent sürdürülemedi: {:#}", "Couldn't resume the torrent: {:#}", e))?;
+    }
+    if !handle.stats().finished { focus(eng, handle.id()).await; }
 
     // Streaming only works once the torrent has finished checking its files and is live.
     for _ in 0..600 {
@@ -135,7 +215,13 @@ pub async fn add(source: String, out_dir: String) -> Result<Added, String> {
         })
         .map_err(|e| e.to_string())?;    // A file named by the link (one episode of a season pack) plays instead of the biggest video;
     // if the torrent was already here with other files selected, that file is added to them.
-    let picked = selected_file(&source).filter(|&i| files.get(i).is_some_and(|f| is_video(&f.name)));
+    let named = selected_file(&source);
+    let picked = named.filter(|&i| files.get(i).is_some_and(|f| is_video(&f.name)));
+    // the link's own file choice skipped the video-only filter above: a chosen file that isn't a video is refused
+    if named.is_some() && picked.is_none() {
+        let _ = eng.session.delete(id.into(), true).await;
+        return Err(tr!("Bu kaynakta video yok (program ya da başka dosyalar var): sahte olabilir, indirilmedi. Başka bir kaynak seç.", "This source has no video (programs or other files instead): it may be fake, nothing was downloaded. Pick another source."));
+    }
     if let Some(i) = picked {
         if let Some(mut only) = handle.only_files() {
             if !only.contains(&i) {
@@ -218,7 +304,15 @@ pub fn haves(id: usize, idx: usize) -> Result<Vec<(f64, f64)>, String> {
 pub async fn pause(id: usize, pause: bool) -> Result<(), String> {
     let eng = ENGINE.get().ok_or(tr!("Torrent motoru çalışmıyor", "The torrent engine isn't running"))?;
     let h = eng.session.get(id.into()).ok_or(tr!("Torrent bulunamadı", "Torrent not found"))?;
-    if pause { eng.session.pause(&h).await } else { eng.session.unpause(&h).await }.map_err(|e| e.to_string())
+    if pause {
+        // paused by hand: it leaves the line and nothing else starts by itself
+        parked().retain(|&p| p != id);
+        return eng.session.pause(&h).await.map_err(|e| e.to_string());
+    }
+    eng.session.unpause(&h).await.map_err(|e| e.to_string())?;
+    // resumed by hand: this one downloads now, the others wait
+    if !h.stats().finished { focus(eng, id).await; }
+    Ok(())
 }
 
 pub async fn remove(id: usize, delete_files: bool) -> Result<(), String> {

@@ -32,7 +32,7 @@
 .lh-prog span { flex: 1; }
 @keyframes lpSlide { from { transform: translateX(0); } to { transform: translateX(185%); } }
 
-.sg-bg { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); backdrop-filter: blur(6px); }
+.sg-bg { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); backdrop-filter: var(--glass-scrim); }
 .sg { width: min(1100px, 94vw); max-height: 90vh; overflow: auto; padding: 14px; border-radius: 16px; }
 .sg-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
 .sg-head b { font-family: Sora, sans-serif; }

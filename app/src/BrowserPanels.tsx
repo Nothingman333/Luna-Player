@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { ExtraModal } from "./Extras";
 import { lang } from "./i18n";
+import { isTauri } from "./nativeCore";
 import { BrowserIcon as WebIcon } from "./BrowserIcons";
 import { hostLabel, siteHue } from "./browserHistoryModel";
 import { BANGS } from "./browserSearchModel";
@@ -105,30 +106,68 @@ export function FindBar({ query, setQuery, result, matchCase, setMatchCase, step
 }
 
 export type TabMenuItem = { label: string; icon?: Parameters<typeof WebIcon>[0]["name"]; hint?: string; disabled?: boolean; run: () => void } | "sep";
-/** Right-click menu of a tab (or any small menu): arrow keys, Enter and Esc work like a native menu. */
-export function WebMenu({ x, y, items, close }: { x: number; y: number; items: TabMenuItem[]; close: () => void }) {
-  const box = useRef<HTMLDivElement>(null), [pos, setPos] = useState({ x, y });
+/** The page under a menu, as a picture (see browser_snapshot): `src` is drawn at the page's place on screen. */
+export type MenuGlass = { src: string; x: number; y: number; w: number; h: number };
+/** how far the page's cut-out reaches past a glass menu, so its soft shadow is not cut off */
+const GLASS_PAD = 32;
+/**
+ * Right-click menu of a tab (or any small menu): arrow keys, Enter and Esc work like a native menu.
+ * Over a web page the page window sits above Luna's, so the page cuts a hole for the menu (Browser.tsx place()).
+ * The menu waits for that hole before it animates in, and on closing it fades out over the page's picture first and
+ * leaves only once the hole is closed again: no black box for a moment. `glass` (undefined while it is still being
+ * taken) is that picture, blurred inside the menu and shown sharp around it.
+ */
+export function WebMenu({ x, y, items, close, glass: given = null }: { x: number; y: number; items: TabMenuItem[]; close: () => void; glass?: MenuGlass | null | "pending" }) {
+  const layered = isTauri(), glass = given === "pending" ? undefined : given;
+  const box = useRef<HTMLDivElement>(null), [pos, setPos] = useState({ x, y, w: 0, h: 0 });
+  const [phase, setPhase] = useState<"wait" | "open" | "closing" | "uncut">(layered ? "wait" : "open");
+  const shut = useRef(close); shut.current = close;
+  const leave = () => { if (!layered) shut.current(); else setPhase((p) => p === "wait" || p === "open" ? "closing" : p); };
+  const leaveRef = useRef(leave); leaveRef.current = leave;
   useEffect(() => {
     const el = box.current; if (!el) return;
     const r = el.getBoundingClientRect();
-    setPos({ x: Math.max(8, Math.min(x, innerWidth - r.width - 8)), y: Math.max(8, Math.min(y, innerHeight - r.height - 8)) });
+    // no room below: open above the pointer instead of sliding up over what was clicked
+    const below = y + r.height + 8 <= innerHeight, top = below ? y : y - r.height - 30;
+    setPos({ x: Math.max(8, Math.min(x, innerWidth - r.width - 8)), y: Math.max(8, Math.min(top, innerHeight - r.height - 8)), w: r.width, h: r.height });
     el.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
-    const outside = (e: PointerEvent) => { if (!el.contains(e.target as Node)) close(); };
-    const blur = () => close();
+    const outside = (e: PointerEvent) => { if (!el.contains(e.target as Node)) leaveRef.current(); };
+    const blur = () => leaveRef.current();
     document.addEventListener("pointerdown", outside, true); window.addEventListener("blur", blur); window.addEventListener("resize", blur);
     return () => { document.removeEventListener("pointerdown", outside, true); window.removeEventListener("blur", blur); window.removeEventListener("resize", blur); };
   }, [x, y]);
+  // wait → the page has cut the hole → open; closing → faded out → uncut → the page has closed the hole → gone
+  useEffect(() => {
+    if (phase === "open") return;
+    if (phase === "wait" && glass === undefined) return; // the page's picture is still coming: it decides how big the hole is
+    if (phase === "closing") { const t = window.setTimeout(() => setPhase("uncut"), glass ? 130 : 0); return () => window.clearTimeout(t); }
+    const want = phase === "wait";
+    const done = (e: Event) => { if ((e as CustomEvent<{ menu: boolean }>).detail?.menu === want) finish(); };
+    const finish = () => { if (want) setPhase("open"); else shut.current(); };
+    window.addEventListener("luna-web-layer-done", done);
+    window.dispatchEvent(new Event("luna-web-layer"));
+    const t = window.setTimeout(finish, want ? 240 : 420);
+    return () => { window.removeEventListener("luna-web-layer-done", done); window.clearTimeout(t); };
+  }, [phase, glass]);
   const keys = (e: ReactKeyboardEvent) => {
-    const buttons = [...(box.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])], at = buttons.indexOf(document.activeElement as HTMLButtonElement);
-    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
+    const buttons = [...(box.current?.querySelectorAll<HTMLButtonElement>(":scope > button:not(:disabled)") ?? [])], at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); leave(); }
     else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); buttons[(at + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus(); }
     else if (e.key === "Home" || e.key === "End") { e.preventDefault(); buttons[e.key === "Home" ? 0 : buttons.length - 1]?.focus(); }
-    else if (e.key === "Tab") { e.preventDefault(); close(); }
+    else if (e.key === "Tab") { e.preventDefault(); leave(); }
   };
-  return <div ref={box} className="browser-tab-menu" role="menu" style={{ left: pos.x, top: pos.y }} onKeyDown={keys} onContextMenu={e => e.preventDefault()}>
-    {items.map((item, i) => item === "sep" ? <hr key={i}/> : <button key={i} role="menuitem" disabled={item.disabled} onClick={() => { close(); item.run(); }}>
-      {item.icon ? <WebIcon name={item.icon} size={15}/> : <i/>}<span>{item.label}</span>{item.hint && <small>{item.hint}</small>}</button>)}
-  </div>;
+  const sharp = glass && phase !== "uncut" && pos.w > 0;
+  return <>
+    {sharp && <div className="wm-page" aria-hidden="true" style={{ left: pos.x - GLASS_PAD - 2, top: pos.y - GLASS_PAD - 2, width: pos.w + 2 * GLASS_PAD + 4, height: pos.h + 2 * GLASS_PAD + 4 }}>
+      <img src={glass.src} alt="" style={{ left: glass.x - pos.x + GLASS_PAD + 2, top: glass.y - pos.y + GLASS_PAD + 2, width: glass.w, height: glass.h }}/></div>}
+    <div ref={box} className={"browser-tab-menu is-" + phase + (glass ? " has-glass" : "")} role="menu" data-cut-pad={glass ? GLASS_PAD : undefined}
+      style={{ left: pos.x, top: pos.y, transformOrigin: `${Math.max(0, Math.min(x - pos.x, pos.w))}px ${y < pos.y ? 0 : pos.h}px` }}
+      onKeyDown={keys} onContextMenu={e => e.preventDefault()}>
+      {glass && <div className="wm-glass" aria-hidden="true"><img src={glass.src} alt="" style={{ left: glass.x - pos.x - 1, top: glass.y - pos.y - 1, width: glass.w, height: glass.h }}/></div>}
+      {items.map((item, i) => item === "sep" ? <hr key={i}/> : <button key={i} role="menuitem" disabled={item.disabled} onClick={() => { item.run(); leave(); }}>
+        {item.icon ? <WebIcon name={item.icon} size={15}/> : <i/>}<span>{item.label}</span>{item.hint && <small>{item.hint}</small>}</button>)}
+    </div>
+  </>;
 }
 
 /** The address-bar drop-down: open tabs, favourites, history and the search itself. */

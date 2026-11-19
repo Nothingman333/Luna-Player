@@ -15,7 +15,7 @@ pub fn verify(data:&[u8],expected:Option<&str>)->Result<SignedCrx,String>{
  let id:String=crx_id.iter().flat_map(|b|[(b'a'+(b>>4))as char,(b'a'+(b&15))as char]).collect();if expected.is_some_and(|v|v!=id){return Err("İndirilen paket istenen mağaza eklentisiyle eşleşmiyor".into());}
  let mut message=Vec::with_capacity(data.len()+32);message.extend_from_slice(b"CRX3 SignedData\0");message.extend_from_slice(&(signed.len()as u32).to_le_bytes());message.extend_from_slice(signed);message.extend_from_slice(&data[end..]);
  for(algorithm,proof)in header.into_iter().filter(|(k,_)|*k==2||*k==3){let proof=fields(proof)?;let key:Vec<_>=proof.iter().filter(|(k,_)|*k==1).map(|(_,v)|*v).collect();let signatures:Vec<_>=proof.iter().filter(|(k,_)|*k==2).map(|(_,v)|*v).collect();if key.len()!=1||signatures.len()!=1{continue;}let key=key[0];if &Sha256::digest(key)[..16]!=crx_id{continue;}let raw=public_key(key)?;
-  let result=if algorithm==2{signature::UnparsedPublicKey::new(&signature::RSA_PKCS1_2048_8192_SHA256,raw).verify(&message,signatures[0])}else{signature::UnparsedPublicKey::new(&signature::ECDSA_P256_SHA256_ASN1,raw).verify(&message,signatures[0])};
+  let result=if algorithm==2{signature::UnparsedPublicKey::new(&signature::RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY,raw).verify(&message,signatures[0])}else{signature::UnparsedPublicKey::new(&signature::ECDSA_P256_SHA256_ASN1,raw).verify(&message,signatures[0])};
   if result.is_ok(){return Ok(SignedCrx{offset:end,id,key:base64::engine::general_purpose::STANDARD.encode(key)});}
  }Err("CRX geliştirici imzası doğrulanamadı; paket yüklenmedi".into())
 }

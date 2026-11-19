@@ -1,0 +1,66 @@
+#luna-page-btn {
+  position: fixed;
+  right: 20px;
+  bottom: 88px;
+  z-index: 2147483000;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 15px 9px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #ff7a2a;
+  color: #1a0d03;
+  font: 600 14px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .35);
+  cursor: pointer;
+  transition: transform .12s ease-out, background .15s;
+}
+#luna-page-btn:hover { background: #ff8c45; }
+#luna-page-btn:active { transform: scale(.96); }
+.luna-ytp-btn { opacity: .9; display: inline-flex !important; align-items: center; justify-content: center; vertical-align: top; background: none !important; }
+.luna-ytp-btn svg { width: 24px; height: 24px; }
+.luna-ytp-btn:hover { opacity: 1; }
+.luna-ytp-btn svg { pointer-events: none; }
+#luna-ytp-menu {
+  position: absolute;
+  right: 12px;
+  bottom: 61px;
+  z-index: 71;
+  min-width: 250px;
+  padding: 8px 0;
+  border-radius: 12px;
+  background: rgba(28, 28, 28, .9);
+  text-shadow: 0 0 2px rgba(0, 0, 0, .5);
+  font-family: "YouTube Sans", Roboto, Arial, sans-serif;
+  color: #eee;
+  user-select: none;
+}
+.luna-ytp-item {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 15px 0 10px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+}
+.luna-ytp-item:hover, .luna-ytp-item:focus-visible { background: rgba(255, 255, 255, .1); }
+.luna-ytp-ic { width: 24px; height: 24px; margin-right: 14px; display: inline-flex; }
+.luna-ytp-label { flex: 1; }
+.luna-ytp-hint { color: #aaa; font-weight: 400; font-size: 13px; margin-left: 16px; }
+.luna-ytp-head { border-bottom: 1px solid rgba(255, 255, 255, .2); margin-bottom: 8px; padding-bottom: 8px; height: 48px; }
+.luna-ytp-head .luna-ytp-hint { display: none; }
+.luna-pl-btn {
+  width: 40px; height: 40px; margin-left: 8px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 50%; padding: 0;
+  background: rgba(255, 255, 255, .1); color: #fff; cursor: pointer;
+  vertical-align: middle;
+}
+.luna-pl-wrap { display: inline-flex !important; flex: none !important; align-items: center; min-width: 0; }
+.luna-pl-wrap .luna-pl-btn { margin-left: 0; }
+.luna-pl-btn:hover { background: rgba(255, 255, 255, .2); }
+.luna-pl-btn:active { transform: scale(.95); }
+#luna-page-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }

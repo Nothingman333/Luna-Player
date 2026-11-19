@@ -1,0 +1,29 @@
+/* The player's episodes panel: Luna's glass, over the right side of the video */
+.player-episodes {
+  position: absolute; top: 14px; right: 14px; bottom: 96px; z-index: 40; width: 340px; max-width: calc(100% - 28px);
+  display: flex; flex-direction: column; gap: 10px; padding: 14px;
+  border-radius: 18px; border: 1px solid #ffffff24;
+  background: color-mix(in srgb, var(--panel) 62%, transparent);
+  backdrop-filter: var(--glass-2); -webkit-backdrop-filter: var(--glass-2);
+  box-shadow: var(--glass-light), 0 18px 50px #0007;
+  animation: pe-in .22s var(--ease, ease) both;
+}
+@keyframes pe-in { from { opacity: 0; transform: translateX(16px); } }
+@media (prefers-reduced-motion: reduce) { .player-episodes { animation: none; } }
+.player-episodes > header { display: flex; align-items: center; justify-content: space-between; }
+.player-episodes > header b { font-size: 16px; }
+.pe-seasons { display: flex; gap: 6px; flex-wrap: wrap; }
+.pe-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 2px; scrollbar-width: thin; }
+.pe-row { display: flex; align-items: center; gap: 10px; padding: 6px; border-radius: 12px; border: 1px solid transparent; background: none; color: inherit; text-align: left; cursor: pointer; }
+.pe-row:hover { background: #ffffff12; }
+.pe-row.now { background: color-mix(in srgb, var(--accent) 18%, transparent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); cursor: default; }
+.pe-row.off { opacity: .5; cursor: default; }
+.pe-row.off:hover { background: none; }
+.pe-still { position: relative; flex: none; width: 96px; height: 54px; border-radius: 8px; overflow: hidden; background: #2a2630 center / cover no-repeat; display: grid; place-items: center; color: #8a8290; }
+.pe-still > i { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent); }
+.pe-t { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pe-t b { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pe-t small { font-size: 12px; color: var(--muted, #b5b0aa); }
+.pe-row.now .pe-t small { color: color-mix(in srgb, var(--accent) 70%, #fff); }
+.pe-row.seen .pe-t small { color: #6fd08f; }
+.pe-row.ghost .pe-still { animation: pulse 1.4s ease-in-out infinite; }

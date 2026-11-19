@@ -187,11 +187,13 @@ export function applySubOpts(o: SubOpts) {
     setProp("sub-blur", 0);
   } else {
     setProp("sub-border-style", "outline-and-shadow");
-    setProp("sub-outline-color", "#E6000000");
-    setProp("sub-outline-size", o.bg === "shadow" ? 1.5 : 0.9);
-    setProp("sub-shadow-offset", o.bg === "shadow" ? 1.8 : 0);
-    setProp("sub-back-color", "#A0000000");
-    setProp("sub-blur", 0.4);
+    // Shadow style: a thin, half-clear edge and a soft shadow (like streaming services); a thick dark rim looked jagged.
+    const soft = o.bg === "shadow";
+    setProp("sub-outline-color", soft ? "#99000000" : "#E6000000");
+    setProp("sub-outline-size", soft ? 0.6 : 0.9);
+    setProp("sub-shadow-offset", soft ? 0.9 : 0);
+    setProp("sub-back-color", soft ? "#70000000" : "#A0000000");
+    setProp("sub-blur", soft ? 0.8 : 0.4);
   }
   // Restyle plain-text subs (SRT etc.), but leave real ASS typesetting alone.
   setProp("sub-ass-override", "scale");

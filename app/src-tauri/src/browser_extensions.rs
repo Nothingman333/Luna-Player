@@ -7,6 +7,8 @@ pub struct Extensions{pending:Mutex<HashMap<String,PathBuf>>,attempted:Mutex<Has
 impl Default for Extensions{fn default()->Self{Self{pending:Mutex::default(),attempted:Mutex::default(),busy:tokio::sync::Semaphore::new(1)}}}
 #[path="browser_extension_policy.rs"]
 mod policy;
+#[path="browser_extension_ui.rs"]
+mod extension_ui;
 static AUDIT_STARTED:AtomicBool=AtomicBool::new(false);
 /// Profile audit is asynchronous and never delays navigation. No source files are removed.
 pub fn audit_profile(app:AppHandle){
@@ -106,12 +108,16 @@ async fn runtime(app:&AppHandle,action:String,id:String,path:Option<PathBuf>,ena
 #[tauri::command]
 pub async fn browser_extension_manage(app:AppHandle,caller:Webview,action:String,id:Option<String>,enabled:Option<bool>)->Result<Value,String>{
  trusted(&caller)?;let state=app.state::<Extensions>();let _guard=lock(&state).await?;
- if !matches!(action.as_str(),"list"|"enable"|"remove"|"install"|"discard"){return Err("Geçersiz işlem".into());}
+ if !matches!(action.as_str(),"list"|"enable"|"remove"|"install"|"discard"|"reload"){return Err("Geçersiz işlem".into());}
  let id=id.unwrap_or_default();
+ // Chrome's reload button: turn the extension off and on so its background worker and content scripts restart.
+ if action=="reload"{runtime(&app,"enable".into(),id.clone(),None,false).await?;return runtime(&app,"enable".into(),id,None,true).await;}
  if action=="discard"{if let Some(path)=state.pending.lock().map_err(|e|e.to_string())?.remove(&id){if !state.attempted.lock().map_err(|e|e.to_string())?.remove(&id){let _=trash::delete(path);}}return Ok(Value::Null);}
  let path=if action=="install"{Some(state.pending.lock().map_err(|e|e.to_string())?.get(&id).cloned().ok_or("Önizleme süresi doldu; paketi yeniden seç.")?)}else{None};
  if action=="install"{state.attempted.lock().map_err(|e|e.to_string())?.insert(id.clone());}
- let result=runtime(&app,action.clone(),id.clone(),path,enabled.unwrap_or(false)).await;
+ let mut result=runtime(&app,action.clone(),id.clone(),path.clone(),enabled.unwrap_or(false)).await;
+ if action=="list"{if let Ok(rows)=&mut result{extension_ui::enrich(&app,rows);}}
+ if let ("install",Ok(row),Some(path))=(action.as_str(),&result,path.as_ref()){if let Some(installed_id)=row["id"].as_str(){if extension_ui::remember(&app,installed_id,path).is_err(){crate::browser::dlog(&app,"extension installed; toolbar index could not be saved");}}}
  if action=="install"&&result.is_ok(){state.pending.lock().map_err(|e|e.to_string())?.remove(&id);state.attempted.lock().map_err(|e|e.to_string())?.remove(&id);}
  if let Ok(value)=&result{
   if action=="list"{sync_filter(&app,value);}
@@ -121,4 +127,30 @@ pub async fn browser_extension_manage(app:AppHandle,caller:Webview,action:String
  }
  // On an uncertain install result keep its immutable source: a late WebView2 callback may have installed it.
  result
-}
+ }
+ async fn installed(app:&AppHandle,id:&str)->Result<Value,String>{
+  let rows=runtime(app,"list".into(),String::new(),None,false).await?;
+  let mut row=rows.as_array().and_then(|v|v.iter().find(|r|r["id"].as_str()==Some(id))).cloned().ok_or("Eklenti artık yüklü değil")?;
+  let mut one=Value::Array(vec![row.clone()]);extension_ui::enrich(app,&mut one);if let Some(r)=one.get(0){row=r.clone();}Ok(row)
+ }
+ #[tauri::command]
+ pub async fn browser_extension_details(app:AppHandle,caller:Webview,id:String)->Result<Value,String>{
+  trusted(&caller)?;let state=app.state::<Extensions>();let _guard=lock(&state).await?;
+  let row=installed(&app,&id).await?;let handle=app.clone();tauri::async_runtime::spawn_blocking(move||extension_ui::details(&handle,&row)).await.map_err(|e|e.to_string())?
+ }
+ #[tauri::command]
+ pub async fn browser_extension_open(app:AppHandle,caller:Webview,id:String,target:String)->Result<(),String>{
+  trusted(&caller)?;let state=app.state::<Extensions>();let _guard=lock(&state).await?;
+  let row=installed(&app,&id).await?;
+  match target.as_str(){"options"=>extension_ui::options(&app,&row),"folder"=>extension_ui::reveal(&app,&row),_=>Err("Geçersiz hedef".into())}
+ }
+ #[tauri::command]
+ pub async fn browser_extension_popup(app:AppHandle,caller:Webview,id:String,anchor:extension_ui::PopupAnchor,tab:Option<u32>)->Result<(),String>{
+  trusted(&caller)?;let state=app.state::<Extensions>();let _guard=lock(&state).await?;
+  let rows=runtime(&app,"list".into(),String::new(),None,false).await?;
+  let row=rows.as_array().and_then(|v|v.iter().find(|r|r["id"].as_str()==Some(id.as_str()))).ok_or("Eklenti artık yüklü değil")?;
+  let page=tab.and_then(|t|app.get_webview(&format!("luna-web-{t}"))).and_then(|v|v.url().ok()).map(|u|u.to_string());
+  extension_ui::popup(&app,row,anchor,page)
+ }
+ #[tauri::command]
+ pub fn browser_extension_popup_close(app:AppHandle,caller:Webview)->Result<(),String>{trusted(&caller)?;extension_ui::close_popup(&app);Ok(())}

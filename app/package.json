@@ -1,10 +1,11 @@
 {
   "name": "app",
   "private": true,
-  "version": "2.7.5",
+  "version": "3.5.4",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:outside": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-luna-dev.ps1",
     "build": "tsc && vite build",
     "test:regression": "node scripts/package-regression.cjs",
     "preview": "vite preview",
@@ -75,6 +76,9 @@
     "test:luna2": "node scripts/luna2-regression.cjs",
     "test:country-ui": "node scripts/country-ui-regression.cjs",
     "prebuild": "node scripts/generate-release-history.cjs",
+    "test:taste-themes": "node scripts/taste-themes-regression.cjs",
+    "test:follow": "node scripts/follow-regression.cjs",
+    "test:addon-best": "node scripts/addon-best-regression.cjs",
     "test:release-history": "node scripts/release-history-regression.cjs"
   },
   "dependencies": {
@@ -92,6 +96,7 @@
     "@tauri-apps/plugin-notification": "^2.7.0",
     "@tauri-apps/plugin-opener": "^2",
     "epubjs": "^0.3.93",
+    "glisse": "^0.6.0",
     "pdfjs-dist": "^4.10.38",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

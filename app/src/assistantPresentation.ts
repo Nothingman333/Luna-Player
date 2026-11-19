@@ -53,7 +53,9 @@ export function safeHttpUrl(raw:unknown):string|null{
  try{const u=new URL(raw.trim());if(!["http:","https:"].includes(u.protocol)||u.username||u.password||!u.hostname)return null;return u.href;}catch{return null;}
 }
 export const hostOf=(url:string)=>{try{return new URL(url).hostname.replace(/^www\./,"");}catch{return "";}};
-const urlId=(href:string)=>{try{const u=new URL(href);return u.origin+u.pathname.replace(/\/+$/,"")+u.search;}catch{return href;}};
+// a YouTube video is one page whatever its &t= / &pp= / si= extras say
+const youtubeId=(u:URL)=>{const host=u.hostname.replace(/^(?:www|m)\./,"");const id=host==="youtu.be"?u.pathname.slice(1).split("/")[0]:host==="youtube.com"?(u.pathname==="/watch"?u.searchParams.get("v"):u.pathname.match(/^\/(?:shorts|live)\/([^/]+)/)?.[1]):null;return id&&/^[A-Za-z0-9_-]{11}$/.test(id)?id:"";};
+const urlId=(href:string)=>{try{const u=new URL(href);const video=youtubeId(u);if(video)return "youtube:"+video;return u.origin+u.pathname.replace(/\/+$/,"")+u.search;}catch{return href;}};
 /** Two addresses are the same page when only a fragment or a trailing slash differs. */
 export const sameUrl=(a:string,b:string)=>urlId(a)===urlId(b);
 /** Sources shown under an answer: valid addresses only, one per page, a short single-line title. */

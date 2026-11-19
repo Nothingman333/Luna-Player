@@ -27,6 +27,8 @@ export type AiRun = {
   verdict: AiVerdict; reviews: RunReview[];
   /** books: 1000Kitap's own score (out of 10) and how many read it */
   siteScore?: number | null; readers?: number | null;
+  /** books: where the reviews came from ("1000Kitap + Goodreads"); older runs have none */
+  site?: string;
   /** what was analysed (older runs have none) */
   title?: string; year?: string;
 };
@@ -46,9 +48,11 @@ const ASPECT_EN: Record<Aspect, string> = { story: "story", pace: "pace", acting
 const ASPECT_BOOK: Record<Aspect, string> = { story: "plot", pace: "pace", acting: "writing style", visuals: "atmosphere and world", emotion: "characters and emotion", sound: "ideas and depth" };
 /** Where the reviews come from: films from Letterboxd, books from 1000Kitap. */
 export type Medium = "film" | "book";
-const site = (m: Medium) => (m === "book" ? "1000Kitap" : "Letterboxd");
+const site = (m: Medium) => (m === "book" ? "1000Kitap and Goodreads" : "Letterboxd");
 const MOOD_EN: Record<Mood, string> = { any: "a general verdict", easy: "pace first", deep: "story and characters", visual: "a visual journey" };
 const lang = (tr: boolean) => (tr ? "Turkish" : "English");
+/** The last words of a request: a small model writes in the reviews' language unless reminded right at the end. */
+const langTail = (tr: boolean) => (tr ? "\n\nÖNEMLİ: Yorumlar İngilizce olsa da JSON'daki bütün metinleri (gist, özet, maddeler, notlar) TÜRKÇE yaz. Alan adları ve tone/topic değerleri İngilizce kalsın." : "");
 const label = (film: FilmTarget, m: Medium = "film") => `${film.title}${film.year ? ` (${String(film.year).slice(0, 4)})` : ""} — ${m === "book" ? "book" : film.kind === "tv" ? "series" : "film"}`;
 
 // ---------- step 1: read each batch ----------
@@ -65,7 +69,7 @@ export function batchPrompt(film: FilmTarget, batch: LbReview[], offset: number,
     'Answer with JSON only: {"items":[{"n":1,"tone":"positive|mixed|negative|neutral","quality":3,"topic":"story","gist":"…"}],"best":[1],"worst":[2]}',
   ].join("\n");
   const user = [`Title: ${label(film, m)}`, "", ...batch.map((r, i) => `[${offset + i + 1}]${r.stars ? ` ${r.stars}★` : ""}${r.spoiler ? " (spoiler)" : ""} ${r.text.replace(/\s+/g, " ").slice(0, 2500)}`)].join("\n");
-  return { system, user };
+  return { system, user: user + langTail(tr) };
 }
 /** The batch's answer, by review number (only numbers in this batch). */
 export function cleanBatch(x: any, offset: number, size: number): { items: Map<number, ReadItem>; best: number[]; worst: number[] } {
@@ -79,6 +83,37 @@ export function cleanBatch(x: any, offset: number, size: number): { items: Map<n
   const nums = (l: unknown) => (Array.isArray(l) ? [...new Set(l.filter(n=>inBatch(n)&&items.has(n)))].slice(0, 2) as number[] : []);
   const best = nums(x?.best), worst = nums(x?.worst).filter((n) => !best.includes(n));
   return { items, best, worst };
+}
+
+// ---------- a local model's lighter reading ----------
+/** A review with nothing to read in it (a few words, emoji, a repeat): labelled here from its stars, never sent to a model. */
+export function trivialReview(r: LbReview, seen: Set<string>): ReadItem | null {
+  const plain = r.text.replace(/[^\p{L}\p{N}\s]+/gu, " ").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+  const words = plain ? plain.split(" ").length : 0;
+  const repeat = plain.length > 0 && seen.has(plain);
+  if (plain) seen.add(plain);
+  if (words >= 5 && plain.length >= 30 && !repeat) return null;
+  const tone: ItemTone = r.stars == null ? "neutral" : r.stars >= 4 ? "positive" : r.stars <= 2 ? "negative" : "neutral";
+  return { tone, quality: words ? 2 : 1, gist: r.text.replace(/\s+/g, " ").trim().slice(0, 120), topic: "general" };
+}
+/** Batches filled by length, not by count: many short reviews go together, a long essay goes nearly alone. */
+export function lengthBatches(nums: number[], text: (n: number) => string, budget = 6000, most = 25): number[][] {
+  const out: number[][] = [];
+  let cur: number[] = [], size = 0;
+  for (const n of nums) {
+    const len = Math.min(2500, text(n).length) + 40;
+    if (cur.length && (size + len > budget || cur.length >= most)) { out.push(cur); cur = []; size = 0; }
+    cur.push(n); size += len;
+  }
+  if (cur.length) out.push(cur);
+  return out;
+}
+/** A review's key in the local reading memory. */
+export function reviewKey(r: LbReview): string {
+  let h = 5381;
+  const s = r.author + "|" + r.text.slice(0, 400);
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
 }
 
 // ---------- local numbers ----------
@@ -142,7 +177,7 @@ export function summaryPrompt(film: FilmTarget, reviews: RunReview[], profile: P
     "The most telling reviews in full:",
     ...reviews.map((r, i) => (r.best || r.worst ? `[${i + 1}]${r.best ? " (best argued)" : " (sharpest complaint)"} ${r.text.replace(/\s+/g, " ").slice(0, 1500)}` : "")).filter(Boolean).slice(0, 10),
   ].filter((x) => x !== "").join("\n");
-  return { system, user };
+  return { system, user: user + langTail(tr) };
 }
 
 /** The model's answer, kept only in the expected shape (a stored copy is cleaned the same way). */
@@ -179,7 +214,7 @@ export function cleanRun(x: any): AiRun | null {
   return {
     at: x.at, url: str(x.url, 300), count: Number(x.count) || reviews.length, spoilers: Number(x.spoilers) || 0, stars: num(x.stars, 0, 5), model: str(x.model, 120),
     community: num(x.community, 0, 10), counts: reviews.length ? t.counts : { positive: 0, mixed: 0, negative: 0, neutral: 0 }, topics: t.topics, verdict, reviews,
-    siteScore: num(x.siteScore, 0, 10), readers: typeof x.readers === "number" ? x.readers : null,
+    siteScore: num(x.siteScore, 0, 10), readers: typeof x.readers === "number" ? x.readers : null, site: str(x.site, 60) || undefined,
     title: str(x.title, 200) || undefined, year: str(x.year, 4) || undefined,
   };
 }

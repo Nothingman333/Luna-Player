@@ -70,12 +70,19 @@ export function toOpenAiRequest(body: any, model: string, target: RequestTarget 
   const messages: any[] = [];
   let sys = systemText(body);
   if (wantsJson(body)) sys += "\n\nAnswer with JSON only.";
+  // small local models (Qwen especially) drift into Chinese characters mid-sentence and copy Luna's [ALINTI …] markers
+  // DeepSeek: a short note of its own (few tokens); thinking follows Luna's "Thinking" switch
+  const deepseek = target === "custom" && /deepseek/i.test(model);
+  if (deepseek) sys = (sys.trim() ? sys + "\n\n" : "") + "Be brief. Reply in the user's language. When a tool can do what is asked, call it instead of describing it; never invent tool results.";
+  else if (target === "custom") sys = (sys.trim() ? sys + "\n\n" : "") + "Write only in the language of the user's question, using its own alphabet. Never insert Chinese, Japanese or Korean characters unless the user writes in them. Never repeat bracketed markers such as [ALINTI …] or [ALINTI SONU …].";
   if (sys.trim()) messages.push({ role: "system", content: sys });
   for (const t of requestTurns(body)) {
     const texts = t.parts.filter((p: any) => typeof p.text === "string" && p.text).map((p: any) => p.text);
     if (t.role === "model") {
       const calls = t.parts.filter((p: any) => p.functionCall).map((p: any) => ({ id: p._id, type: "function", function: { name: p.functionCall.name, arguments: JSON.stringify(p.functionCall.args ?? {}) } }));
-      messages.push({ role: "assistant", content: texts.join("\n") || null, ...(calls.length ? { tool_calls: calls } : {}) });
+      // DeepSeek's thinking mode wants its reasoning back on a tool-calling turn (400 without it)
+      const reasoning = t.parts.find((p: any) => typeof p.lunaReasoning === "string")?.lunaReasoning;
+      messages.push({ role: "assistant", content: texts.join("\n") || null, ...(calls.length ? { tool_calls: calls } : {}), ...(reasoning && target === "custom" ? { reasoning_content: reasoning } : {}) });
       continue;
     }
     for (const p of t.parts.filter((p: any) => p.functionResponse))
@@ -84,6 +91,14 @@ export function toOpenAiRequest(body: any, model: string, target: RequestTarget 
     const pics = t.parts.filter((p: any) => p.inlineData && IMAGE_MIME.test(String(p.inlineData.mimeType ?? ""))).map((p: any) => ({ type: "image_url", image_url: { url: `data:${p.inlineData.mimeType};base64,${p.inlineData.data}` } }));
     if (pics.length) messages.push({ role: "user", content: [...texts.map((x: string) => ({ type: "text", text: x })), ...pics] });
     else if (texts.length) messages.push({ role: "user", content: texts.join("\n") });
+  }
+  // Qwen3 on a local server (LM Studio, Ollama…) writes a long hidden "thinking" pass before every answer. Its own switch,
+  // /no_think, goes at the end of the user's latest message (its model card's instruction); simple questions come back
+  // several times faster. The assistant's "Thinking" switch (lunaThink) leaves it out.
+  if (target === "custom" && !body?.lunaThink && /qwen[\s_-]*3/i.test(model)) {
+    const last = [...messages].reverse().find((m) => m.role === "user");
+    if (last && typeof last.content === "string") last.content += " /no_think";
+    else if (last && Array.isArray(last.content)) { const t = [...last.content].reverse().find((c: any) => c.type === "text"); if (t) t.text += " /no_think"; else last.content.push({ type: "text", text: "/no_think" }); }
   }
   const tools = requestDeclarations(body).map((d) => ({ type: "function", function: { name: d.name, description: d.description ?? "", parameters: toJsonSchema(d.parameters ?? { type: "OBJECT" }) } }));
   const out: any = { model, messages };
@@ -96,9 +111,18 @@ export function toOpenAiRequest(body: any, model: string, target: RequestTarget 
   // Settings Luna asked for (subtitle translation at 0.2, comparisons capped at 1500 tokens…) used to be dropped here.
   const g = generationSettings(body);
   const reasoning = target === "openai" && isOpenAiReasoningModel(model);
+  // Gemma 4 ignores /no_think; on LM Studio reasoning_effort "none" is what turns its thinking off (measured: 510 hidden tokens to 0).
+  if (target === "custom" && !body?.lunaThink && /gemma[\s_-]*4/i.test(model)) out.reasoning_effort = "none";
+  if (deepseek) out.thinking = { type: body?.lunaThink ? "enabled" : "disabled" };
+  // an effort chosen for this job (subtitle translation): OpenAI's reasoning models take it as is ("off" = the least they allow)
+  const effort = body?.lunaEffort as string | undefined;
+  if (reasoning && effort) out.reasoning_effort = effort === "off" ? (/^gpt-5/i.test(model) ? "minimal" : "low") : effort;
   if (g.temperature !== undefined && !reasoning) out.temperature = g.temperature;
   if (g.maxOutputTokens !== undefined) {
     if (reasoning) out.max_completion_tokens = g.maxOutputTokens; else out.max_tokens = g.maxOutputTokens;
+  } else if (target === "custom") {
+    // a small local model can fall into a loop and write until the context is full: an answer has a ceiling
+    out.max_tokens = body?.lunaThink ? 6000 : 2500;
   }
   // JSON mode on the official API only: OpenAI-compatible servers do not all accept response_format.
   if (wantsJson(body) && target === "openai" && !tools.length) out.response_format = { type: "json_object" };
@@ -132,6 +156,9 @@ export function toAnthropicRequest(body: any, model: string) {
   const out: any = { model, max_tokens: g.maxOutputTokens ?? 8192, messages, ...(sys.trim() ? { system: sys } : {}) };
   // Anthropic accepts 0–1; Gemini-style values up to 2 are clamped
   if (g.temperature !== undefined) out.temperature = Math.min(1, g.temperature);
+  // Claude's extended thinking for a chosen effort: a budget on top of the answer (it does not take a temperature then)
+  const effort = body?.lunaEffort as string | undefined;
+  if (effort === "medium" || effort === "high") { const budget = effort === "high" ? 8000 : 2048; out.thinking = { type: "enabled", budget_tokens: budget }; out.max_tokens = (g.maxOutputTokens ?? 8192) + budget; delete out.temperature; }
   const tools = requestDeclarations(body).map((d) => ({ name: d.name, description: d.description ?? "", input_schema: toJsonSchema(d.parameters ?? { type: "OBJECT" }) }));
   if (tools.length) {
     out.tools = tools;

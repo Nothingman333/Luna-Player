@@ -41,11 +41,11 @@ export function FriendsWatched(props: Parameters<typeof friendsWhoWatched>[0]) {
   const score = summary.average === null ? extraText("Puan yok", "Not rated") : `${summary.average.toFixed(1).replace(".", DEC)}/5`;
   const step = Math.min(48, Math.max(0, (width - 36) / Math.max(1, friends.length - 1)));
   return <div className="friends-watched" ref={host} aria-label={extraText("Bu filmi izleyen arkadaşların", "Friends who watched this title")}
-    onPointerEnter={e => { clearTimeout(closeTimer.current);if (e.pointerType === "mouse") setOpen(true); }}
+    onPointerEnter={() => clearTimeout(closeTimer.current)}
     onPointerLeave={() => { closeTimer.current = setTimeout(() => { if (!host.current?.contains(document.activeElement)) setOpen(false); }, 140); }}
     onBlurCapture={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOpen(false); }}
     onKeyDown={e => { if (e.key === "Escape") { e.preventDefault();e.stopPropagation();trigger.current?.focus();setOpen(false); } }}>
-    <button type="button" className="friends-average" aria-expanded={open} onClick={() => setOpen(value => !value)} onFocus={() => setOpen(true)}><span className="muted small">{extraText("Arkadaş ortalaması", "Friends’ average")}</span><b>{score}</b></button>
+    <button type="button" className="friends-average" aria-expanded={open} onPointerEnter={e => { if (e.pointerType === "mouse") setOpen(true); }} onClick={() => setOpen(value => !value)} onFocus={() => setOpen(true)}><span className="muted small">{extraText("Arkadaş ortalaması", "Friends’ average")}</span><b>{score}</b></button>
     <div className={"ww-fan" + (open ? " is-open" : "")} ref={box}
       onPointerEnter={e => { if (e.pointerType === "mouse") setOpen(true); }}
       onFocusCapture={e => { if (e.target.matches(":focus-visible")) setOpen(true); }}
