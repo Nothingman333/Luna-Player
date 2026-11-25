@@ -1,3 +1,14 @@
+<p align="center">
+  <a href="https://lunaplayer.org/video/luna-tanitim.mp4"><img src="docs/media/luna-video.jpg" width="720" alt="Watch the Luna Player intro video"></a>
+</p>
+
+<p align="center">
+  <b>▶ <a href="https://lunaplayer.org/video/luna-tanitim.mp4">Watch the intro video</a></b> · 🌙 <b><a href="https://lunaplayer.org">lunaplayer.org</a></b>
+</p>
+
+> **Luna Player now continues on [lunaplayer.org](https://lunaplayer.org).** New versions and downloads are published there.
+> **Luna Player artık [lunaplayer.org](https://lunaplayer.org) üzerinden devam ediyor.** Yeni sürümler ve indirmeler orada.
+
 > Yeni tur: [12 günlük kullanım geliştirmesi ve doğrulama](docs/LUNA-GUNLUK-GELISTIRMELER.md).
 
 > Yerel birleşik teslim (22 Ekim 2026): [birleştirme ve doğrulama raporu](docs/CLAUDE-BIRLESTIRME-20261022.md). Eklenti/indirme işlemleri için güncel [Luna Web yönetim belgesini](docs/LUNA-BROWSER-EKLENTI-INDIRME.md) esas alın.
